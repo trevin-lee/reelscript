@@ -69,7 +69,7 @@ The container is the canonical render environment: Chromium, ffmpeg, the theme f
 docker run --rm -v "$PWD:/work" ghcr.io/trevin-lee/reelscript:main render demo.ts --out demo.mp4
 ```
 
-Tags: `main` tracks the main branch, `sha-<commit>` pins a build, and each release adds `<version>` and `latest`. While the repository is private the image is too, so `docker login ghcr.io` with a GitHub token that has `read:packages` first.
+Tags: `main` tracks the main branch, `sha-<commit>` pins a build, and each release adds `<version>` and `latest`.
 
 In GitHub Actions:
 

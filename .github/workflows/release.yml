@@ -38,8 +38,18 @@ jobs:
           fi
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      # prepublishOnly builds dist and runs the tests before upload
-      - run: npm publish --provenance --access public
+      - id: version
+        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # prepublishOnly builds dist and runs the tests before upload. Skipped
+      # when this version is already on npm (e.g. first release published by
+      # hand), so the image tags below still get published.
+      - name: Publish to npm unless this version already exists
+        run: |
+          if npm view "$(node -p "require('./package.json').name")@${{ steps.version.outputs.v }}" version >/dev/null 2>&1; then
+            echo "already on npm, skipping publish"
+          else
+            npm publish --provenance --access public
+          fi
 
       # Container image: same version tag as the npm package, plus latest.
       - uses: docker/setup-buildx-action@v3
@@ -48,8 +58,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: version
-        run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
