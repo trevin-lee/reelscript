@@ -5,7 +5,7 @@
 Screen-recording tools (Screen Studio, Arcade, Tango) all rot the same way: your product UI changes and your beautiful demo is now a lie, so you re-record it by hand. reelscript makes a demo a *build artifact*. The video is generated from a script, so when your UI updates you just re-run it.
 
 ```ts
-import { createDemo } from "reelscript";
+import { createDemo } from "@reelscript/cli";
 
 const demo = createDemo({ theme: "macos", viewport: [1280, 800], fps: 60 });
 
@@ -30,6 +30,15 @@ await demo.render("out/demo.mp4");
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing. The polish that makes a demo feel produced, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
+
+## Install
+
+```sh
+npm install -D @reelscript/cli
+npx playwright install chromium
+```
+
+The package installs a `reelscript` command. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
 ## Try it
 

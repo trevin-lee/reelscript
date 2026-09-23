@@ -1,5 +1,5 @@
 {
-  "name": "reelscript",
+  "name": "@reelscript/cli",
   "version": "0.1.0",
   "description": "Product demos as code. Write a script, render a demo, re-run it in CI when your UI changes.",
   "type": "module",
@@ -57,5 +57,8 @@
   "homepage": "https://github.com/trevin-lee/reelscript#readme",
   "bugs": {
     "url": "https://github.com/trevin-lee/reelscript/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

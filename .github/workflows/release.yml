@@ -4,7 +4,7 @@ name: Release
 # v<version> and match package.json, e.g. tag v0.1.0 for version 0.1.0.
 #
 # Auth uses npm trusted publishing (OIDC): no npm token is stored in GitHub.
-# One-time setup on npmjs.com -> package -> Settings -> Trusted publisher:
+# One-time setup on npmjs.com -> @reelscript/cli -> Settings -> Trusted publisher:
 #   provider: GitHub Actions, owner: trevin-lee, repo: reelscript, workflow: release.yml
 
 on:
