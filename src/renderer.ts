@@ -6,7 +6,7 @@ import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type SceneLayout, type Theme, type ThemeName } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
-import { Encoder } from "./encoder.js";
+import { Encoder, type GifOptions } from "./encoder.js";
 import { CLOCK_SHIM } from "./clock.js";
 
 export interface RenderOptions {
@@ -14,6 +14,8 @@ export interface RenderOptions {
   fps?: number;
   viewport?: [number, number];
   theme?: ThemeName;
+  /** Settings applied when `out` ends in .gif. */
+  gif?: GifOptions;
   /**
    * Replace the page's clock with a virtual one that advances exactly one
    * frame per rendered frame, so CSS transitions, timers and rAF loops play
@@ -353,7 +355,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   const engine = new Engine(viewport, themeName, options.deterministic ?? true);
   const { width, height } = engine.layout;
-  const encoder = snapshot === undefined ? new Encoder({ out: options.out, width, height, fps }) : null;
+  const encoder = snapshot === undefined ? new Encoder({ out: options.out, width, height, fps, gif: options.gif }) : null;
 
   await engine.open();
   encoder?.start();

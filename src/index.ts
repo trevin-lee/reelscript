@@ -10,11 +10,13 @@ import { render as renderTimeline, type RenderResult } from "./renderer.js";
 import type { Action, Target } from "./timeline.js";
 import type { Ease } from "./easing.js";
 import type { ThemeName } from "./theme.js";
+import type { GifOptions } from "./encoder.js";
 
 export type { Action, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { ThemeName } from "./theme.js";
 export type { RenderOptions, RenderResult } from "./renderer.js";
+export type { GifOptions } from "./encoder.js";
 export { render } from "./renderer.js";
 
 export interface DemoOptions {
@@ -26,6 +28,8 @@ export interface DemoOptions {
   fps?: number;
   /** Freeze the page clock and step it per frame for reproducible animations. Default: true. */
   deterministic?: boolean;
+  /** Applied when rendering to a .gif path. Default: 960px wide at 20fps. */
+  gif?: GifOptions;
   /** Print render progress to stderr. Default: true. */
   verbose?: boolean;
 }
@@ -131,7 +135,8 @@ export class Demo {
   }
 
   /**
-   * Render the timeline to a video file.
+   * Render the timeline to a video file. The container is chosen from the
+   * extension: .mp4 (H.264) or .gif (palette-optimized).
    *
    * Honors REELSCRIPT_OUT (override output path) and REELSCRIPT_SNAPSHOT_AT
    * (render a single PNG at that time in ms) so the CLI can drive scripts.
@@ -149,6 +154,7 @@ export class Demo {
       viewport: this.options.viewport,
       theme: this.options.theme,
       deterministic: this.options.deterministic,
+      gif: this.options.gif,
       snapshotAt,
       onProgress: verbose
         ? ({ frame, timeMs }) => {

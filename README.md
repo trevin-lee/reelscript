@@ -2,6 +2,10 @@
 
 **Product demos as code.** Write a script, render a demo, re-run it in CI when your UI changes.
 
+![reelscript rendering a demo of a sample app: cursor glides to a button, a modal opens, the view zooms in, text is typed, and the zoom releases](https://raw.githubusercontent.com/trevin-lee/reelscript/main/docs/demo.gif)
+
+<sup>This GIF is a demo of reelscript made with reelscript: CI renders [examples/basic.ts](examples/basic.ts) on every push to `main` and commits the result.</sup>
+
 Screen-recording tools (Screen Studio, Arcade, Tango) all rot the same way: your product UI changes and your beautiful demo is now a lie, so you re-record it by hand. reelscript makes a demo a *build artifact*. The video is generated from a script, so when your UI updates you just re-run it.
 
 ```ts
@@ -64,7 +68,7 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, fps, deterministic })` | `theme`: `"macos"` or `"bare"`. Defaults: macos, 1280x800, 60fps, deterministic clock on. |
+| `createDemo({ theme, viewport, fps, deterministic, gif })` | `theme`: `"macos"` or `"bare"`. Defaults: macos, 1280x800, 60fps, deterministic clock on. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration })` | Glide to a selector or `{x, y}`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
@@ -74,7 +78,7 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
-| `demo.render(path)` | Render to mp4. Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |
+| `demo.render(path)` | Render to `.mp4` (H.264) or `.gif` (palette-optimized, 960px / 20fps by default, see `gif` option). Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |
 
 ## Status
 

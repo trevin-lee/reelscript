@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, extname } from "node:path";
 import { once } from "node:events";
 
 export interface EncoderOptions {
@@ -12,6 +12,41 @@ export interface EncoderOptions {
   /** x264 CRF; lower = higher quality. */
   crf?: number;
   ffmpegPath?: string;
+  /** GIF output settings (used when `out` ends in .gif). */
+  gif?: GifOptions;
+}
+
+export interface GifOptions {
+  /** Output width in px; height keeps the aspect ratio. Default: 960 */
+  width?: number;
+  /** GIF frame rate. Default: 20 */
+  fps?: number;
+}
+
+/** Codec arguments chosen from the output extension. */
+function outputArgs(opts: EncoderOptions): string[] {
+  const ext = extname(opts.out).toLowerCase();
+  if (ext === ".gif") {
+    const width = opts.gif?.width ?? 960;
+    const fps = opts.gif?.fps ?? 20;
+    // Two-pass palette in one graph: sample a palette from the scaled frames,
+    // then dither against it. Gives far better colour than ffmpeg's default GIF path.
+    const filter = [
+      `fps=${fps}`,
+      `scale=${width}:-1:flags=lanczos`,
+      "split[a][b]",
+      "[a]palettegen=stats_mode=diff[p]",
+      "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+    ].join(",");
+    return ["-filter_complex", filter, "-loop", "0"];
+  }
+  return [
+    "-c:v", "libx264",
+    "-preset", "medium",
+    "-crf", String(opts.crf ?? 18),
+    "-pix_fmt", "yuv420p",
+    "-movflags", "+faststart",
+  ];
 }
 
 export function resolveFfmpeg(explicit?: string): string {
@@ -39,7 +74,7 @@ export class Encoder {
   }
 
   start(): void {
-    const { out, width, height, fps, crf = 18 } = this.opts;
+    const { out, width, height, fps } = this.opts;
     mkdirSync(dirname(out), { recursive: true });
     const args = [
       "-y",
@@ -50,11 +85,7 @@ export class Encoder {
       "-s", `${width}x${height}`,
       "-r", String(fps),
       "-i", "-",
-      "-c:v", "libx264",
-      "-preset", "medium",
-      "-crf", String(crf),
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
+      ...outputArgs(this.opts),
       out,
     ];
     const proc = spawn(resolveFfmpeg(this.opts.ffmpegPath), args, { stdio: ["pipe", "ignore", "pipe"] });
