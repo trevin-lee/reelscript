@@ -26,6 +26,7 @@ function usage(): never {
 usage:
   reelscript render  <script> [--out demo.mp4]
   reelscript preview <script> --at <seconds> [--out frame.png]
+  reelscript warmup                      download the narration model into the cache
 
 env:
   REELSCRIPT_FFMPEG   path to ffmpeg (defaults to bundled ffmpeg-static)`);
@@ -66,6 +67,13 @@ async function main(): Promise<void> {
       process.env.REELSCRIPT_SNAPSHOT_AT = String(Math.round(at * 1000));
       process.env.REELSCRIPT_OUT = resolve(flags.out ?? `preview-${at}s.png`);
       await runScript(script);
+      break;
+    }
+    case "warmup": {
+      const { kokoro } = await import("./tts.js");
+      const t = Date.now();
+      await kokoro().synthesize("Ready.", {});
+      console.log(`narration model ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
       break;
     }
     case "--version":

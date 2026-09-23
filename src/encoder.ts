@@ -116,3 +116,42 @@ export class Encoder {
     }
   }
 }
+
+export interface NarrationCue {
+  /** WAV file to play. */
+  file: string;
+  /** When it starts on the video timeline, in ms. */
+  atMs: number;
+}
+
+/** Remux a finished video with narration clips placed on the timeline (no video re-encode). */
+export async function muxNarration(videoPath: string, cues: NarrationCue[], out: string, ffmpegPath?: string): Promise<void> {
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-i", videoPath];
+  for (const c of cues) args.push("-i", c.file);
+  const delayed = cues.map((c, i) => `[${i + 1}:a]adelay=${Math.max(0, Math.round(c.atMs))}:all=1[a${i}]`);
+  const labels = cues.map((_, i) => `[a${i}]`).join("");
+  const filter =
+    cues.length === 1
+      ? delayed[0]
+      : [...delayed, `${labels}amix=inputs=${cues.length}:normalize=0[mix]`].join(";");
+  const outLabel = cues.length === 1 ? "[a0]" : "[mix]";
+  args.push(
+    "-filter_complex", filter,
+    "-map", "0:v",
+    "-map", outLabel,
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-b:a", "160k",
+    "-ar", "48000",
+    "-movflags", "+faststart",
+    out,
+  );
+  const proc = spawn(resolveFfmpeg(ffmpegPath), args, { stdio: ["ignore", "ignore", "pipe"] });
+  let stderr = "";
+  proc.stderr!.on("data", (d) => (stderr += d.toString()));
+  const code = await new Promise<number | null>((resolve, reject) => {
+    proc.on("error", reject);
+    proc.on("close", resolve);
+  });
+  if (code !== 0) throw new Error(`ffmpeg (narration mux) exited with code ${code}\n${stderr.trim()}`);
+}

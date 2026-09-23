@@ -18,10 +18,12 @@ await demo.cursor.moveTo("#new-project", { ease: "smooth" });
 await demo.cursor.click();
 
 demo.zoom.to("#modal", { scale: 1.6 });
+demo.say("Give it a name, and hit Create.");
 await demo.type("#project-name", "Acme Q3 Launch", { wpm: 400 });
 await demo.cursor.moveTo("#create");
 await demo.cursor.click();
 demo.zoom.out();
+await demo.waitForNarration();
 
 await demo.render("out/demo.mp4");
 ```
@@ -34,6 +36,7 @@ await demo.render("out/demo.mp4");
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing. The polish that makes a demo feel produced, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
+- **Narration as code.** `say()` speaks a line while the actions continue, sentences never overlap, and `waitForNarration()` paces the timeline to the voice. The default voice is Kokoro, an open-weights model that runs on CPU with no account, so it works offline and in CI. Plug in any engine through the `tts` option.
 
 ## Install
 
@@ -90,7 +93,7 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, fps, deterministic, gif })` | `theme`: `"macos"` or `"bare"`. Defaults: macos, 1280x800, 60fps, deterministic clock on. |
+| `createDemo({ theme, viewport, fps, deterministic, gif, voice, tts, pronunciations })` | `theme`: `"macos"` or `"bare"`. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. `pronunciations` respells words the voice gets wrong. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration })` | Glide to a selector or `{x, y}`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
@@ -100,18 +103,29 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
+| `demo.say(text, { voice, speed })` | Queue narration. Starts immediately or after the previous sentence, while following actions run. |
+| `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.render(path)` | Render to `.mp4` (H.264) or `.gif` (palette-optimized, 960px / 20fps by default, see `gif` option). Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |
 
 ## Status
 
 Early but working end to end. Roadmap, roughly in order:
 
+- Captions generated from narration (SRT and burned-in)
 - Auto-zoom that follows the cursor, and zoom transitions with a bit of drift
 - `watch` mode with live preview while editing a script
 - Retina (2x) output
-- Transitions between scenes, captions and callouts
+- Transitions between scenes and callouts
 - Python bindings over the same timeline
 - A Linux desktop backend (Xvfb in a container) for demos of native apps, targeted by coordinates or accessibility names
+
+## Narration
+
+`say()` uses [Kokoro-82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) through the optional `kokoro-js` dependency. The model (about 90 MB) downloads on first use into `~/.cache/reelscript` (override with `REELSCRIPT_CACHE`); `reelscript warmup` fetches it ahead of time, and the container image ships with it baked in. Synthesized clips are cached by text and voice, so re-renders don't re-synthesize unchanged lines. Voices include `af_heart`, `af_bella`, `am_michael`, `bf_emma`, `bm_george` and more.
+
+GIF output has no audio track; narration still paces the timeline. Render to `.mp4` for sound.
+
+To skip the model entirely, install with `npm install --omit=optional` and pass your own `tts` engine, or don't call `say()`.
 
 ## Requirements
 

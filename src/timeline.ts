@@ -12,7 +12,9 @@ export type Action =
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
   | { kind: "type"; target?: string; text: string; wpm?: number }
   | { kind: "press"; key: string }
-  | { kind: "wait"; ms: number };
+  | { kind: "wait"; ms: number }
+  | { kind: "say"; text: string; voice?: string; speed?: number }
+  | { kind: "waitForNarration" };
 
 export type ActionKind = Action["kind"];
 
@@ -27,4 +29,6 @@ export const DEFAULTS = {
   zoomDuration: 700,
   /** frames appended after the last action so the ending doesn't feel clipped */
   tailMs: 500,
+  /** silence between consecutive narration clips */
+  narrationGapMs: 300,
 };

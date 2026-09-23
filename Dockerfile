@@ -15,7 +15,8 @@ FROM node:22-bookworm-slim
 LABEL org.opencontainers.image.source="https://github.com/trevin-lee/reelscript" \
       org.opencontainers.image.description="reelscript: product demos as code" \
       org.opencontainers.image.licenses="MIT"
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    REELSCRIPT_CACHE=/opt/reelscript/cache
 WORKDIR /opt/reelscript
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
@@ -24,6 +25,8 @@ RUN npm ci --omit=dev \
 COPY --from=build /src/dist ./dist
 COPY assets ./assets
 RUN chmod +x dist/cli.js && ln -s /opt/reelscript/dist/cli.js /usr/local/bin/reelscript
+# Bake the narration model into the image so renders never download at run time.
+RUN reelscript warmup
 WORKDIR /work
 ENTRYPOINT ["reelscript"]
 CMD ["--help"]

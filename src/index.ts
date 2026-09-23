@@ -11,12 +11,15 @@ import type { Action, Target } from "./timeline.js";
 import type { Ease } from "./easing.js";
 import type { ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
+import type { TtsEngine } from "./tts.js";
 
 export type { Action, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { ThemeName } from "./theme.js";
 export type { RenderOptions, RenderResult } from "./renderer.js";
 export type { GifOptions } from "./encoder.js";
+export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
+export { kokoro } from "./tts.js";
 export { render } from "./renderer.js";
 
 export interface DemoOptions {
@@ -30,6 +33,12 @@ export interface DemoOptions {
   deterministic?: boolean;
   /** Applied when rendering to a .gif path. Default: 960px wide at 20fps. */
   gif?: GifOptions;
+  /** Default narration voice for say(). Default: "af_heart" (Kokoro). */
+  voice?: string;
+  /** Text-to-speech engine. Default: Kokoro via the optional kokoro-js dependency. */
+  tts?: TtsEngine;
+  /** Respell words the voice mispronounces, e.g. { Reelscript: "Reel script" }. */
+  pronunciations?: Record<string, string>;
   /** Print render progress to stderr. Default: true. */
   verbose?: boolean;
 }
@@ -51,6 +60,12 @@ export interface ZoomOptions {
 export interface TypeOptions {
   /** Typing speed in words per minute. Default: 300 */
   wpm?: number;
+}
+
+export interface SayOptions {
+  voice?: string;
+  /** Speed multiplier. Default: 1 */
+  speed?: number;
 }
 
 export interface GotoOptions {
@@ -129,6 +144,20 @@ export class Demo {
     this._push({ kind: "wait", ms });
   }
 
+  /**
+   * Narrate. Starts speaking now (or when the previous sentence finishes)
+   * while the following actions continue. Use waitForNarration() to hold
+   * the timeline until speech ends.
+   */
+  say(text: string, opts: SayOptions = {}): void {
+    this._push({ kind: "say", text, ...opts });
+  }
+
+  /** Hold until all narration queued so far has finished. */
+  async waitForNarration(): Promise<void> {
+    this._push({ kind: "waitForNarration" });
+  }
+
   /** The recorded timeline (useful for tests and debugging). */
   getTimeline(): readonly Action[] {
     return this.actions;
@@ -155,7 +184,11 @@ export class Demo {
       theme: this.options.theme,
       deterministic: this.options.deterministic,
       gif: this.options.gif,
+      tts: this.options.tts,
+      voice: this.options.voice,
+      pronunciations: this.options.pronunciations,
       snapshotAt,
+      onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {
             if (frame > 0 && frame % 30 === 0) {

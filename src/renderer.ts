@@ -6,7 +6,10 @@ import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type SceneLayout, type Theme, type ThemeName } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
-import { Encoder, type GifOptions } from "./encoder.js";
+import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
+import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
+import { extname } from "node:path";
+import { unlinkSync } from "node:fs";
 import { CLOCK_SHIM } from "./clock.js";
 
 export interface RenderOptions {
@@ -16,6 +19,13 @@ export interface RenderOptions {
   theme?: ThemeName;
   /** Settings applied when `out` ends in .gif. */
   gif?: GifOptions;
+  /** Text-to-speech engine for say(). Default: Kokoro via kokoro-js. */
+  tts?: TtsEngine;
+  /** Default narration voice. Default: "af_heart" */
+  voice?: string;
+  /** Words to respell before synthesis, e.g. { Reelscript: "Reel script" }. */
+  pronunciations?: Record<string, string>;
+  onStatus?: (message: string) => void;
   /**
    * Replace the page's clock with a virtual one that advances exactly one
    * frame per rendered frame, so CSS transitions, timers and rAF loops play
@@ -91,6 +101,10 @@ class Engine {
   private zoomAnim: Tween<ZoomState> | null = null;
   private lastClick = -Infinity;
   private url = "";
+  // narration
+  private clips = new Map<number, Clip>();
+  private narrationEnd = 0;
+  readonly narration: NarrationCue[] = [];
 
   constructor(
     private viewport: [number, number],
@@ -101,6 +115,10 @@ class Engine {
     this.layout = this.theme.layout(viewport);
     this.cursor = { x: viewport[0] / 2, y: viewport[1] / 2 };
     this.zoom = { scale: 1, cx: this.layout.width / 2, cy: this.layout.height / 2 };
+  }
+
+  setClips(clips: Map<number, Clip>): void {
+    this.clips = clips;
   }
 
   async open(): Promise<void> {
@@ -165,7 +183,7 @@ class Engine {
 
   // ------------------------------------------------------------ steps
 
-  async begin(action: Action, start: number): Promise<Step | null> {
+  async begin(action: Action, index: number, start: number): Promise<Step | null> {
     const page = this.page;
     switch (action.kind) {
       case "browser.goto": {
@@ -222,6 +240,17 @@ class Engine {
       }
       case "wait":
         return { end: start + action.ms };
+      case "say": {
+        const clip = this.clips.get(index);
+        if (!clip) throw new Error("reelscript: narration clip missing (internal)");
+        // Clips never overlap: a new sentence waits for the previous one to finish.
+        const at = Math.max(start, this.narrationEnd);
+        this.narration.push({ file: clip.file, atMs: at });
+        this.narrationEnd = at + clip.seconds * 1000 + DEFAULTS.narrationGapMs;
+        return null;
+      }
+      case "waitForNarration":
+        return { end: Math.max(start, this.narrationEnd) };
       case "zoom.to": {
         const r = await this.resolveRect(action.target);
         const to: ZoomState = {
@@ -255,9 +284,10 @@ class Engine {
     }
   }
 
-  /** Time (ms) after which nothing on screen is still animating. */
+  /** Time (ms) after which nothing is still animating or speaking. */
   pendingUntil(): number {
-    return this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
+    const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
+    return Math.max(zoom, this.narrationEnd);
   }
 
   /** Advance continuous state (cursor, zoom) to time t. */
@@ -368,7 +398,26 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   const engine = new Engine(viewport, themeName, options.deterministic ?? true);
   const { width, height } = engine.layout;
-  const encoder = snapshot === undefined ? new Encoder({ out: options.out, width, height, fps, gif: options.gif }) : null;
+
+  // Narration is synthesized up front so clip durations can pace the timeline.
+  const sayIndexes = actions.flatMap((a, i) => (a.kind === "say" ? [i] : []));
+  const isGif = extname(options.out).toLowerCase() === ".gif";
+  const hasAudio = sayIndexes.length > 0 && snapshot === undefined && !isGif;
+  if (sayIndexes.length) {
+    const tts = options.tts ?? kokoro();
+    options.onStatus?.(`synthesizing narration (${sayIndexes.length} clip${sayIndexes.length === 1 ? "" : "s"})`);
+    const clips = new Map<number, Clip>();
+    for (const i of sayIndexes) {
+      const a = actions[i] as Extract<Action, { kind: "say" }>;
+      const text = applyPronunciations(a.text, options.pronunciations);
+      clips.set(i, await synthesizeClip(tts, text, { voice: a.voice ?? options.voice, speed: a.speed }));
+    }
+    engine.setClips(clips);
+    if (isGif && snapshot === undefined) options.onStatus?.("note: GIF output has no audio; narration is used for pacing only");
+  }
+
+  const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
+  const encoder = snapshot === undefined ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
   await engine.open();
   encoder?.start();
@@ -394,7 +443,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           endAt ??= Math.max(nextStart, engine.pendingUntil()) + DEFAULTS.tailMs;
           break;
         }
-        step = await engine.begin(actions[i++], nextStart);
+        step = await engine.begin(actions[i], i, nextStart);
+        i++;
       }
       if (endAt !== null && t >= endAt) break;
 
@@ -420,6 +470,11 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       t += frameMs;
     }
     await encoder?.finish();
+    if (hasAudio && engine.narration.length) {
+      options.onStatus?.("mixing narration");
+      await muxNarration(videoPath, engine.narration, options.out);
+      unlinkSync(videoPath);
+    }
   } finally {
     await engine.close();
   }
