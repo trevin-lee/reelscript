@@ -53,6 +53,40 @@ export function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Point transformers.js (kokoro-js's model loader) at reelscript's cache dir
+ * instead of its default inside node_modules, so the model survives
+ * reinstalls and can be cached in CI.
+ *
+ * Node keeps separate module instances for the ESM and CJS builds, each with
+ * its own `env`, so this must configure the exact file kokoro-js imports: the
+ * ESM build resolved from kokoro-js's own location (nested or hoisted).
+ */
+async function redirectModelCache(): Promise<void> {
+  const { fileURLToPath, pathToFileURL } = await import("node:url");
+  const { dirname, join: pjoin } = await import("node:path");
+  let url = "@huggingface/transformers";
+  try {
+    let dir = dirname(fileURLToPath(import.meta.resolve("kokoro-js")));
+    for (;;) {
+      const candidate = pjoin(dir, "node_modules", "@huggingface", "transformers", "dist", "transformers.node.mjs");
+      if (existsSync(candidate)) {
+        url = pathToFileURL(candidate).href;
+        break;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    /* fall back to bare specifier */
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mod: any = await import(url);
+  if (!mod.env) throw new Error("reelscript: could not configure the transformers.js model cache");
+  mod.env.cacheDir = join(cacheDir(), "models") + "/";
+}
+
 /** Kokoro-82M via kokoro-js, loaded lazily on first use. */
 export function kokoro(model = KOKORO_MODEL): TtsEngine {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -71,7 +105,7 @@ export function kokoro(model = KOKORO_MODEL): TtsEngine {
             "or pass your own engine via createDemo({ tts })",
         );
       }
-      mod.env.cacheDir = join(cacheDir(), "models");
+      await redirectModelCache();
       return mod.KokoroTTS.from_pretrained(model, { dtype: "q8", device: "cpu" });
     })());
 

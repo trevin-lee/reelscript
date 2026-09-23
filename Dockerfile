@@ -21,6 +21,8 @@ WORKDIR /opt/reelscript
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev \
  && npx playwright install --with-deps chromium-headless-shell \
+ # onnxruntime ships binaries for every platform; keep only Linux
+ && rm -rf node_modules/onnxruntime-node/bin/napi-v*/darwin node_modules/onnxruntime-node/bin/napi-v*/win32 \
  && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY --from=build /src/dist ./dist
 COPY assets ./assets
