@@ -60,11 +60,13 @@ The example drives a small dashboard app that ships with the repo, so it is full
 
 ## Run in CI
 
-The container is the canonical render environment: Chromium, ffmpeg, and the theme font are pinned, so a script renders the same pixels on every machine.
+The container is the canonical render environment: Chromium, ffmpeg, the theme font, and the narration model are all baked in, so a script renders the same pixels on every machine and never downloads anything at run time.
 
 ```sh
-docker run --rm -v "$PWD:/work" ghcr.io/trevin-lee/reelscript render demo.ts --out demo.mp4
+docker run --rm -v "$PWD:/work" ghcr.io/trevin-lee/reelscript:main render demo.ts --out demo.mp4
 ```
+
+Tags: `main` tracks the main branch, `sha-<commit>` pins a build, and each release adds `<version>` and `latest`. While the repository is private the image is too, so `docker login ghcr.io` with a GitHub token that has `read:packages` first.
 
 In GitHub Actions:
 
@@ -72,7 +74,7 @@ In GitHub Actions:
 jobs:
   demo:
     runs-on: ubuntu-latest
-    container: ghcr.io/trevin-lee/reelscript:latest
+    container: ghcr.io/trevin-lee/reelscript:main
     steps:
       - uses: actions/checkout@v5
       - run: reelscript render demo.ts --out demo.mp4
