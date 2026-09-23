@@ -1,0 +1,40 @@
+{
+  "name": "reelscript",
+  "version": "0.0.0",
+  "description": "Product demos as code. Write a script, render a demo, re-run it in CI when your UI changes.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Trevin Lee",
+  "keywords": [
+    "demo",
+    "screencast",
+    "screen-recording",
+    "video",
+    "automation",
+    "playwright",
+    "demo-as-code"
+  ],
+  "bin": {
+    "reelscript": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "example": "node --loader ts-node/esm examples/basic.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
