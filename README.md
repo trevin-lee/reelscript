@@ -48,7 +48,7 @@ npm install -D @reelscript/cli
 npx playwright install chromium
 ```
 
-The package installs a `reelscript` command. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
+The package installs a `reelscript` command. Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
 ## Try it
 

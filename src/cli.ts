@@ -49,9 +49,26 @@ function parse(argv: string[]) {
 }
 
 async function runScript(path: string): Promise<void> {
-  process.env.REELSCRIPT_SCRIPT = resolve(path);
+  const script = resolve(path);
+  process.env.REELSCRIPT_SCRIPT = script;
   const { tsImport } = await import("tsx/esm/api");
-  await tsImport(pathToFileURL(resolve(path)).href, import.meta.url);
+  try {
+    await tsImport(pathToFileURL(script).href, import.meta.url);
+  } catch (err) {
+    // A .ts/.js script in a project without "type": "module" is compiled as
+    // CommonJS, which forbids top-level await. Re-run it as an ES module via
+    // a temporary .mts copy beside the original so relative paths still work.
+    if (!(err instanceof Error) || !/Top-level await/.test(err.message)) throw err;
+    const { copyFileSync, unlinkSync } = await import("node:fs");
+    const { dirname, basename, join } = await import("node:path");
+    const tmp = join(dirname(script), `.${basename(script).replace(/\.[cm]?[jt]sx?$/, "")}.reelscript.mts`);
+    copyFileSync(script, tmp);
+    try {
+      await tsImport(pathToFileURL(tmp).href, import.meta.url);
+    } finally {
+      unlinkSync(tmp);
+    }
+  }
 }
 
 async function main(): Promise<void> {

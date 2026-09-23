@@ -617,35 +617,49 @@ class Engine {
     const s = this.zoom.scale;
     const cw = W / s;
     const ch = H / s;
-    const crop = {
-      left: Math.round(clamp(this.zoom.cx - cw / 2, 0, W - cw)),
-      top: Math.round(clamp(this.zoom.cy - ch / 2, 0, H - ch)),
-      width: Math.max(2, Math.round(cw)),
-      height: Math.max(2, Math.round(ch)),
-    };
-    crop.width = Math.min(crop.width, W - crop.left);
-    crop.height = Math.min(crop.height, H - crop.top);
-    const sx = W / crop.width;
-    const sy = H / crop.height;
+    // Sub-pixel crop origin. Rounding it to whole pixels makes the content
+    // jump by up to a pixel per frame during a zoom, which reads as flicker.
+    const fx = clamp(this.zoom.cx - cw / 2, 0, W - cw);
+    const fy = clamp(this.zoom.cy - ch / 2, 0, H - ch);
 
-    const ox = (this.cursor.x - crop.left) * sx;
-    const oy = (this.cursor.y - crop.top) * sy;
+    // cursor: desktop → output coordinates
+    const ox = (this.cursor.x - fx) * s;
+    const oy = (this.cursor.y - fy) * s;
 
     const overlays: OverlayOptions[] = [];
     const since = t - this.lastClick;
     if (since >= 0 && since < RIPPLE_MS) {
       const p = since / RIPPLE_MS;
-      const ripple = await rippleSprite((6 + 22 * p) * sx, 0.55 * (1 - p));
+      const ripple = await rippleSprite((6 + 22 * p) * s, 0.55 * (1 - p));
       const o = await placeSprite(ripple, ox, oy, W, H);
       if (o) overlays.push(o);
     }
     const squish = since >= 0 && since < SQUISH_MS ? 0.86 : 1;
-    const arrow = await cursorSprite(CURSOR_PX * sx * squish);
+    const arrow = await cursorSprite(CURSOR_PX * s * squish);
     const o = await placeSprite(arrow, ox, oy, W, H);
     if (o) overlays.push(o);
 
-    let pipeline = sharp(sceneData, { raw: { width: W, height: H, channels: 4 } });
-    if (s > 1.001) pipeline = pipeline.extract(crop).resize(W, H, { kernel: "lanczos3", fit: "fill" });
+    let zoomed: Buffer = sceneData;
+    if (s > 1.001) {
+      // Integer crop with a margin, then scale with the fractional offset
+      // folded into the affine transform, then trim to the output size.
+      const left = Math.floor(fx);
+      const top = Math.floor(fy);
+      const width = Math.min(W - left, Math.ceil(fx + cw) - left + 2);
+      const height = Math.min(H - top, Math.ceil(fy + ch) - top + 2);
+      const { data, info } = await sharp(sceneData, { raw: { width: W, height: H, channels: 4 } })
+        .extract({ left, top, width, height })
+        .affine([[s, 0], [0, s]], { interpolator: "bicubic", idx: -(fx - left), idy: -(fy - top), background: "#000" })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      zoomed = await sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+        .extract({ left: 0, top: 0, width: Math.min(W, info.width), height: Math.min(H, info.height) })
+        .resize(W, H, { fit: "fill" })
+        .raw()
+        .toBuffer();
+    }
+
+    let pipeline = sharp(zoomed, { raw: { width: W, height: H, channels: 4 } });
     if (overlays.length) pipeline = pipeline.composite(overlays);
     return pipeline.removeAlpha().raw().toBuffer();
   }
