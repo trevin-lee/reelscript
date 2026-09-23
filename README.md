@@ -55,6 +55,28 @@ npm run example            # renders examples/basic.ts -> out/basic.mp4
 
 The example drives a small dashboard app that ships with the repo, so it is fully self-contained. A 6.5s demo at 1424x992 / 60fps renders in about 15s on an M-series laptop.
 
+## Run in CI
+
+The container is the canonical render environment: Chromium, ffmpeg, and the theme font are pinned, so a script renders the same pixels on every machine.
+
+```sh
+docker run --rm -v "$PWD:/work" ghcr.io/trevin-lee/reelscript render demo.ts --out demo.mp4
+```
+
+In GitHub Actions:
+
+```yaml
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    container: ghcr.io/trevin-lee/reelscript:latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: reelscript render demo.ts --out demo.mp4
+```
+
+Scripts may `import { createDemo } from "@reelscript/cli"` without installing the package locally; the CLI resolves it to its own copy.
+
 ## CLI
 
 ```sh

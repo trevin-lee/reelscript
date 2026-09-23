@@ -12,7 +12,10 @@
 
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
+import { createRequire, register } from "node:module";
+
+// Let scripts import "@reelscript/cli" without a local install (see resolve-self.ts).
+register(new URL("./resolve-self.js", import.meta.url));
 
 const require = createRequire(import.meta.url);
 const version: string = require("../package.json").version;

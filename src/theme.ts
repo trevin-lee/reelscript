@@ -1,9 +1,14 @@
 import sharp from "sharp";
+import { readFileSync } from "node:fs";
 
 /**
  * A theme turns a raw page screenshot into a "scene": the full frame that
  * gets zoomed and cursor-overlaid. `bare` is the page itself; `macos` puts
  * the page inside a browser window on a mocked macOS desktop.
+ *
+ * Chrome (wallpaper, menubar, window frame) is rendered as HTML by Chromium
+ * using a font bundled with the package, so the same script produces the
+ * same pixels on macOS, Linux, and in the container.
  */
 
 export type ThemeName = "macos" | "bare";
@@ -29,6 +34,9 @@ export interface SceneState {
   url: string;
 }
 
+/** Renders an HTML document of the given size to a PNG. Provided by the engine. */
+export type HtmlRasterizer = (html: string, width: number, height: number) => Promise<Buffer>;
+
 export interface Theme {
   layout(viewport: [number, number]): SceneLayout;
   /** Compose the scene (RGBA raw) from a PNG screenshot of the page. */
@@ -37,6 +45,20 @@ export interface Theme {
 
 function even(n: number): number {
   return n % 2 === 0 ? n : n + 1;
+}
+
+// ---------------------------------------------------------------- font
+
+let fontFace: string | null = null;
+
+/** @font-face rule embedding the bundled Inter variable font. */
+export function bundledFontFace(): string {
+  if (!fontFace) {
+    const ttf = readFileSync(new URL("../assets/fonts/InterVariable.ttf", import.meta.url));
+    fontFace = `@font-face { font-family: "Inter"; font-weight: 100 900; font-style: normal;
+      src: url(data:font/ttf;base64,${ttf.toString("base64")}) format("truetype"); }`;
+  }
+  return fontFace;
 }
 
 // ---------------------------------------------------------------- bare
@@ -72,7 +94,10 @@ const RADIUS = 12;
 class MacosTheme implements Theme {
   private bg = new Map<string, Promise<{ base: RawImage; cornerBL: Buffer; cornerBR: Buffer }>>();
 
-  constructor(private viewport: [number, number]) {}
+  constructor(
+    private viewport: [number, number],
+    private rasterize: HtmlRasterizer,
+  ) {}
 
   layout(): SceneLayout {
     const [vw, vh] = this.viewport;
@@ -82,62 +107,45 @@ class MacosTheme implements Theme {
     return { width, height, pageX: PAD_X, pageY, pageW: vw, pageH: vh };
   }
 
-  private svg(state: SceneState): string {
+  private html(state: SceneState): string {
     const l = this.layout();
     const winX = l.pageX;
     const winY = l.pageY - TITLE_H;
     const winW = l.pageW;
     const winH = l.pageH + TITLE_H;
     const urlW = Math.min(560, Math.round(winW * 0.46));
-    const urlX = winX + Math.round((winW - urlW) / 2);
-    const urlY = winY + 12;
-    const url = escapeXml(displayUrl(state.url));
-    const font = `font-family="-apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif"`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${l.width}" height="${l.height}">
-  <defs>
-    <linearGradient id="wall" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4f46e5"/>
-      <stop offset="0.55" stop-color="#c2410c"/>
-      <stop offset="1" stop-color="#f59e0b"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="0.3" cy="0.2" r="0.8">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="22"/>
-      <feOffset dx="0" dy="22" result="s"/>
-      <feComponentTransfer><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
-    </filter>
-    <clipPath id="win"><rect x="${winX}" y="${winY}" width="${winW}" height="${winH}" rx="${RADIUS}"/></clipPath>
-  </defs>
-
-  <rect width="100%" height="100%" fill="url(#wall)"/>
-  <rect width="100%" height="100%" fill="url(#glow)"/>
-
-  <!-- menubar -->
-  <rect x="0" y="0" width="${l.width}" height="${MENUBAR_H}" fill="#ffffff" fill-opacity="0.16"/>
-  <text x="18" y="19" ${font} font-size="13" font-weight="700" fill="#fff"></text>
-  <text x="38" y="19" ${font} font-size="13" font-weight="600" fill="#fff">reelscript</text>
-  <text x="${l.width - 18}" y="19" ${font} font-size="13" fill="#fff" text-anchor="end">Tue Sep 23  9:41 AM</text>
-
-  <!-- window shadow + body -->
-  <rect x="${winX}" y="${winY}" width="${winW}" height="${winH}" rx="${RADIUS}" fill="#000" filter="url(#shadow)"/>
-  <rect x="${winX}" y="${winY}" width="${winW}" height="${winH}" rx="${RADIUS}" fill="#ffffff"/>
-
-  <!-- title bar -->
-  <g clip-path="url(#win)">
-    <rect x="${winX}" y="${winY}" width="${winW}" height="${TITLE_H}" fill="#f3f3f5"/>
-    <rect x="${winX}" y="${winY + TITLE_H - 1}" width="${winW}" height="1" fill="#dcdce1"/>
-  </g>
-  <circle cx="${winX + 22}" cy="${winY + TITLE_H / 2}" r="6" fill="#ff5f57"/>
-  <circle cx="${winX + 42}" cy="${winY + TITLE_H / 2}" r="6" fill="#febc2e"/>
-  <circle cx="${winX + 62}" cy="${winY + TITLE_H / 2}" r="6" fill="#28c840"/>
-
-  <!-- url pill -->
-  <rect x="${urlX}" y="${urlY}" width="${urlW}" height="${TITLE_H - 24}" rx="7" fill="#e6e6ea"/>
-  <text x="${urlX + urlW / 2}" y="${urlY + 16}" ${font} font-size="12.5" fill="#3f3f46" text-anchor="middle">${url}</text>
-</svg>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+${bundledFontFace()}
+html, body { margin: 0; width: ${l.width}px; height: ${l.height}px; overflow: hidden;
+  font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.wall { position: absolute; inset: 0;
+  background: linear-gradient(135deg, #4f46e5 0%, #c2410c 55%, #f59e0b 100%); }
+.glow { position: absolute; inset: 0;
+  background: radial-gradient(80% 80% at 30% 20%, rgba(255,255,255,.22), rgba(255,255,255,0)); }
+.menubar { position: absolute; left: 0; top: 0; right: 0; height: ${MENUBAR_H}px;
+  background: rgba(255,255,255,.16); color: #fff; font-size: 13px;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 18px; }
+.menubar b { font-weight: 600; }
+.window { position: absolute; left: ${winX}px; top: ${winY}px; width: ${winW}px; height: ${winH}px;
+  border-radius: ${RADIUS}px; background: #fff; overflow: hidden;
+  box-shadow: 0 22px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25); }
+.title { position: relative; height: ${TITLE_H}px; background: #f3f3f5; border-bottom: 1px solid #dcdce1; }
+.lights { position: absolute; left: 16px; top: ${TITLE_H / 2 - 6}px; display: flex; gap: 8px; }
+.lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
+.url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  width: ${urlW}px; height: ${TITLE_H - 24}px; border-radius: 7px; background: #e6e6ea;
+  color: #3f3f46; font-size: 12.5px; display: flex; align-items: center; justify-content: center;
+  white-space: nowrap; overflow: hidden; }
+</style></head><body>
+<div class="wall"></div><div class="glow"></div>
+<div class="menubar"><b>reelscript</b><span>Tue Sep 23&nbsp;&nbsp;9:41 AM</span></div>
+<div class="window">
+  <div class="title">
+    <div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <div class="url">${escapeHtml(displayUrl(state.url))}</div>
+  </div>
+</div>
+</body></html>`;
   }
 
   private assets(state: SceneState) {
@@ -146,7 +154,7 @@ class MacosTheme implements Theme {
     if (!p) {
       p = (async () => {
         const l = this.layout();
-        const png = await sharp(Buffer.from(this.svg(state))).png().toBuffer();
+        const png = await this.rasterize(this.html(state), l.width, l.height);
         const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
         const base: RawImage = { data, width: info.width, height: info.height, channels: 4 };
         const r = RADIUS;
@@ -200,16 +208,16 @@ function displayUrl(url: string): string {
   }
 }
 
-function escapeXml(s: string): string {
+function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function createTheme(name: ThemeName, viewport: [number, number]): Theme {
+export function createTheme(name: ThemeName, viewport: [number, number], rasterize: HtmlRasterizer): Theme {
   switch (name) {
     case "bare":
       return new BareTheme(viewport);
     case "macos":
-      return new MacosTheme(viewport);
+      return new MacosTheme(viewport, rasterize);
     default:
       throw new Error(`reelscript: unknown theme "${name as string}"`);
   }

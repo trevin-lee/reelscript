@@ -1,4 +1,4 @@
-import { createDemo } from "../src/index.js";
+import { createDemo } from "@reelscript/cli";
 
 const demo = createDemo({ theme: "macos", viewport: [1280, 800], fps: 60 });
 

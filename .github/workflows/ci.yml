@@ -26,8 +26,10 @@ jobs:
           path: out/basic.mp4
           retention-days: 7
 
-  # The README GIF is a demo of reelscript made with reelscript. Re-render it
-  # on every push to main and commit it back if the pixels changed.
+  # The README GIF is a demo of reelscript made with reelscript, rendered
+  # inside the container image so the Dockerfile is exercised on every push
+  # and the GIF comes from the canonical environment. Committed back if the
+  # pixels changed.
   demo:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
@@ -36,15 +38,19 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npx tsx src/cli.ts render examples/basic.ts --out docs/demo.gif
+          context: .
+          load: true
+          tags: reelscript:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Render the demo inside the container
+        run: docker run --rm -v "$PWD:/work" reelscript:ci render examples/basic.ts --out docs/demo.gif
       - name: Commit the demo if it changed
         run: |
+          sudo chown "$(id -u):$(id -g)" docs/demo.gif
           if git diff --quiet -- docs/demo.gif; then
             echo "demo.gif unchanged"
             exit 0

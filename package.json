@@ -26,13 +26,14 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "example": "tsx examples/basic.ts",
+    "example": "npm run build && tsx examples/basic.ts",
     "preview": "tsx src/cli.ts preview examples/basic.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "npm run build && npm test"

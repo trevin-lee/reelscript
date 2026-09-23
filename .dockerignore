@@ -1,0 +1,11 @@
+node_modules
+dist
+out
+docs
+.git
+.github
+test
+examples
+*.png
+*.mp4
+*.gif

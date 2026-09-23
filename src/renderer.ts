@@ -97,7 +97,7 @@ class Engine {
     themeName: ThemeName,
     private deterministic: boolean,
   ) {
-    this.theme = createTheme(themeName, viewport);
+    this.theme = createTheme(themeName, viewport, (html, w, h) => this.rasterizeHtml(html, w, h));
     this.layout = this.theme.layout(viewport);
     this.cursor = { x: viewport[0] / 2, y: viewport[1] / 2 };
     this.zoom = { scale: 1, cx: this.layout.width / 2, cy: this.layout.height / 2 };
@@ -113,6 +113,19 @@ class Engine {
     if (this.deterministic) await context.addInitScript(CLOCK_SHIM);
     this.page = await context.newPage();
     this.cdp = await context.newCDPSession(this.page);
+  }
+
+  /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
+  private async rasterizeHtml(html: string, width: number, height: number): Promise<Buffer> {
+    const ctx = await this.browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+    try {
+      const page = await ctx.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      return await page.screenshot({ type: "png" });
+    } finally {
+      await ctx.close();
+    }
   }
 
   // ------------------------------------------------------------ page clock

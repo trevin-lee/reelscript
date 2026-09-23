@@ -4,9 +4,10 @@
 <meta charset="utf-8" />
 <title>Acme — Projects</title>
 <style>
+  @font-face { font-family: "Inter"; font-weight: 100 900; src: url("../assets/fonts/InterVariable.ttf") format("truetype"); }
   :root { --bg:#f7f7f8; --panel:#fff; --line:#e6e6ea; --ink:#18181b; --muted:#6b7280; --accent:#4f46e5; }
   * { box-sizing:border-box; }
-  html, body { margin:0; height:100%; font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  html, body { margin:0; height:100%; font-family:Inter, system-ui, sans-serif; -webkit-font-smoothing:antialiased; color:var(--ink); background:var(--bg); }
   .app { display:grid; grid-template-columns:232px 1fr; height:100vh; }
   aside { background:var(--panel); border-right:1px solid var(--line); padding:20px 14px; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; padding:6px 8px 18px; }
