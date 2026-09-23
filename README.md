@@ -1,10 +1,11 @@
 # reelscript
 
+![A demo rendered by reelscript: the cursor glides to a button, a modal opens, the view zooms in, a name is typed, and the zoom releases](docs/demo.gif)
+
+<sup>Made with reelscript, by reelscript: CI renders [examples/basic.ts](examples/basic.ts) inside the published container on every push to `main` and commits the result.</sup>
+
 **Product demos as code.** Write a script, render a demo, re-run it in CI when your UI changes.
 
-![reelscript rendering a demo of a sample app: cursor glides to a button, a modal opens, the view zooms in, text is typed, and the zoom releases](https://raw.githubusercontent.com/trevin-lee/reelscript/main/docs/demo.gif)
-
-<sup>This GIF is a demo of reelscript made with reelscript: CI renders [examples/basic.ts](examples/basic.ts) on every push to `main` and commits the result.</sup>
 
 Screen-recording tools (Screen Studio, Arcade, Tango) all rot the same way: your product UI changes and your beautiful demo is now a lie, so you re-record it by hand. reelscript makes a demo a *build artifact*. The video is generated from a script, so when your UI updates you just re-run it.
 

@@ -80,8 +80,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache synthesized narration clips
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/reelscript/tts
+          key: reelscript-tts-${{ hashFiles('examples/**/*.ts') }}
+          restore-keys: reelscript-tts-
       - name: Render the demo with the published image
-        run: docker run --rm -v "$PWD:/work" "$IMAGE:${{ needs.image.outputs.tag }}" render examples/basic.ts --out docs/demo.gif
+        run: |
+          mkdir -p ~/.cache/reelscript/tts
+          docker run --rm -v "$PWD:/work" -v "$HOME/.cache/reelscript/tts:/opt/reelscript/cache/tts" \
+            "$IMAGE:${{ needs.image.outputs.tag }}" render examples/basic.ts --out docs/demo.gif
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/reelscript
       - name: Commit the demo if it changed
         run: |
           sudo chown "$(id -u):$(id -g)" docs/demo.gif
