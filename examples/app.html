@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Acme — Projects</title>
+<style>
+  :root { --bg:#f7f7f8; --panel:#fff; --line:#e6e6ea; --ink:#18181b; --muted:#6b7280; --accent:#4f46e5; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; font-family:-apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  .app { display:grid; grid-template-columns:232px 1fr; height:100vh; }
+  aside { background:var(--panel); border-right:1px solid var(--line); padding:20px 14px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; padding:6px 8px 18px; }
+  .brand i { width:22px; height:22px; border-radius:6px; background:linear-gradient(135deg,#4f46e5,#c2410c); display:inline-block; }
+  nav a { display:block; padding:9px 10px; border-radius:8px; color:var(--muted); font-size:14px; text-decoration:none; }
+  nav a.active { background:#eef2ff; color:var(--accent); font-weight:600; }
+  nav a:hover:not(.active) { background:#f3f4f6; }
+  main { padding:28px 36px; overflow:auto; }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; }
+  h1 { font-size:22px; margin:0; letter-spacing:-0.01em; }
+  .btn { border:0; border-radius:9px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer; transition:transform .12s, background .15s, box-shadow .15s; }
+  .btn-primary { background:var(--accent); color:#fff; box-shadow:0 1px 2px rgba(79,70,229,.35); }
+  .btn-primary:hover { background:#4338ca; box-shadow:0 4px 12px rgba(79,70,229,.35); }
+  .btn-primary:active { transform:scale(.97); }
+  .btn-ghost { background:transparent; color:var(--muted); }
+  .btn-ghost:hover { background:#f3f4f6; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th, td { text-align:left; padding:13px 16px; font-size:14px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; background:#fafafa; }
+  tr:last-child td { border-bottom:0; }
+  tr.new td { animation:flash 1.2s ease-out; }
+  @keyframes flash { from { background:#eef2ff; } to { background:transparent; } }
+  .pill { display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
+  .pill.on { background:#dcfce7; color:#166534; }
+  .pill.draft { background:#f3f4f6; color:#4b5563; }
+  .backdrop { position:fixed; inset:0; background:rgba(17,17,20,.35); opacity:0; pointer-events:none; transition:opacity .18s; }
+  .backdrop.open { opacity:1; pointer-events:auto; }
+  .modal { position:fixed; left:50%; top:50%; width:460px; transform:translate(-50%,-46%) scale(.97); opacity:0; pointer-events:none;
+           background:var(--panel); border-radius:14px; padding:24px; box-shadow:0 24px 64px rgba(0,0,0,.25); transition:transform .2s, opacity .2s; }
+  .modal.open { transform:translate(-50%,-50%) scale(1); opacity:1; pointer-events:auto; }
+  .modal h2 { margin:0 0 6px; font-size:18px; }
+  .modal p { margin:0 0 18px; color:var(--muted); font-size:14px; }
+  label { display:block; font-size:13px; font-weight:600; margin-bottom:6px; }
+  input { width:100%; padding:11px 12px; font-size:15px; border:1px solid #d4d4d8; border-radius:9px; outline:none; transition:border-color .15s, box-shadow .15s; font-family:inherit; }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,70,229,.18); }
+  .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand"><i></i>Acme</div>
+    <nav>
+      <a class="active" href="#">Projects</a>
+      <a href="#">Deployments</a>
+      <a href="#">Analytics</a>
+      <a href="#">Team</a>
+      <a href="#">Settings</a>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <h1>Projects</h1>
+      <button id="new-project" class="btn btn-primary">+ New project</button>
+    </header>
+    <table>
+      <thead><tr><th>Name</th><th>Status</th><th>Owner</th><th>Updated</th></tr></thead>
+      <tbody id="rows">
+        <tr><td>Website redesign</td><td><span class="pill on">Live</span></td><td>Maya</td><td>2h ago</td></tr>
+        <tr><td>Mobile onboarding</td><td><span class="pill on">Live</span></td><td>Devon</td><td>Yesterday</td></tr>
+        <tr><td>Billing v2</td><td><span class="pill draft">Draft</span></td><td>Sam</td><td>3d ago</td></tr>
+      </tbody>
+    </table>
+  </main>
+</div>
+
+<div id="backdrop" class="backdrop"></div>
+<div id="modal" class="modal" role="dialog" aria-modal="true">
+  <h2>New project</h2>
+  <p>Give your project a name. You can change it later.</p>
+  <label for="project-name">Project name</label>
+  <input id="project-name" placeholder="e.g. Q3 launch" autocomplete="off" />
+  <div class="actions">
+    <button id="cancel" class="btn btn-ghost">Cancel</button>
+    <button id="create" class="btn btn-primary">Create project</button>
+  </div>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const open = (v) => { $("#modal").classList.toggle("open", v); $("#backdrop").classList.toggle("open", v); if (v) setTimeout(() => $("#project-name").focus(), 200); };
+  $("#new-project").addEventListener("click", () => open(true));
+  $("#cancel").addEventListener("click", () => open(false));
+  $("#backdrop").addEventListener("click", () => open(false));
+  $("#create").addEventListener("click", () => {
+    const name = $("#project-name").value.trim() || "Untitled project";
+    const tr = document.createElement("tr");
+    tr.className = "new";
+    tr.innerHTML = `<td>${name}</td><td><span class="pill draft">Draft</span></td><td>You</td><td>Just now</td></tr>`;
+    $("#rows").prepend(tr);
+    $("#project-name").value = "";
+    open(false);
+  });
+</script>
+</body>
+</html>

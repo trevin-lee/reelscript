@@ -1,33 +1,80 @@
 #!/usr/bin/env node
 /**
- * reelscript CLI — thin entry point.
+ * reelscript CLI
  *
- *   reelscript render <script.ts> [--out demo.mp4]
- *   reelscript watch  <script.ts>
+ *   reelscript render  <script.ts> [--out demo.mp4]
+ *   reelscript preview <script.ts> --at 2.5 [--out frame.png]
  *
- * Command wiring is stubbed until the engine lands.
+ * Scripts are ordinary TS/JS modules that build a Demo and call
+ * `demo.render(...)`. The CLI runs them with tsx, overriding the output via
+ * environment variables (see Demo.render).
  */
 
-const [, , command, ...rest] = process.argv;
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const version: string = require("../package.json").version;
+
+function usage(): never {
+  console.log(`reelscript ${version} — product demos as code
+
+usage:
+  reelscript render  <script> [--out demo.mp4]
+  reelscript preview <script> --at <seconds> [--out frame.png]
+
+env:
+  REELSCRIPT_FFMPEG   path to ffmpeg (defaults to bundled ffmpeg-static)`);
+  process.exit(1);
+}
+
+function parse(argv: string[]) {
+  const [command, ...rest] = argv;
+  const flags: Record<string, string> = {};
+  const positional: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a.startsWith("--")) {
+      const [k, v] = a.slice(2).split("=", 2);
+      flags[k] = v ?? rest[++i] ?? "";
+    } else positional.push(a);
+  }
+  return { command, flags, positional };
+}
+
+async function runScript(path: string): Promise<void> {
+  const { tsImport } = await import("tsx/esm/api");
+  await tsImport(pathToFileURL(resolve(path)).href, import.meta.url);
+}
 
 async function main(): Promise<void> {
+  const { command, flags, positional } = parse(process.argv.slice(2));
   switch (command) {
-    case "render":
-      console.log(`reelscript: render not implemented yet (script: ${rest[0] ?? "?"})`);
+    case "render": {
+      const script = positional[0] ?? usage();
+      if (flags.out) process.env.REELSCRIPT_OUT = resolve(flags.out);
+      await runScript(script);
       break;
-    case "watch":
-      console.log(`reelscript: watch not implemented yet (script: ${rest[0] ?? "?"})`);
+    }
+    case "preview": {
+      const script = positional[0] ?? usage();
+      const at = Number(flags.at ?? "0");
+      process.env.REELSCRIPT_SNAPSHOT_AT = String(Math.round(at * 1000));
+      process.env.REELSCRIPT_OUT = resolve(flags.out ?? `preview-${at}s.png`);
+      await runScript(script);
       break;
+    }
     case "--version":
     case "-v":
-      console.log("reelscript 0.0.0");
+      console.log(version);
       break;
     default:
-      console.log("usage: reelscript <render|watch> <script> [--out demo.mp4]");
+      usage();
   }
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

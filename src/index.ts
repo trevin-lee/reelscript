@@ -1,81 +1,99 @@
 /**
  * reelscript — product demos as code.
  *
- * This is the public API surface. The engine (deterministic, frame-by-frame
- * offline rendering with a composited animated cursor + auto-zoom) is not
- * wired up yet — methods currently record timeline actions so the shape of
- * the API can be exercised and iterated on.
+ * Scripts build a timeline through the `Demo` API; `render()` executes it
+ * against a headless Chromium, samples the state at a fixed frame rate, and
+ * composites the animated cursor + zoom offline before encoding to mp4.
  */
 
-export type Ease = "linear" | "smooth" | "snappy" | "overshoot";
+import { render as renderTimeline, type RenderResult } from "./renderer.js";
+import type { Action, Target } from "./timeline.js";
+import type { Ease } from "./easing.js";
+import type { ThemeName } from "./theme.js";
+
+export type { Action, Target } from "./timeline.js";
+export type { Ease } from "./easing.js";
+export type { ThemeName } from "./theme.js";
+export type { RenderOptions, RenderResult } from "./renderer.js";
+export { render } from "./renderer.js";
 
 export interface DemoOptions {
-  /** Visual chrome around the recorded panel. */
-  theme?: "macos" | "bare";
-  /** Recording viewport in CSS pixels: [width, height]. */
+  /** Visual chrome around the recorded page. Default: "macos". */
+  theme?: ThemeName;
+  /** Page viewport in CSS pixels: [width, height]. Default: [1280, 800]. */
   viewport?: [number, number];
-  /** Output frames per second. */
+  /** Output frames per second. Default: 60. */
   fps?: number;
+  /** Freeze the page clock and step it per frame for reproducible animations. Default: true. */
+  deterministic?: boolean;
+  /** Print render progress to stderr. Default: true. */
+  verbose?: boolean;
 }
 
 export interface MoveOptions {
   ease?: Ease;
-  /** Duration of the movement in milliseconds. */
+  /** Movement duration in ms. Default: derived from distance. */
   duration?: number;
 }
 
 export interface ZoomOptions {
+  /** Default: 1.6 */
   scale?: number;
-  /** How long to hold the zoom before releasing, in milliseconds. */
-  hold?: number;
+  /** Transition duration in ms. Default: 700 */
+  duration?: number;
   ease?: Ease;
 }
 
 export interface TypeOptions {
-  /** Accelerated typing speed, words per minute. */
+  /** Typing speed in words per minute. Default: 300 */
   wpm?: number;
 }
 
-/** A single recorded step on the demo timeline. */
-export interface TimelineAction {
-  kind: string;
-  args: Record<string, unknown>;
+export interface GotoOptions {
+  /** ms to hold on the freshly loaded page. Default: 400 */
+  settle?: number;
+}
+
+export interface MockOptions {
+  status?: number;
 }
 
 class Cursor {
   constructor(private demo: Demo) {}
 
-  async moveTo(target: string, opts: MoveOptions = {}): Promise<void> {
-    this.demo._record("cursor.moveTo", { target, ...opts });
+  /** Glide the cursor to a selector or point. */
+  async moveTo(target: Target, opts: MoveOptions = {}): Promise<void> {
+    this.demo._push({ kind: "cursor.moveTo", target, ...opts });
   }
 
-  async click(): Promise<void> {
-    this.demo._record("cursor.click", {});
+  async click(opts: { button?: "left" | "right" } = {}): Promise<void> {
+    this.demo._push({ kind: "cursor.click", ...opts });
   }
 }
 
 class Zoom {
   constructor(private demo: Demo) {}
 
-  to(target: string, opts: ZoomOptions = {}): void {
-    this.demo._record("zoom.to", { target, ...opts });
+  /** Animate a zoom centered on a selector or point. Runs alongside following actions. */
+  to(target: Target, opts: ZoomOptions = {}): void {
+    this.demo._push({ kind: "zoom.to", target, ...opts });
   }
 
-  out(): void {
-    this.demo._record("zoom.out", {});
+  out(opts: Omit<ZoomOptions, "scale"> = {}): void {
+    this.demo._push({ kind: "zoom.out", ...opts });
   }
 }
 
 class Browser {
   constructor(private demo: Demo) {}
 
-  async goto(url: string): Promise<void> {
-    this.demo._record("browser.goto", { url });
+  async goto(url: string, opts: GotoOptions = {}): Promise<void> {
+    this.demo._push({ kind: "browser.goto", url, ...opts });
   }
 
-  /** Intercept a request and return canned data — demos never hit a live backend. */
-  mockAPI(pattern: string, response: unknown): void {
-    this.demo._record("browser.mockAPI", { pattern, response });
+  /** Intercept matching requests and return canned JSON — demos never hit a live backend. */
+  mockAPI(pattern: string, response: unknown, opts: MockOptions = {}): void {
+    this.demo._push({ kind: "browser.mockAPI", pattern, response, ...opts });
   }
 }
 
@@ -84,34 +102,70 @@ export class Demo {
   readonly zoom = new Zoom(this);
   readonly browser = new Browser(this);
 
-  private timeline: TimelineAction[] = [];
+  private actions: Action[] = [];
 
   constructor(readonly options: DemoOptions = {}) {}
 
   /** @internal */
-  _record(kind: string, args: Record<string, unknown>): void {
-    this.timeline.push({ kind, args });
+  _push(action: Action): void {
+    this.actions.push(action);
   }
 
+  /** Type into a field with accelerated, evenly paced keystrokes. */
   async type(target: string, text: string, opts: TypeOptions = {}): Promise<void> {
-    this._record("type", { target, text, ...opts });
+    this._push({ kind: "type", target, text, ...opts });
+  }
+
+  /** Press a key or chord, e.g. "Enter" or "Meta+K". */
+  async press(key: string): Promise<void> {
+    this._push({ kind: "press", key });
   }
 
   async wait(ms: number): Promise<void> {
-    this._record("wait", { ms });
+    this._push({ kind: "wait", ms });
   }
 
-  /** Return the recorded timeline (useful for tests and debugging). */
-  getTimeline(): readonly TimelineAction[] {
-    return this.timeline;
+  /** The recorded timeline (useful for tests and debugging). */
+  getTimeline(): readonly Action[] {
+    return this.actions;
   }
 
-  /** Render the recorded timeline to a video file. Not yet implemented. */
-  async render(_outPath: string): Promise<void> {
-    throw new Error(
-      "reelscript: the render engine is not implemented yet. " +
-        "The timeline API is in place — see getTimeline().",
-    );
+  /**
+   * Render the timeline to a video file.
+   *
+   * Honors REELSCRIPT_OUT (override output path) and REELSCRIPT_SNAPSHOT_AT
+   * (render a single PNG at that time in ms) so the CLI can drive scripts.
+   */
+  async render(outPath: string): Promise<RenderResult> {
+    const out = process.env.REELSCRIPT_OUT || outPath;
+    const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
+    const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
+    const verbose = this.options.verbose ?? true;
+    const started = Date.now();
+
+    const result = await renderTimeline(this.actions, {
+      out,
+      fps: this.options.fps,
+      viewport: this.options.viewport,
+      theme: this.options.theme,
+      deterministic: this.options.deterministic,
+      snapshotAt,
+      onProgress: verbose
+        ? ({ frame, timeMs }) => {
+            if (frame > 0 && frame % 30 === 0) {
+              process.stderr.write(`\rreelscript: frame ${frame}  t=${(timeMs / 1000).toFixed(2)}s`);
+            }
+          }
+        : undefined,
+    });
+
+    if (verbose) {
+      const secs = ((Date.now() - started) / 1000).toFixed(1);
+      process.stderr.write(
+        `\rreelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frames, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
+      );
+    }
+    return result;
   }
 }
 
