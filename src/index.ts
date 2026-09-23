@@ -12,6 +12,8 @@ import type { Ease } from "./easing.js";
 import type { ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
+import { recordCommand, saveRecording } from "./terminal.js";
+import { dirname, join, resolve } from "node:path";
 
 export type { Action, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
@@ -20,6 +22,8 @@ export type { RenderOptions, RenderResult } from "./renderer.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
+export type { TermEvent, TermRecording } from "./terminal.js";
+export { recordCommand, scriptedEvents, playbackEvents } from "./terminal.js";
 export { render } from "./renderer.js";
 
 export interface DemoOptions {
@@ -39,6 +43,8 @@ export interface DemoOptions {
   tts?: TtsEngine;
   /** Respell words the voice mispronounces, e.g. { Reelscript: "Reel script" }. */
   pronunciations?: Record<string, string>;
+  /** Where terminal recordings are stored. Default: `recordings/` next to the script. */
+  recordingsDir?: string;
   /** Print render progress to stderr. Default: true. */
   verbose?: boolean;
 }
@@ -66,6 +72,28 @@ export interface SayOptions {
   voice?: string;
   /** Speed multiplier. Default: 1 */
   speed?: number;
+}
+
+export interface TerminalOptions {
+  /** Window title. Default: "zsh" */
+  title?: string;
+  /** Prompt string. Default: "~ % " */
+  prompt?: string;
+  /** Default: 15 */
+  fontSize?: number;
+}
+
+export interface RunOptions {
+  /** Output to show. Omit to replay a recording made with `reelscript record`. */
+  output?: string;
+  /** Spread declared output over this many ms. */
+  duration?: number;
+  /** Typing speed for the command. Default: 300 */
+  wpm?: number;
+  /** Playback speed for recorded output. Default: 1 */
+  speed?: number;
+  /** Cap silences in recorded output, in ms. Default: 700 */
+  maxGapMs?: number;
 }
 
 export interface GotoOptions {
@@ -116,10 +144,28 @@ class Browser {
   }
 }
 
+class TerminalWindow {
+  constructor(private demo: Demo) {}
+
+  /** Show a terminal window on the desktop. */
+  async open(opts: TerminalOptions = {}): Promise<void> {
+    this.demo._push({ kind: "terminal.open", ...opts });
+  }
+
+  /**
+   * Type a command and show its output. With `output`, nothing executes;
+   * without it, the output is replayed from a recording (see `reelscript record`).
+   */
+  async run(command: string, opts: RunOptions = {}): Promise<void> {
+    this.demo._push({ kind: "terminal.run", command, ...opts });
+  }
+}
+
 export class Demo {
   readonly cursor = new Cursor(this);
   readonly zoom = new Zoom(this);
   readonly browser = new Browser(this);
+  readonly terminal = new TerminalWindow(this);
 
   private actions: Action[] = [];
 
@@ -170,7 +216,36 @@ export class Demo {
    * Honors REELSCRIPT_OUT (override output path) and REELSCRIPT_SNAPSHOT_AT
    * (render a single PNG at that time in ms) so the CLI can drive scripts.
    */
+  /** Directory for terminal recordings: option, else `recordings/` beside the entry script. */
+  recordingsDir(): string {
+    if (this.options.recordingsDir) return resolve(this.options.recordingsDir);
+    const script = process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".";
+    return join(dirname(resolve(script)), "recordings");
+  }
+
+  /** Run every terminal command that has no declared output and save its recording. */
+  async recordTerminals(): Promise<string[]> {
+    const dir = this.recordingsDir();
+    const files: string[] = [];
+    for (const a of this.actions) {
+      if (a.kind !== "terminal.run" || a.output !== undefined) continue;
+      process.stderr.write(`reelscript: recording "${a.command}"\n`);
+      const rec = await recordCommand(a.command);
+      files.push(saveRecording(dir, rec));
+    }
+    return files;
+  }
+
   async render(outPath: string): Promise<RenderResult> {
+    if (process.env.REELSCRIPT_RECORD) {
+      const files = await this.recordTerminals();
+      process.stderr.write(
+        files.length
+          ? `reelscript: saved ${files.length} recording${files.length === 1 ? "" : "s"} in ${this.recordingsDir()}\n`
+          : "reelscript: nothing to record (no terminal.run without output)\n",
+      );
+      return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
+    }
     const out = process.env.REELSCRIPT_OUT || outPath;
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
@@ -188,6 +263,7 @@ export class Demo {
       voice: this.options.voice,
       pronunciations: this.options.pronunciations,
       snapshotAt,
+      recordingsDir: this.recordingsDir(),
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {

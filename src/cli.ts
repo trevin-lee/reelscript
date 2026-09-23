@@ -26,6 +26,7 @@ function usage(): never {
 usage:
   reelscript render  <script> [--out demo.mp4]
   reelscript preview <script> --at <seconds> [--out frame.png]
+  reelscript record  <script>            run terminal commands for real and save recordings
   reelscript warmup                      download the narration model into the cache
 
 env:
@@ -48,6 +49,7 @@ function parse(argv: string[]) {
 }
 
 async function runScript(path: string): Promise<void> {
+  process.env.REELSCRIPT_SCRIPT = resolve(path);
   const { tsImport } = await import("tsx/esm/api");
   await tsImport(pathToFileURL(resolve(path)).href, import.meta.url);
 }
@@ -66,6 +68,12 @@ async function main(): Promise<void> {
       const at = Number(flags.at ?? "0");
       process.env.REELSCRIPT_SNAPSHOT_AT = String(Math.round(at * 1000));
       process.env.REELSCRIPT_OUT = resolve(flags.out ?? `preview-${at}s.png`);
+      await runScript(script);
+      break;
+    }
+    case "record": {
+      const script = positional[0] ?? usage();
+      process.env.REELSCRIPT_RECORD = "1";
       await runScript(script);
       break;
     }

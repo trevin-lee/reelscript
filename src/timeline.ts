@@ -14,7 +14,22 @@ export type Action =
   | { kind: "press"; key: string }
   | { kind: "wait"; ms: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
-  | { kind: "waitForNarration" };
+  | { kind: "waitForNarration" }
+  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number }
+  | {
+      kind: "terminal.run";
+      command: string;
+      /** Declared output. Omit to replay a recording made by `reelscript record`. */
+      output?: string;
+      /** Spread declared output over this many ms. */
+      duration?: number;
+      /** Typing speed for the command. */
+      wpm?: number;
+      /** Playback speed for recorded output. Default: 1 */
+      speed?: number;
+      /** Cap silences in recorded output, ms. Default: 700 */
+      maxGapMs?: number;
+    };
 
 export type ActionKind = Action["kind"];
 
@@ -31,4 +46,6 @@ export const DEFAULTS = {
   tailMs: 500,
   /** silence between consecutive narration clips */
   narrationGapMs: 300,
+  terminalPrompt: "~ % ",
+  terminalTitle: "zsh",
 };

@@ -36,6 +36,7 @@ await demo.render("out/demo.mp4");
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing. The polish that makes a demo feel produced, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
+- **Terminal windows.** `terminal.open()` puts a Terminal-style window on the desktop and `terminal.run()` types a command and streams its output. Declare the output in the script, or run the real command once with `reelscript record` and replay the recording frame-exact on every render.
 - **Narration as code.** `say()` speaks a line while the actions continue, sentences never overlap, and `waitForNarration()` paces the timeline to the voice. The default voice is Kokoro, an open-weights model that runs on CPU with no account, so it works offline and in CI. Plug in any engine through the `tts` option.
 
 ## Install
@@ -105,6 +106,8 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
+| `demo.terminal.open({ title, prompt, fontSize })` | Show a terminal window (replaces the browser window until the next `goto`). |
+| `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
 | `demo.say(text, { voice, speed })` | Queue narration. Starts immediately or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.render(path)` | Render to `.mp4` (H.264) or `.gif` (palette-optimized, 960px / 20fps by default, see `gif` option). Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |
@@ -113,6 +116,9 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 Early but working end to end. Roadmap, roughly in order:
 
+- Several windows on the desktop at once (browser, terminal, editor) with focus and z-order
+- An editor window built on VS Code's web workbench
+- Pseudo-terminal recording for TTY-only tools
 - Captions generated from narration (SRT and burned-in)
 - Auto-zoom that follows the cursor, and zoom transitions with a bit of drift
 - `watch` mode with live preview while editing a script
@@ -120,6 +126,24 @@ Early but working end to end. Roadmap, roughly in order:
 - Transitions between scenes and callouts
 - Python bindings over the same timeline
 - A Linux desktop backend (Xvfb in a container) for demos of native apps, targeted by coordinates or accessibility names
+
+## Terminal demos
+
+```ts
+await demo.terminal.open({ title: "acme", prompt: "acme % " });
+await demo.terminal.run("npm install -D @reelscript/cli", { output: "\nadded 38 packages in 2s\n" });
+await demo.terminal.run("node --version"); // replayed from recordings/node-version-<hash>.json
+```
+
+Declared output never executes anything, so it renders identically everywhere. For real commands, run
+
+```sh
+reelscript record examples/terminal.ts
+```
+
+once (or in CI whenever your CLI changes): it executes every `terminal.run` that has no `output`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. Rendering replays the recording with long silences capped (`maxGapMs`) and optional `speed`, and never needs the tool installed. Commit the recordings; they're small JSON. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars may print their non-interactive output.
+
+See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 

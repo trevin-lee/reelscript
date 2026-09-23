@@ -36,12 +36,15 @@
     "example": "npm run build && tsx examples/basic.ts",
     "preview": "tsx src/cli.ts preview examples/basic.ts",
     "test": "node --import tsx --test test/*.test.ts",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "example:terminal": "npm run build && tsx examples/terminal.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ffmpeg-static": "^5.3.0",
     "playwright": "^1.63.0",
     "sharp": "^0.34.5",

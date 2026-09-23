@@ -31,7 +31,11 @@ export interface RawImage {
 }
 
 export interface SceneState {
+  /** What the window is showing; picks the chrome style. */
+  window: "browser" | "terminal";
   url: string;
+  /** Title shown for terminal windows. */
+  title: string;
 }
 
 /** Renders an HTML document of the given size to a PNG. Provided by the engine. */
@@ -113,7 +117,13 @@ class MacosTheme implements Theme {
     const winY = l.pageY - TITLE_H;
     const winW = l.pageW;
     const winH = l.pageH + TITLE_H;
+    const terminal = state.window === "terminal";
     const urlW = Math.min(560, Math.round(winW * 0.46));
+    const titleBar = terminal
+      ? `<div class="title term"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+         <div class="ttl">${escapeHtml(state.title)}</div></div>`
+      : `<div class="title"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+         <div class="url">${escapeHtml(displayUrl(state.url))}</div></div>`;
     return `<!doctype html><html><head><meta charset="utf-8"><style>
 ${bundledFontFace()}
 html, body { margin: 0; width: ${l.width}px; height: ${l.height}px; overflow: hidden;
@@ -127,29 +137,27 @@ html, body { margin: 0; width: ${l.width}px; height: ${l.height}px; overflow: hi
   display: flex; align-items: center; justify-content: space-between; padding: 0 18px; }
 .menubar b { font-weight: 600; }
 .window { position: absolute; left: ${winX}px; top: ${winY}px; width: ${winW}px; height: ${winH}px;
-  border-radius: ${RADIUS}px; background: #fff; overflow: hidden;
+  border-radius: ${RADIUS}px; background: ${terminal ? "#1c1c1e" : "#ffffff"}; overflow: hidden;
   box-shadow: 0 22px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25); }
 .title { position: relative; height: ${TITLE_H}px; background: #f3f3f5; border-bottom: 1px solid #dcdce1; }
+.title.term { background: #2c2c2e; border-bottom: 1px solid #3a3a3c; }
 .lights { position: absolute; left: 16px; top: ${TITLE_H / 2 - 6}px; display: flex; gap: 8px; }
 .lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
 .url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
   width: ${urlW}px; height: ${TITLE_H - 24}px; border-radius: 7px; background: #e6e6ea;
   color: #3f3f46; font-size: 12.5px; display: flex; align-items: center; justify-content: center;
   white-space: nowrap; overflow: hidden; }
+.ttl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #a1a1a6; font-size: 13px; font-weight: 500; }
 </style></head><body>
 <div class="wall"></div><div class="glow"></div>
 <div class="menubar"><b>reelscript</b><span>Tue Sep 23&nbsp;&nbsp;9:41 AM</span></div>
-<div class="window">
-  <div class="title">
-    <div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
-    <div class="url">${escapeHtml(displayUrl(state.url))}</div>
-  </div>
-</div>
+<div class="window">${titleBar}</div>
 </body></html>`;
   }
 
   private assets(state: SceneState) {
-    const key = state.url;
+    const key = `${state.window}|${state.url}|${state.title}`;
     let p = this.bg.get(key);
     if (!p) {
       p = (async () => {

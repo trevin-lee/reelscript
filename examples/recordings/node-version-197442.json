@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "command": "node --version",
+  "cols": 120,
+  "rows": 36,
+  "exitCode": 0,
+  "durationMs": 14,
+  "recordedAt": "2026-09-23T18:12:46.046Z",
+  "events": [
+    [
+      14,
+      "v22.18.0\n"
+    ]
+  ]
+}

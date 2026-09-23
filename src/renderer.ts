@@ -10,6 +10,15 @@ import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./enc
 import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
 import { extname } from "node:path";
 import { unlinkSync } from "node:fs";
+import {
+  TERMINAL_URL,
+  loadRecording,
+  playbackEvents,
+  scriptedEvents,
+  terminalPageHtml,
+  type TermEvent,
+} from "./terminal.js";
+import type { SceneState } from "./theme.js";
 import { CLOCK_SHIM } from "./clock.js";
 
 export interface RenderOptions {
@@ -26,6 +35,8 @@ export interface RenderOptions {
   /** Words to respell before synthesis, e.g. { Reelscript: "Reel script" }. */
   pronunciations?: Record<string, string>;
   onStatus?: (message: string) => void;
+  /** Where terminal recordings live (for terminal.run without declared output). */
+  recordingsDir?: string;
   /**
    * Replace the page's clock with a virtual one that advances exactly one
    * frame per rendered frame, so CSS transitions, timers and rAF loops play
@@ -100,7 +111,11 @@ class Engine {
   private zoom: ZoomState;
   private zoomAnim: Tween<ZoomState> | null = null;
   private lastClick = -Infinity;
-  private url = "";
+  private scene: SceneState = { window: "browser", url: "", title: "" };
+  // terminal
+  private termEvents = new Map<number, TermEvent[]>();
+  private termPrompt = DEFAULTS.terminalPrompt;
+  private termRouted = false;
   // narration
   private clips = new Map<number, Clip>();
   private narrationEnd = 0;
@@ -119,6 +134,17 @@ class Engine {
 
   setClips(clips: Map<number, Clip>): void {
     this.clips = clips;
+  }
+
+  setTerminalEvents(events: Map<number, TermEvent[]>): void {
+    this.termEvents = events;
+  }
+
+  private async termWrite(text: string): Promise<void> {
+    if (!text) return;
+    await this.page.evaluate((s) => {
+      (window as unknown as { __rsTerm: { write: (s: string) => void } }).__rsTerm.write(s);
+    }, text);
   }
 
   async open(): Promise<void> {
@@ -188,7 +214,7 @@ class Engine {
     switch (action.kind) {
       case "browser.goto": {
         await page.goto(action.url, { waitUntil: "load" });
-        this.url = action.url;
+        this.scene = { window: "browser", url: action.url, title: "" };
         return { end: start + (action.settle ?? DEFAULTS.gotoSettle) };
       }
       case "browser.mockAPI": {
@@ -251,6 +277,64 @@ class Engine {
       }
       case "waitForNarration":
         return { end: Math.max(start, this.narrationEnd) };
+      case "terminal.open": {
+        if (!this.termRouted) {
+          const html = terminalPageHtml(action.fontSize);
+          await page.route(`${TERMINAL_URL}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: html }));
+          this.termRouted = true;
+        }
+        await page.goto(TERMINAL_URL, { waitUntil: "load" });
+        const deadline = Date.now() + 5000;
+        let dims: { cols: number; rows: number } | null = null;
+        while (!dims) {
+          dims = await page.evaluate(() => {
+            const t = (window as unknown as { __rsTerm?: { ready: boolean; cols: number; rows: number } }).__rsTerm;
+            return t?.ready ? { cols: t.cols, rows: t.rows } : null;
+          });
+          if (!dims) {
+            if (Date.now() > deadline) throw new Error("reelscript: terminal page did not initialise");
+            await new Promise((r) => setTimeout(r, 25));
+          }
+        }
+        this.termPrompt = action.prompt ?? DEFAULTS.terminalPrompt;
+        await this.termWrite(this.termPrompt);
+        const title = action.title ?? DEFAULTS.terminalTitle;
+        this.scene = { window: "terminal", url: TERMINAL_URL, title: `${title} \u2014 ${dims.cols}\u00d7${dims.rows}` };
+        return { end: start + 300 };
+      }
+      case "terminal.run": {
+        const events = this.termEvents.get(index);
+        if (!events) throw new Error("reelscript: terminal events missing (internal)");
+        const chars = Array.from(action.command);
+        const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
+        const typeStart = start + 120;
+        const typeEnd = typeStart + chars.length * msPerChar;
+        const outStart = typeEnd + 60;
+        const lastOut = events.length ? outStart + events[events.length - 1][0] : outStart;
+        const endsWithNewline = !events.length || /\n$/.test(events[events.length - 1][1]);
+        const promptAt = lastOut + 150;
+        let nextChar = 0;
+        let nextEvent = 0;
+        let entered = false;
+        let prompted = false;
+        const flush = async (t: number) => {
+          let batch = "";
+          while (nextChar < chars.length && typeStart + nextChar * msPerChar <= t) batch += chars[nextChar++];
+          await this.termWrite(batch);
+          if (!entered && t >= typeEnd) {
+            entered = true;
+            await this.termWrite("\r\n");
+          }
+          let out = "";
+          while (nextEvent < events.length && outStart + events[nextEvent][0] <= t) out += events[nextEvent++][1];
+          await this.termWrite(out);
+          if (!prompted && t >= promptAt) {
+            prompted = true;
+            await this.termWrite((endsWithNewline ? "" : "\r\n") + this.termPrompt);
+          }
+        };
+        return { end: promptAt + 100, onFrame: flush, onEnd: () => flush(Infinity) };
+      }
       case "zoom.to": {
         const r = await this.resolveRect(action.target);
         const to: ZoomState = {
@@ -331,7 +415,7 @@ class Engine {
   async frame(t: number): Promise<Buffer> {
     const { width: W, height: H } = this.layout;
     const shot = await this.capture();
-    const scene = await this.theme.compose(shot, { url: this.url });
+    const scene = await this.theme.compose(shot, this.scene);
 
     const s = this.zoom.scale;
     const cw = W / s;
@@ -414,6 +498,29 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     }
     engine.setClips(clips);
     if (isGif && snapshot === undefined) options.onStatus?.("note: GIF output has no audio; narration is used for pacing only");
+  }
+
+  // Terminal output: declared in the script, or replayed from a recording.
+  const termRuns = actions.flatMap((a, i) => (a.kind === "terminal.run" ? [i] : []));
+  if (termRuns.length) {
+    const events = new Map<number, TermEvent[]>();
+    for (const i of termRuns) {
+      const a = actions[i] as Extract<Action, { kind: "terminal.run" }>;
+      if (a.output !== undefined) {
+        events.set(i, scriptedEvents(a.output, a.duration));
+        continue;
+      }
+      const rec = options.recordingsDir ? loadRecording(options.recordingsDir, a.command) : null;
+      if (!rec) {
+        throw new Error(
+          `reelscript: no recording for terminal command "${a.command}".\n` +
+            `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
+            `  reelscript record <script>`,
+        );
+      }
+      events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGapMs: a.maxGapMs }));
+    }
+    engine.setTerminalEvents(events);
   }
 
   const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
