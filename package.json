@@ -1,6 +1,6 @@
 {
   "name": "reelscript",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Product demos as code. Write a script, render a demo, re-run it in CI when your UI changes.",
   "type": "module",
   "license": "MIT",
@@ -34,7 +34,8 @@
     "typecheck": "tsc --noEmit",
     "example": "tsx examples/basic.ts",
     "preview": "tsx src/cli.ts preview examples/basic.ts",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20"
@@ -48,5 +49,13 @@
   "devDependencies": {
     "@types/node": "^26.6.2",
     "typescript": "^7.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trevin-lee/reelscript.git"
+  },
+  "homepage": "https://github.com/trevin-lee/reelscript#readme",
+  "bugs": {
+    "url": "https://github.com/trevin-lee/reelscript/issues"
   }
 }
