@@ -1,15 +1,14 @@
-import { chromium, type Page, type Browser, type CDPSession } from "playwright";
+import { chromium, type Page, type Browser, type BrowserContext, type CDPSession } from "playwright";
 import sharp, { type OverlayOptions } from "sharp";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, unlinkSync } from "node:fs";
+import { dirname, extname } from "node:path";
 import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
-import { createTheme, type SceneLayout, type Theme, type ThemeName } from "./theme.js";
+import { createTheme, type FrameImage, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
+import { CLOCK_SHIM } from "./clock.js";
 import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
-import { extname } from "node:path";
-import { unlinkSync } from "node:fs";
 import {
   TERMINAL_URL,
   loadRecording,
@@ -18,13 +17,14 @@ import {
   terminalPageHtml,
   type TermEvent,
 } from "./terminal.js";
-import type { SceneState } from "./theme.js";
-import { CLOCK_SHIM } from "./clock.js";
 
 export interface RenderOptions {
   out: string;
   fps?: number;
+  /** Content size of the first window. */
   viewport?: [number, number];
+  /** Desktop (output) size. Default: first window plus theme margins. */
+  desktop?: [number, number];
   theme?: ThemeName;
   /** Settings applied when `out` ends in .gif. */
   gif?: GifOptions;
@@ -93,29 +93,56 @@ interface Step {
   onEnd?: () => Promise<void> | void;
 }
 
+interface Geometry {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+/** A window on the desktop: one Chromium page plus its chrome. */
+interface Win {
+  id: string;
+  kind: WindowKind;
+  page: Page;
+  cdp: CDPSession;
+  /** Frame origin in desktop pixels. */
+  x: number;
+  y: number;
+  /** Content size. */
+  width: number;
+  height: number;
+  z: number;
+  title: string;
+  url: string;
+  termPrompt: string;
+  termRouted: boolean;
+  frameOverlay: { key: string; overlay: OverlayOptions | null } | null;
+}
+
 const RIPPLE_MS = 420;
 const SQUISH_MS = 120;
 const CURSOR_PX = 26;
+const CASCADE_MARGIN = 40;
 
 class Engine {
-  readonly layout: SceneLayout;
+  readonly desktop: [number, number];
   private theme: Theme;
-  private page!: Page;
   private browser!: Browser;
-  private cdp!: CDPSession;
+  private context!: BrowserContext;
 
-  // page-coordinate cursor state
+  private windows = new Map<string, Win>();
+  private zTop = 0;
+  private focusedId: string | null = null;
+
+  // desktop-coordinate cursor state
   private cursor: Point;
   private move: Tween<Point> | null = null;
-  // scene-coordinate zoom state
   private zoom: ZoomState;
   private zoomAnim: Tween<ZoomState> | null = null;
   private lastClick = -Infinity;
-  private scene: SceneState = { window: "browser", url: "", title: "" };
   // terminal
   private termEvents = new Map<number, TermEvent[]>();
-  private termPrompt = DEFAULTS.terminalPrompt;
-  private termRouted = false;
   // narration
   private clips = new Map<number, Clip>();
   private narrationEnd = 0;
@@ -123,13 +150,14 @@ class Engine {
 
   constructor(
     private viewport: [number, number],
+    desktop: [number, number] | undefined,
     themeName: ThemeName,
     private deterministic: boolean,
   ) {
-    this.theme = createTheme(themeName, viewport, (html, w, h) => this.rasterizeHtml(html, w, h));
-    this.layout = this.theme.layout(viewport);
-    this.cursor = { x: viewport[0] / 2, y: viewport[1] / 2 };
-    this.zoom = { scale: 1, cx: this.layout.width / 2, cy: this.layout.height / 2 };
+    this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent));
+    this.desktop = desktop ?? this.theme.defaultDesktop(viewport);
+    this.cursor = { x: this.desktop[0] / 2, y: this.desktop[1] / 2 };
+    this.zoom = { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 };
   }
 
   setClips(clips: Map<number, Clip>): void {
@@ -140,92 +168,221 @@ class Engine {
     this.termEvents = events;
   }
 
-  private async termWrite(text: string): Promise<void> {
-    if (!text) return;
-    await this.page.evaluate((s) => {
-      (window as unknown as { __rsTerm: { write: (s: string) => void } }).__rsTerm.write(s);
-    }, text);
-  }
-
   async open(): Promise<void> {
     this.browser = await chromium.launch({ headless: true });
-    const context = await this.browser.newContext({
+    this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
       colorScheme: "light",
     });
-    if (this.deterministic) await context.addInitScript(CLOCK_SHIM);
-    this.page = await context.newPage();
-    this.cdp = await context.newCDPSession(this.page);
-  }
-
-  /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
-  private async rasterizeHtml(html: string, width: number, height: number): Promise<Buffer> {
-    const ctx = await this.browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
-    try {
-      const page = await ctx.newPage();
-      await page.setContent(html, { waitUntil: "load" });
-      await page.evaluate(() => document.fonts.ready);
-      return await page.screenshot({ type: "png" });
-    } finally {
-      await ctx.close();
-    }
-  }
-
-  // ------------------------------------------------------------ page clock
-
-  /** Advance the page's virtual clock by `ms` (no-op before the first page loads). */
-  async advanceClock(ms: number): Promise<void> {
-    if (!this.deterministic) return;
-    await this.page.evaluate((ms) => {
-      const w = window as unknown as { __reelscript_advance?: (ms: number) => void };
-      w.__reelscript_advance?.(ms);
-    }, ms);
+    if (this.deterministic) await this.context.addInitScript(CLOCK_SHIM);
   }
 
   async close(): Promise<void> {
     await this.browser?.close();
   }
 
+  /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
+  private async rasterizeHtml(html: string, width: number, height: number, transparent: boolean): Promise<Buffer> {
+    const ctx = await this.browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+    try {
+      const page = await ctx.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.evaluate(() => document.fonts.ready);
+      return await page.screenshot({ type: "png", omitBackground: transparent });
+    } finally {
+      await ctx.close();
+    }
+  }
+
+  // ------------------------------------------------------------ windows
+
+  private get titleH(): number {
+    return this.theme.titleHeight;
+  }
+
+  private clampGeometry(w: Win): void {
+    const [W, H] = this.desktop;
+    w.width = Math.max(200, Math.min(w.width, W));
+    w.height = Math.max(120, Math.min(w.height, H - this.titleH));
+    w.x = Math.round(clamp(w.x, 0, W - w.width));
+    w.y = Math.round(clamp(w.y, 0, H - w.height - this.titleH));
+  }
+
+  /** Get a window, creating its page if this is the first time it's used. */
+  private async ensureWindow(id: string, kind: WindowKind, geometry: Geometry = {}): Promise<Win> {
+    const existing = this.windows.get(id);
+    if (existing) {
+      if (geometry.x !== undefined || geometry.y !== undefined || geometry.width !== undefined || geometry.height !== undefined) {
+        await this.place(existing, geometry);
+      }
+      return existing;
+    }
+    const first = this.windows.size === 0;
+    const [W, H] = this.desktop;
+    let width = geometry.width ?? (first ? this.viewport[0] : Math.min(900, Math.round(W * 0.6)));
+    let height = geometry.height ?? (first ? this.viewport[1] : Math.min(520, Math.round(H * 0.5)));
+    let x: number;
+    let y: number;
+    if (first) {
+      ({ x, y } = this.theme.mainPlacement(this.desktop, [width, height]));
+    } else {
+      x = W - width - CASCADE_MARGIN;
+      y = H - height - this.titleH - CASCADE_MARGIN;
+    }
+    if (geometry.x !== undefined) x = geometry.x;
+    if (geometry.y !== undefined) y = geometry.y;
+
+    const page = await this.context.newPage();
+    const win: Win = {
+      id,
+      kind,
+      page,
+      cdp: await this.context.newCDPSession(page),
+      x,
+      y,
+      width,
+      height,
+      z: ++this.zTop,
+      title: "",
+      url: "",
+      termPrompt: DEFAULTS.terminalPrompt,
+      termRouted: false,
+      frameOverlay: null,
+    };
+    this.clampGeometry(win);
+    await page.setViewportSize({ width: win.width, height: win.height });
+    this.windows.set(id, win);
+    this.focusedId = id;
+    return win;
+  }
+
+  private window(id: string): Win {
+    const w = this.windows.get(id);
+    if (!w) throw new Error(`reelscript: window "${id}" is not open (call browser.goto or terminal.open first)`);
+    return w;
+  }
+
+  private focused(): Win {
+    if (!this.focusedId) throw new Error("reelscript: no window is open yet (call browser.goto or terminal.open first)");
+    return this.window(this.focusedId);
+  }
+
+  private focus(w: Win): void {
+    if (this.focusedId !== w.id || w.z !== this.zTop) w.z = ++this.zTop;
+    this.focusedId = w.id;
+  }
+
+  private async place(w: Win, g: Geometry): Promise<void> {
+    const resized = (g.width !== undefined && g.width !== w.width) || (g.height !== undefined && g.height !== w.height);
+    if (g.x !== undefined) w.x = g.x;
+    if (g.y !== undefined) w.y = g.y;
+    if (g.width !== undefined) w.width = g.width;
+    if (g.height !== undefined) w.height = g.height;
+    this.clampGeometry(w);
+    if (resized) {
+      await w.page.setViewportSize({ width: w.width, height: w.height });
+      if (w.kind === "terminal") await this.refitTerminal(w);
+    }
+  }
+
+  private byZ(): Win[] {
+    return [...this.windows.values()].sort((a, b) => a.z - b.z);
+  }
+
+  /** Topmost window whose frame contains the desktop point. */
+  private windowAt(p: Point): Win | null {
+    const wins = this.byZ();
+    for (let i = wins.length - 1; i >= 0; i--) {
+      const w = wins[i];
+      if (p.x >= w.x && p.x < w.x + w.width && p.y >= w.y && p.y < w.y + w.height + this.titleH) return w;
+    }
+    return null;
+  }
+
+  private toLocal(w: Win, p: Point): Point {
+    return { x: p.x - w.x, y: p.y - w.y - this.titleH };
+  }
+
+  private inContent(w: Win, local: Point): boolean {
+    return local.x >= 0 && local.y >= 0 && local.x < w.width && local.y < w.height;
+  }
+
+  // ------------------------------------------------------------ page clock
+
+  /** Advance every window's virtual clock by `ms`. */
+  async advanceClock(ms: number): Promise<void> {
+    if (!this.deterministic) return;
+    await Promise.all(
+      [...this.windows.values()].map((w) =>
+        w.page.evaluate((ms) => {
+          const g = window as unknown as { __reelscript_advance?: (ms: number) => void };
+          g.__reelscript_advance?.(ms);
+        }, ms),
+      ),
+    );
+  }
+
   // ------------------------------------------------------------ targets
 
-  private async resolveRect(target: Target): Promise<Rect> {
-    if (typeof target !== "string") return { x: target.x, y: target.y, w: 0, h: 0 };
-    const loc = this.page.locator(target).first();
+  /** Resolve a target to desktop coordinates, searching the given or focused window. */
+  private async resolveRect(target: Target, windowId?: string): Promise<Rect> {
+    const w = windowId ? this.window(windowId) : this.focused();
+    if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+    const loc = w.page.locator(target).first();
     const deadline = Date.now() + 3000;
     while (!(await loc.isVisible())) {
-      if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible`);
+      if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible in the ${w.id} window`);
       await new Promise((r) => setTimeout(r, 25));
     }
     const box = await loc.boundingBox();
     if (!box) throw new Error(`reelscript: target "${target}" has no bounding box`);
-    return { x: box.x, y: box.y, w: box.width, h: box.height };
+    return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
   }
 
-  private async resolvePoint(target: Target): Promise<Point> {
-    const r = await this.resolveRect(target);
+  private async resolvePoint(target: Target, windowId?: string): Promise<Point> {
+    const r = await this.resolveRect(target, windowId);
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+  }
+
+  // ------------------------------------------------------------ terminal
+
+  private async termWrite(w: Win, text: string): Promise<void> {
+    if (!text) return;
+    await w.page.evaluate((s) => {
+      (window as unknown as { __rsTerm: { write: (s: string) => void } }).__rsTerm.write(s);
+    }, text);
+  }
+
+  private async refitTerminal(w: Win): Promise<void> {
+    const dims = await w.page.evaluate(() => {
+      const t = (window as unknown as { __rsTerm?: { fit: () => { cols: number; rows: number } } }).__rsTerm;
+      return t ? t.fit() : null;
+    });
+    if (dims) w.title = w.title.replace(/\s\S+$/, ` ${dims.cols}×${dims.rows}`);
   }
 
   // ------------------------------------------------------------ steps
 
   async begin(action: Action, index: number, start: number): Promise<Step | null> {
-    const page = this.page;
     switch (action.kind) {
       case "browser.goto": {
-        await page.goto(action.url, { waitUntil: "load" });
-        this.scene = { window: "browser", url: action.url, title: "" };
+        const w = await this.ensureWindow("browser", "browser");
+        this.focus(w);
+        await w.page.goto(action.url, { waitUntil: "load" });
+        w.url = action.url;
         return { end: start + (action.settle ?? DEFAULTS.gotoSettle) };
       }
       case "browser.mockAPI": {
+        const w = await this.ensureWindow("browser", "browser");
         const { pattern, response, status = 200 } = action;
-        await page.route(pattern, (route) =>
+        await w.page.route(pattern, (route) =>
           route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response) }),
         );
         return null;
       }
       case "cursor.moveTo": {
-        const to = await this.resolvePoint(action.target);
+        const to = await this.resolvePoint(action.target, action.window);
         const from = { ...this.cursor };
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
         const dur = action.duration ?? clamp(Math.round(dist * 0.9 + 200), 250, 1400);
@@ -239,12 +396,18 @@ class Engine {
         };
       }
       case "cursor.click": {
-        await page.mouse.click(this.cursor.x, this.cursor.y, { button: action.button ?? "left" });
+        const w = this.windowAt(this.cursor);
+        if (w) {
+          this.focus(w);
+          const local = this.toLocal(w, this.cursor);
+          if (this.inContent(w, local)) await w.page.mouse.click(local.x, local.y, { button: action.button ?? "left" });
+        }
         this.lastClick = start;
         return { end: start + DEFAULTS.clickDuration };
       }
       case "type": {
-        if (action.target) await page.locator(action.target).first().focus();
+        const w = this.focused();
+        if (action.target) await w.page.locator(action.target).first().focus();
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
         const firstAt = start + 80;
@@ -252,7 +415,7 @@ class Engine {
         const flush = async (upTo: number) => {
           let batch = "";
           while (next < chars.length && firstAt + next * msPerChar <= upTo) batch += chars[next++];
-          if (batch) await page.keyboard.type(batch);
+          if (batch) await w.page.keyboard.type(batch);
         };
         return {
           end: firstAt + chars.length * msPerChar + 120,
@@ -261,15 +424,30 @@ class Engine {
         };
       }
       case "press": {
-        await page.keyboard.press(action.key);
+        await this.focused().page.keyboard.press(action.key);
         return { end: start + 100 };
       }
       case "wait":
         return { end: start + action.ms };
+      case "zoom.to": {
+        const r = await this.resolveRect(action.target, action.window);
+        const to: ZoomState = { scale: action.scale ?? DEFAULTS.zoomScale, cx: r.x + r.w / 2, cy: r.y + r.h / 2 };
+        this.zoomAnim = { from: { ...this.zoom }, to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
+        return null;
+      }
+      case "zoom.out": {
+        this.zoomAnim = {
+          from: { ...this.zoom },
+          to: { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 },
+          start,
+          dur: action.duration ?? DEFAULTS.zoomDuration,
+          ease: action.ease ?? "smooth",
+        };
+        return null;
+      }
       case "say": {
         const clip = this.clips.get(index);
         if (!clip) throw new Error("reelscript: narration clip missing (internal)");
-        // Clips never overlap: a new sentence waits for the previous one to finish.
         const at = Math.max(start, this.narrationEnd);
         this.narration.push({ file: clip.file, atMs: at });
         this.narrationEnd = at + clip.seconds * 1000 + DEFAULTS.narrationGapMs;
@@ -277,17 +455,27 @@ class Engine {
       }
       case "waitForNarration":
         return { end: Math.max(start, this.narrationEnd) };
+      case "window.focus": {
+        this.focus(this.window(action.window));
+        return null;
+      }
+      case "window.place": {
+        await this.place(this.window(action.window), action);
+        return null;
+      }
       case "terminal.open": {
-        if (!this.termRouted) {
+        const w = await this.ensureWindow("terminal", "terminal", action);
+        this.focus(w);
+        if (!w.termRouted) {
           const html = terminalPageHtml(action.fontSize);
-          await page.route(`${TERMINAL_URL}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: html }));
-          this.termRouted = true;
+          await w.page.route(`${TERMINAL_URL}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: html }));
+          w.termRouted = true;
         }
-        await page.goto(TERMINAL_URL, { waitUntil: "load" });
+        await w.page.goto(TERMINAL_URL, { waitUntil: "load" });
         const deadline = Date.now() + 5000;
         let dims: { cols: number; rows: number } | null = null;
         while (!dims) {
-          dims = await page.evaluate(() => {
+          dims = await w.page.evaluate(() => {
             const t = (window as unknown as { __rsTerm?: { ready: boolean; cols: number; rows: number } }).__rsTerm;
             return t?.ready ? { cols: t.cols, rows: t.rows } : null;
           });
@@ -296,13 +484,15 @@ class Engine {
             await new Promise((r) => setTimeout(r, 25));
           }
         }
-        this.termPrompt = action.prompt ?? DEFAULTS.terminalPrompt;
-        await this.termWrite(this.termPrompt);
-        const title = action.title ?? DEFAULTS.terminalTitle;
-        this.scene = { window: "terminal", url: TERMINAL_URL, title: `${title} \u2014 ${dims.cols}\u00d7${dims.rows}` };
+        w.termPrompt = action.prompt ?? DEFAULTS.terminalPrompt;
+        await this.termWrite(w, w.termPrompt);
+        w.url = TERMINAL_URL;
+        w.title = `${action.title ?? DEFAULTS.terminalTitle} — ${dims.cols}×${dims.rows}`;
         return { end: start + 300 };
       }
       case "terminal.run": {
+        const w = this.window("terminal");
+        this.focus(w);
         const events = this.termEvents.get(index);
         if (!events) throw new Error("reelscript: terminal events missing (internal)");
         const chars = Array.from(action.command);
@@ -320,46 +510,20 @@ class Engine {
         const flush = async (t: number) => {
           let batch = "";
           while (nextChar < chars.length && typeStart + nextChar * msPerChar <= t) batch += chars[nextChar++];
-          await this.termWrite(batch);
+          await this.termWrite(w, batch);
           if (!entered && t >= typeEnd) {
             entered = true;
-            await this.termWrite("\r\n");
+            await this.termWrite(w, "\r\n");
           }
           let out = "";
           while (nextEvent < events.length && outStart + events[nextEvent][0] <= t) out += events[nextEvent++][1];
-          await this.termWrite(out);
+          await this.termWrite(w, out);
           if (!prompted && t >= promptAt) {
             prompted = true;
-            await this.termWrite((endsWithNewline ? "" : "\r\n") + this.termPrompt);
+            await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
           }
         };
         return { end: promptAt + 100, onFrame: flush, onEnd: () => flush(Infinity) };
-      }
-      case "zoom.to": {
-        const r = await this.resolveRect(action.target);
-        const to: ZoomState = {
-          scale: action.scale ?? DEFAULTS.zoomScale,
-          cx: this.layout.pageX + r.x + r.w / 2,
-          cy: this.layout.pageY + r.y + r.h / 2,
-        };
-        this.zoomAnim = {
-          from: { ...this.zoom },
-          to,
-          start,
-          dur: action.duration ?? DEFAULTS.zoomDuration,
-          ease: action.ease ?? "smooth",
-        };
-        return null;
-      }
-      case "zoom.out": {
-        this.zoomAnim = {
-          from: { ...this.zoom },
-          to: { scale: 1, cx: this.layout.width / 2, cy: this.layout.height / 2 },
-          start,
-          dur: action.duration ?? DEFAULTS.zoomDuration,
-          ease: action.ease ?? "smooth",
-        };
-        return null;
       }
       default: {
         const never: never = action;
@@ -391,31 +555,64 @@ class Engine {
     }
   }
 
-  /** Drive the real mouse to the animated cursor so hover states render. */
+  /** Drive the real mouse in whichever window is under the cursor so hover states render. */
   async syncMouse(): Promise<void> {
-    await this.page.mouse.move(this.cursor.x, this.cursor.y);
+    const w = this.windowAt(this.cursor);
+    if (!w) return;
+    const local = this.toLocal(w, this.cursor);
+    if (this.inContent(w, local)) await w.page.mouse.move(local.x, local.y);
   }
 
   // ------------------------------------------------------------ frames
 
   /**
-   * Capture the viewport via CDP rather than page.screenshot(): Playwright's
-   * screenshot waits for an in-page requestAnimationFrame, which never fires
-   * and is slower; CDP grabs the current compositor frame directly.
+   * Capture a window via CDP rather than page.screenshot(): Playwright's
+   * screenshot waits for an in-page requestAnimationFrame, which is under
+   * our control and slower; CDP grabs the current compositor frame directly.
    */
-  private async capture(): Promise<Buffer> {
+  private async capture(w: Win): Promise<Buffer> {
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("reelscript: screenshot timed out (page compositor stalled)")), 10_000),
     );
-    const { data } = await Promise.race([this.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
+    const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
     return Buffer.from(data, "base64");
   }
 
-  /** Capture, compose, zoom, and overlay the cursor. Returns packed RGB. */
+  /** Window content as RGBA raw, masked to the theme's rounded corners. */
+  private async contentOverlay(w: Win): Promise<OverlayOptions> {
+    const png = await this.capture(w);
+    const mask = await this.theme.contentMask(w.width, w.height);
+    let pipeline = sharp(png).ensureAlpha();
+    if (mask) pipeline = pipeline.composite([{ input: mask.data, raw: { width: mask.width, height: mask.height, channels: 4 }, blend: "dest-in" }]);
+    const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+    return { input: data, raw: { width: info.width, height: info.height, channels: 4 }, left: w.x, top: w.y + this.titleH };
+  }
+
+  /** Window chrome as an overlay, clipped to the desktop; cached per style and position. */
+  private async frameOverlay(w: Win): Promise<OverlayOptions | null> {
+    const style = { kind: w.kind, width: w.width, height: w.height, title: w.title, url: w.url, focused: w.id === this.focusedId };
+    const key = `${JSON.stringify(style)}@${w.x},${w.y}`;
+    if (w.frameOverlay?.key === key) return w.frameOverlay.overlay;
+    const img = await this.theme.frame(style);
+    const overlay = img ? await clipRaw(img, w.x + img.dx, w.y + img.dy, this.desktop[0], this.desktop[1]) : null;
+    w.frameOverlay = { key, overlay };
+    return overlay;
+  }
+
+  /** Capture every window, compose the desktop, zoom, and overlay the cursor. Returns packed RGB. */
   async frame(t: number): Promise<Buffer> {
-    const { width: W, height: H } = this.layout;
-    const shot = await this.capture();
-    const scene = await this.theme.compose(shot, this.scene);
+    const [W, H] = this.desktop;
+    const bg = await this.theme.background(this.desktop);
+    const layers = await Promise.all(
+      this.byZ().map(async (w) => {
+        const [frame, content] = await Promise.all([this.frameOverlay(w), this.contentOverlay(w)]);
+        return frame ? [frame, content] : [content];
+      }),
+    );
+    const { data: sceneData } = await sharp(bg.data, { raw: { width: bg.width, height: bg.height, channels: 4 } })
+      .composite(layers.flat())
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
     const s = this.zoom.scale;
     const cw = W / s;
@@ -431,9 +628,8 @@ class Engine {
     const sx = W / crop.width;
     const sy = H / crop.height;
 
-    // cursor: page → scene → output coordinates
-    const ox = (this.layout.pageX + this.cursor.x - crop.left) * sx;
-    const oy = (this.layout.pageY + this.cursor.y - crop.top) * sy;
+    const ox = (this.cursor.x - crop.left) * sx;
+    const oy = (this.cursor.y - crop.top) * sy;
 
     const overlays: OverlayOptions[] = [];
     const since = t - this.lastClick;
@@ -448,14 +644,35 @@ class Engine {
     const o = await placeSprite(arrow, ox, oy, W, H);
     if (o) overlays.push(o);
 
-    let pipeline = sharp(scene.data, { raw: { width: scene.width, height: scene.height, channels: scene.channels } });
+    let pipeline = sharp(sceneData, { raw: { width: W, height: H, channels: 4 } });
     if (s > 1.001) pipeline = pipeline.extract(crop).resize(W, H, { kernel: "lanczos3", fit: "fill" });
     if (overlays.length) pipeline = pipeline.composite(overlays);
     return pipeline.removeAlpha().raw().toBuffer();
   }
 }
 
-/** Position a sprite by its hotspot, clipping it to the frame (sharp rejects out-of-bounds overlays). */
+/** Clip a raw RGBA image to the desktop bounds and return it as an overlay (sharp rejects out-of-bounds overlays). */
+async function clipRaw(img: RawImage, left: number, top: number, W: number, H: number): Promise<OverlayOptions | null> {
+  let { width, height } = img;
+  if (left >= W || top >= H || left + width <= 0 || top + height <= 0) return null;
+  const clipL = Math.max(0, -left);
+  const clipT = Math.max(0, -top);
+  const clipR = Math.max(0, left + width - W);
+  const clipB = Math.max(0, top + height - H);
+  if (!clipL && !clipT && !clipR && !clipB) {
+    return { input: img.data, raw: { width, height, channels: 4 }, left, top };
+  }
+  width -= clipL + clipR;
+  height -= clipT + clipB;
+  if (width <= 0 || height <= 0) return null;
+  const { data } = await sharp(img.data, { raw: { width: img.width, height: img.height, channels: 4 } })
+    .extract({ left: clipL, top: clipT, width, height })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { input: data, raw: { width, height, channels: 4 }, left: left + clipL, top: top + clipT };
+}
+
+/** Position a sprite by its hotspot, clipping it to the frame. */
 async function placeSprite(sp: Sprite, x: number, y: number, W: number, H: number): Promise<OverlayOptions | null> {
   let left = Math.round(x - sp.hx);
   let top = Math.round(y - sp.hy);
@@ -480,8 +697,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const frameMs = 1000 / fps;
   const snapshot = options.snapshotAt;
 
-  const engine = new Engine(viewport, themeName, options.deterministic ?? true);
-  const { width, height } = engine.layout;
+  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true);
+  const [width, height] = engine.desktop;
 
   // Narration is synthesized up front so clip durations can pace the timeline.
   const sayIndexes = actions.flatMap((a, i) => (a.kind === "say" ? [i] : []));

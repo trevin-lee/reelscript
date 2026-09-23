@@ -36,6 +36,7 @@ await demo.render("out/demo.mp4");
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing. The polish that makes a demo feel produced, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
+- **A real desktop.** Windows have positions, sizes, focus, and z-order. Open a browser and a terminal side by side, click between them, and the one you click comes to the front. Selectors resolve in the focused window (or the one you name), typing goes to the focused window, and zoom targets can be in any window.
 - **Terminal windows.** `terminal.open()` puts a Terminal-style window on the desktop and `terminal.run()` types a command and streams its output. Declare the output in the script, or run the real command once with `reelscript record` and replay the recording frame-exact on every render.
 - **Narration as code.** `say()` speaks a line while the actions continue, sentences never overlap, and `waitForNarration()` paces the timeline to the voice. The default voice is Kokoro, an open-weights model that runs on CPU with no account, so it works offline and in CI. Plug in any engine through the `tts` option.
 
@@ -96,17 +97,19 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, fps, deterministic, gif, voice, tts, pronunciations })` | `theme`: `"macos"` or `"bare"`. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. `pronunciations` respells words the voice gets wrong. |
+| `createDemo({ theme, viewport, desktop, fps, deterministic, gif, voice, tts, pronunciations })` | `theme`: `"macos"` or `"bare"`. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
-| `demo.cursor.moveTo(target, { ease, duration })` | Glide to a selector or `{x, y}`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
-| `demo.cursor.click({ button })` | Click at the cursor, with a ripple. |
-| `demo.zoom.to(target, { scale, duration, ease })` | Animate a zoom centred on a target. Runs alongside the actions that follow. |
+| `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a selector or `{x, y}` in the focused window, or in `window`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
+| `demo.cursor.click({ button })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. |
+| `demo.zoom.to(target, { scale, duration, ease, window })` | Animate a zoom centred on a target. Runs alongside the actions that follow. |
 | `demo.zoom.out({ duration, ease })` | Return to 1x. |
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
-| `demo.terminal.open({ title, prompt, fontSize })` | Show a terminal window (replaces the browser window until the next `goto`). |
+| `demo.browser.focus()`, `demo.terminal.focus()` | Bring a window to the front and direct typing to it. |
+| `demo.browser.place({ x, y, width, height })`, `demo.terminal.place(...)` | Move or resize a window. `x, y` is the frame origin in desktop pixels; `width, height` is the content size. |
+| `demo.terminal.open({ title, prompt, fontSize, x, y, width, height })` | Open a terminal window and focus it. The first window opened takes the main position; later ones cascade to the lower right unless placed. |
 | `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
 | `demo.say(text, { voice, speed })` | Queue narration. Starts immediately or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
@@ -116,8 +119,8 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 Early but working end to end. Roadmap, roughly in order:
 
-- Several windows on the desktop at once (browser, terminal, editor) with focus and z-order
 - An editor window built on VS Code's web workbench
+- Window open/close animations and drag-to-move
 - Pseudo-terminal recording for TTY-only tools
 - Captions generated from narration (SRT and burned-in)
 - Auto-zoom that follows the cursor, and zoom transitions with a bit of drift
@@ -126,6 +129,19 @@ Early but working end to end. Roadmap, roughly in order:
 - Transitions between scenes and callouts
 - Python bindings over the same timeline
 - A Linux desktop backend (Xvfb in a container) for demos of native apps, targeted by coordinates or accessibility names
+
+## Several windows
+
+```ts
+const demo = createDemo({ viewport: [1180, 720], desktop: [1600, 1000] });
+await demo.browser.goto("https://app.local");
+await demo.terminal.open({ title: "acme", x: 700, y: 560, width: 840, height: 360 });
+await demo.terminal.run("npm run deploy", { output: "Live at https://acme.app\n" });
+await demo.cursor.moveTo("#new-project", { window: "browser" }); // the browser is behind the terminal
+await demo.cursor.click();                                        // click raises it
+```
+
+Each window is its own Chromium page; the desktop composites them in z-order with the theme's frames and shadows. See [examples/desktop.ts](examples/desktop.ts).
 
 ## Terminal demos
 

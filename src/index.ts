@@ -29,8 +29,10 @@ export { render } from "./renderer.js";
 export interface DemoOptions {
   /** Visual chrome around the recorded page. Default: "macos". */
   theme?: ThemeName;
-  /** Page viewport in CSS pixels: [width, height]. Default: [1280, 800]. */
+  /** Content size of the first window, in CSS pixels. Default: [1280, 800]. */
   viewport?: [number, number];
+  /** Desktop (output) size. Default: the first window plus the theme's margins. */
+  desktop?: [number, number];
   /** Output frames per second. Default: 60. */
   fps?: number;
   /** Freeze the page clock and step it per frame for reproducible animations. Default: true. */
@@ -53,6 +55,16 @@ export interface MoveOptions {
   ease?: Ease;
   /** Movement duration in ms. Default: derived from distance. */
   duration?: number;
+  /** Window to resolve a selector in. Default: the focused window. */
+  window?: "browser" | "terminal";
+}
+
+/** Window position (frame origin, desktop pixels) and content size. */
+export interface WindowGeometry {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface ZoomOptions {
@@ -61,6 +73,8 @@ export interface ZoomOptions {
   /** Transition duration in ms. Default: 700 */
   duration?: number;
   ease?: Ease;
+  /** Window to resolve a selector in. Default: the focused window. */
+  window?: "browser" | "terminal";
 }
 
 export interface TypeOptions {
@@ -131,9 +145,29 @@ class Zoom {
   }
 }
 
-class Browser {
-  constructor(private demo: Demo) {}
+class Win {
+  constructor(
+    protected demo: Demo,
+    readonly id: "browser" | "terminal",
+  ) {}
 
+  /** Bring this window to the front and direct typing to it. */
+  async focus(): Promise<void> {
+    this.demo._push({ kind: "window.focus", window: this.id });
+  }
+
+  /** Move or resize this window. */
+  async place(geometry: WindowGeometry): Promise<void> {
+    this.demo._push({ kind: "window.place", window: this.id, ...geometry });
+  }
+}
+
+class Browser extends Win {
+  constructor(demo: Demo) {
+    super(demo, "browser");
+  }
+
+  /** Navigate the browser window (opening it if needed) and bring it to the front. */
   async goto(url: string, opts: GotoOptions = {}): Promise<void> {
     this.demo._push({ kind: "browser.goto", url, ...opts });
   }
@@ -144,11 +178,13 @@ class Browser {
   }
 }
 
-class TerminalWindow {
-  constructor(private demo: Demo) {}
+class TerminalWindow extends Win {
+  constructor(demo: Demo) {
+    super(demo, "terminal");
+  }
 
-  /** Show a terminal window on the desktop. */
-  async open(opts: TerminalOptions = {}): Promise<void> {
+  /** Open a terminal window on the desktop (beside or over the browser) and focus it. */
+  async open(opts: TerminalOptions & WindowGeometry = {}): Promise<void> {
     this.demo._push({ kind: "terminal.open", ...opts });
   }
 
@@ -256,6 +292,7 @@ export class Demo {
       out,
       fps: this.options.fps,
       viewport: this.options.viewport,
+      desktop: this.options.desktop,
       theme: this.options.theme,
       deterministic: this.options.deterministic,
       gif: this.options.gif,

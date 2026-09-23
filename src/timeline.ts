@@ -6,16 +6,18 @@ export type Target = string | { x: number; y: number };
 export type Action =
   | { kind: "browser.goto"; url: string; settle?: number }
   | { kind: "browser.mockAPI"; pattern: string; response: unknown; status?: number }
-  | { kind: "cursor.moveTo"; target: Target; ease?: Ease; duration?: number }
+  | { kind: "cursor.moveTo"; target: Target; ease?: Ease; duration?: number; window?: string }
   | { kind: "cursor.click"; button?: "left" | "right" }
-  | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease }
+  | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
   | { kind: "type"; target?: string; text: string; wpm?: number }
   | { kind: "press"; key: string }
   | { kind: "wait"; ms: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
-  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number }
+  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; x?: number; y?: number; width?: number; height?: number }
+  | { kind: "window.focus"; window: string }
+  | { kind: "window.place"; window: string; x?: number; y?: number; width?: number; height?: number }
   | {
       kind: "terminal.run";
       command: string;

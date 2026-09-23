@@ -37,7 +37,8 @@
     "preview": "tsx src/cli.ts preview examples/basic.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "npm run build && npm test",
-    "example:terminal": "npm run build && tsx examples/terminal.ts"
+    "example:terminal": "npm run build && tsx examples/terminal.ts",
+    "example:desktop": "npm run build && tsx examples/desktop.ts"
   },
   "engines": {
     "node": ">=20"

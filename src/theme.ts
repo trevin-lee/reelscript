@@ -2,53 +2,64 @@ import sharp from "sharp";
 import { readFileSync } from "node:fs";
 
 /**
- * A theme turns a raw page screenshot into a "scene": the full frame that
- * gets zoomed and cursor-overlaid. `bare` is the page itself; `macos` puts
- * the page inside a browser window on a mocked macOS desktop.
+ * A theme draws the desktop: the wallpaper and menubar behind everything,
+ * a frame (title bar, shadow, rounded corners) around each window, and the
+ * mask that rounds a window's content. The engine composes these per frame.
  *
- * Chrome (wallpaper, menubar, window frame) is rendered as HTML by Chromium
- * using a font bundled with the package, so the same script produces the
- * same pixels on macOS, Linux, and in the container.
+ * Chrome is rendered as HTML by Chromium with fonts bundled in the package,
+ * so the same script produces the same pixels on every platform.
  */
 
 export type ThemeName = "macos" | "bare";
-
-export interface SceneLayout {
-  width: number;
-  height: number;
-  /** Where the page screenshot lands inside the scene. */
-  pageX: number;
-  pageY: number;
-  pageW: number;
-  pageH: number;
-}
+export type WindowKind = "browser" | "terminal";
 
 export interface RawImage {
   data: Buffer;
   width: number;
   height: number;
-  channels: 3 | 4;
+  channels: 4;
 }
 
-export interface SceneState {
-  /** What the window is showing; picks the chrome style. */
-  window: "browser" | "terminal";
-  url: string;
-  /** Title shown for terminal windows. */
+/** A frame image plus where it sits relative to the window's frame origin. */
+export interface FrameImage extends RawImage {
+  dx: number;
+  dy: number;
+}
+
+export interface WindowStyle {
+  kind: WindowKind;
+  /** Content size. */
+  width: number;
+  height: number;
   title: string;
+  url: string;
+  focused: boolean;
 }
 
 /** Renders an HTML document of the given size to a PNG. Provided by the engine. */
-export type HtmlRasterizer = (html: string, width: number, height: number) => Promise<Buffer>;
+export type HtmlRasterizer = (html: string, width: number, height: number, transparent: boolean) => Promise<Buffer>;
 
 export interface Theme {
-  layout(viewport: [number, number]): SceneLayout;
-  /** Compose the scene (RGBA raw) from a PNG screenshot of the page. */
-  compose(shot: Buffer, state: SceneState): Promise<RawImage>;
+  /** Height of a window's title bar (0 when windows have no chrome). */
+  readonly titleHeight: number;
+  /** Desktop size when the script doesn't set one, given the main window's content size. */
+  defaultDesktop(viewport: [number, number]): [number, number];
+  /** Frame origin for the first window opened. */
+  mainPlacement(desktop: [number, number], content: [number, number]): { x: number; y: number };
+  background(desktop: [number, number]): Promise<RawImage>;
+  /** Window chrome, or null for none. */
+  frame(style: WindowStyle): Promise<FrameImage | null>;
+  /** Alpha mask applied to window content, or null for none. */
+  contentMask(width: number, height: number): Promise<RawImage | null>;
 }
 
 function even(n: number): number {
   return n % 2 === 0 ? n : n + 1;
+}
+
+async function toRaw(png: Buffer): Promise<RawImage> {
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: 4 };
 }
 
 // ---------------------------------------------------------------- font
@@ -68,21 +79,32 @@ export function bundledFontFace(): string {
 // ---------------------------------------------------------------- bare
 
 class BareTheme implements Theme {
-  constructor(private viewport: [number, number]) {}
+  readonly titleHeight = 0;
+  private bg: RawImage | null = null;
 
-  layout(): SceneLayout {
-    const [w, h] = this.viewport;
-    return { width: even(w), height: even(h), pageX: 0, pageY: 0, pageW: w, pageH: h };
+  defaultDesktop(viewport: [number, number]): [number, number] {
+    return [even(viewport[0]), even(viewport[1])];
   }
 
-  async compose(shot: Buffer): Promise<RawImage> {
-    const l = this.layout();
-    const { data, info } = await sharp(shot)
-      .ensureAlpha()
-      .resize(l.width, l.height, { fit: "contain", position: "left top", background: "#000" })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    return { data, width: info.width, height: info.height, channels: 4 };
+  mainPlacement(): { x: number; y: number } {
+    return { x: 0, y: 0 };
+  }
+
+  async background([w, h]: [number, number]): Promise<RawImage> {
+    if (!this.bg || this.bg.width !== w || this.bg.height !== h) {
+      const data = Buffer.alloc(w * h * 4);
+      for (let i = 3; i < data.length; i += 4) data[i] = 255;
+      this.bg = { data, width: w, height: h, channels: 4 };
+    }
+    return this.bg;
+  }
+
+  async frame(): Promise<null> {
+    return null;
+  }
+
+  async contentMask(): Promise<null> {
+    return null;
   }
 }
 
@@ -94,114 +116,111 @@ const GAP_TOP = 44;
 const TITLE_H = 48;
 const PAD_BOTTOM = 72;
 const RADIUS = 12;
+/** Room around a frame for its drop shadow. */
+const SHADOW_PAD = 64;
 
 class MacosTheme implements Theme {
-  private bg = new Map<string, Promise<{ base: RawImage; cornerBL: Buffer; cornerBR: Buffer }>>();
+  readonly titleHeight = TITLE_H;
+  private bgCache = new Map<string, Promise<RawImage>>();
+  private frameCache = new Map<string, Promise<FrameImage>>();
+  private maskCache = new Map<string, Promise<RawImage>>();
 
-  constructor(
-    private viewport: [number, number],
-    private rasterize: HtmlRasterizer,
-  ) {}
+  constructor(private rasterize: HtmlRasterizer) {}
 
-  layout(): SceneLayout {
-    const [vw, vh] = this.viewport;
-    const width = even(vw + PAD_X * 2);
-    const pageY = MENUBAR_H + GAP_TOP + TITLE_H;
-    const height = even(pageY + vh + PAD_BOTTOM);
-    return { width, height, pageX: PAD_X, pageY, pageW: vw, pageH: vh };
+  defaultDesktop([vw, vh]: [number, number]): [number, number] {
+    return [even(vw + PAD_X * 2), even(MENUBAR_H + GAP_TOP + TITLE_H + vh + PAD_BOTTOM)];
   }
 
-  private html(state: SceneState): string {
-    const l = this.layout();
-    const winX = l.pageX;
-    const winY = l.pageY - TITLE_H;
-    const winW = l.pageW;
-    const winH = l.pageH + TITLE_H;
-    const terminal = state.window === "terminal";
-    const urlW = Math.min(560, Math.round(winW * 0.46));
-    const titleBar = terminal
-      ? `<div class="title term"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
-         <div class="ttl">${escapeHtml(state.title)}</div></div>`
-      : `<div class="title"><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
-         <div class="url">${escapeHtml(displayUrl(state.url))}</div></div>`;
-    return `<!doctype html><html><head><meta charset="utf-8"><style>
-${bundledFontFace()}
-html, body { margin: 0; width: ${l.width}px; height: ${l.height}px; overflow: hidden;
-  font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-.wall { position: absolute; inset: 0;
-  background: linear-gradient(135deg, #4f46e5 0%, #c2410c 55%, #f59e0b 100%); }
-.glow { position: absolute; inset: 0;
-  background: radial-gradient(80% 80% at 30% 20%, rgba(255,255,255,.22), rgba(255,255,255,0)); }
-.menubar { position: absolute; left: 0; top: 0; right: 0; height: ${MENUBAR_H}px;
-  background: rgba(255,255,255,.16); color: #fff; font-size: 13px;
-  display: flex; align-items: center; justify-content: space-between; padding: 0 18px; }
+  mainPlacement([dw]: [number, number], [w]: [number, number]): { x: number; y: number } {
+    return { x: Math.round((dw - w) / 2), y: MENUBAR_H + GAP_TOP };
+  }
+
+  private css(): string {
+    return `${bundledFontFace()}
+html, body { margin: 0; overflow: hidden; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }`;
+  }
+
+  background(desktop: [number, number]): Promise<RawImage> {
+    const [w, h] = desktop;
+    const key = `${w}x${h}`;
+    let p = this.bgCache.get(key);
+    if (!p) {
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+${this.css()}
+html, body { width: ${w}px; height: ${h}px; }
+.wall { position: absolute; inset: 0; background: linear-gradient(135deg, #4f46e5 0%, #c2410c 55%, #f59e0b 100%); }
+.glow { position: absolute; inset: 0; background: radial-gradient(80% 80% at 30% 20%, rgba(255,255,255,.22), rgba(255,255,255,0)); }
+.menubar { position: absolute; left: 0; top: 0; right: 0; height: ${MENUBAR_H}px; background: rgba(255,255,255,.16);
+  color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; }
 .menubar b { font-weight: 600; }
-.window { position: absolute; left: ${winX}px; top: ${winY}px; width: ${winW}px; height: ${winH}px;
-  border-radius: ${RADIUS}px; background: ${terminal ? "#1c1c1e" : "#ffffff"}; overflow: hidden;
-  box-shadow: 0 22px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25); }
-.title { position: relative; height: ${TITLE_H}px; background: #f3f3f5; border-bottom: 1px solid #dcdce1; }
-.title.term { background: #2c2c2e; border-bottom: 1px solid #3a3a3c; }
-.lights { position: absolute; left: 16px; top: ${TITLE_H / 2 - 6}px; display: flex; gap: 8px; }
-.lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
-.url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
-  width: ${urlW}px; height: ${TITLE_H - 24}px; border-radius: 7px; background: #e6e6ea;
-  color: #3f3f46; font-size: 12.5px; display: flex; align-items: center; justify-content: center;
-  white-space: nowrap; overflow: hidden; }
-.ttl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  color: #a1a1a6; font-size: 13px; font-weight: 500; }
 </style></head><body>
 <div class="wall"></div><div class="glow"></div>
 <div class="menubar"><b>reelscript</b><span>Tue Sep 23&nbsp;&nbsp;9:41 AM</span></div>
-<div class="window">${titleBar}</div>
 </body></html>`;
-  }
-
-  private assets(state: SceneState) {
-    const key = `${state.window}|${state.url}|${state.title}`;
-    let p = this.bg.get(key);
-    if (!p) {
-      p = (async () => {
-        const l = this.layout();
-        const png = await this.rasterize(this.html(state), l.width, l.height);
-        const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-        const base: RawImage = { data, width: info.width, height: info.height, channels: 4 };
-        const r = RADIUS;
-        // Bottom-corner "covers": wallpaper patches masked to the area outside the
-        // window's rounded corner, composited over the (rectangular) screenshot.
-        const maskBL = `<svg xmlns="http://www.w3.org/2000/svg" width="${r}" height="${r}"><path d="M0 0 L0 ${r} L${r} ${r} A${r} ${r} 0 0 1 0 0 Z" fill="#fff"/></svg>`;
-        const maskBR = `<svg xmlns="http://www.w3.org/2000/svg" width="${r}" height="${r}"><path d="M${r} 0 L${r} ${r} L0 ${r} A${r} ${r} 0 0 0 ${r} 0 Z" fill="#fff"/></svg>`;
-        const corner = (left: number, mask: string) =>
-          sharp(png)
-            .extract({ left, top: l.pageY + l.pageH - r, width: r, height: r })
-            .composite([{ input: Buffer.from(mask), blend: "dest-in" }])
-            .png()
-            .toBuffer();
-        const [cornerBL, cornerBR] = await Promise.all([
-          corner(l.pageX, maskBL),
-          corner(l.pageX + l.pageW - r, maskBR),
-        ]);
-        return { base, cornerBL, cornerBR };
-      })();
-      this.bg.set(key, p);
+      p = this.rasterize(html, w, h, false).then(toRaw);
+      this.bgCache.set(key, p);
     }
     return p;
   }
 
-  async compose(shot: Buffer, state: SceneState): Promise<RawImage> {
-    const l = this.layout();
-    const { base, cornerBL, cornerBR } = await this.assets(state);
-    const r = RADIUS;
-    const { data, info } = await sharp(base.data, {
-      raw: { width: base.width, height: base.height, channels: 4 },
-    })
-      .composite([
-        { input: shot, left: l.pageX, top: l.pageY },
-        { input: cornerBL, left: l.pageX, top: l.pageY + l.pageH - r },
-        { input: cornerBR, left: l.pageX + l.pageW - r, top: l.pageY + l.pageH - r },
-      ])
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    return { data, width: info.width, height: info.height, channels: 4 };
+  frame(style: WindowStyle): Promise<FrameImage> {
+    const key = JSON.stringify(style);
+    let p = this.frameCache.get(key);
+    if (!p) {
+      const { kind, width, height, focused } = style;
+      const W = width + SHADOW_PAD * 2;
+      const H = height + TITLE_H + SHADOW_PAD * 2;
+      const terminal = kind === "terminal";
+      const urlW = Math.min(560, Math.round(width * 0.46));
+      const lights = focused
+        ? ["#ff5f57", "#febc2e", "#28c840"]
+        : terminal
+          ? ["#5a5a5e", "#5a5a5e", "#5a5a5e"]
+          : ["#d4d4d8", "#d4d4d8", "#d4d4d8"];
+      const bar = terminal
+        ? `<div class="ttl">${escapeHtml(style.title)}</div>`
+        : `<div class="url">${escapeHtml(displayUrl(style.url))}</div>`;
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+${this.css()}
+html, body { width: ${W}px; height: ${H}px; background: transparent; }
+.window { position: absolute; left: ${SHADOW_PAD}px; top: ${SHADOW_PAD}px; width: ${width}px; height: ${height + TITLE_H}px;
+  border-radius: ${RADIUS}px; background: ${terminal ? "#1c1c1e" : "#ffffff"}; overflow: hidden;
+  box-shadow: ${focused ? "0 22px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25)" : "0 12px 28px rgba(0,0,0,.28), 0 1px 4px rgba(0,0,0,.2)"}; }
+.title { position: relative; height: ${TITLE_H}px; background: ${terminal ? "#2c2c2e" : "#f3f3f5"};
+  border-bottom: 1px solid ${terminal ? "#3a3a3c" : "#dcdce1"}; }
+.lights { position: absolute; left: 16px; top: ${TITLE_H / 2 - 6}px; display: flex; gap: 8px; }
+.lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
+.url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: ${urlW}px; height: ${TITLE_H - 24}px;
+  border-radius: 7px; background: #e6e6ea; color: ${focused ? "#3f3f46" : "#8e8e93"}; font-size: 12.5px;
+  display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+.ttl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: ${focused ? "#a1a1a6" : "#6e6e73"}; font-size: 13px; font-weight: 500; }
+</style></head><body>
+<div class="window"><div class="title">
+  <div class="lights"><i style="background:${lights[0]}"></i><i style="background:${lights[1]}"></i><i style="background:${lights[2]}"></i></div>
+  ${bar}
+</div></div>
+</body></html>`;
+      p = this.rasterize(html, W, H, true)
+        .then(toRaw)
+        .then((img) => ({ ...img, dx: -SHADOW_PAD, dy: -SHADOW_PAD }));
+      this.frameCache.set(key, p);
+    }
+    return p;
+  }
+
+  contentMask(width: number, height: number): Promise<RawImage> {
+    const key = `${width}x${height}`;
+    let p = this.maskCache.get(key);
+    if (!p) {
+      const r = RADIUS;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <path d="M0 0 H${width} V${height - r} A${r} ${r} 0 0 1 ${width - r} ${height} H${r} A${r} ${r} 0 0 1 0 ${height - r} Z" fill="#fff"/>
+      </svg>`;
+      p = sharp(Buffer.from(svg)).png().toBuffer().then(toRaw);
+      this.maskCache.set(key, p);
+    }
+    return p;
   }
 }
 
@@ -220,12 +239,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function createTheme(name: ThemeName, viewport: [number, number], rasterize: HtmlRasterizer): Theme {
+export function createTheme(name: ThemeName, rasterize: HtmlRasterizer): Theme {
   switch (name) {
     case "bare":
-      return new BareTheme(viewport);
+      return new BareTheme();
     case "macos":
-      return new MacosTheme(viewport, rasterize);
+      return new MacosTheme(rasterize);
     default:
       throw new Error(`reelscript: unknown theme "${name as string}"`);
   }

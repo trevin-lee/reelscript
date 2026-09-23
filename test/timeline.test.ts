@@ -15,10 +15,15 @@ test("demo records a timeline in order", async () => {
   demo.zoom.out();
   demo.say("Done.", { voice: "am_michael" });
   await demo.waitForNarration();
+  await demo.terminal.open({ x: 10, y: 20 });
+  await demo.browser.focus();
+  await demo.terminal.place({ width: 640 });
 
   assert.deepEqual(
     demo.getTimeline().map((a) => a.kind),
-    ["browser.goto", "browser.mockAPI", "cursor.moveTo", "cursor.click", "zoom.to", "type", "press", "wait", "zoom.out", "say", "waitForNarration"],
+    ["browser.goto", "browser.mockAPI", "cursor.moveTo", "cursor.click", "zoom.to", "type", "press", "wait", "zoom.out", "say", "waitForNarration", "terminal.open", "window.focus", "window.place"],
   );
+  assert.deepEqual(demo.getTimeline().at(-2), { kind: "window.focus", window: "browser" });
+  assert.deepEqual(demo.getTimeline().at(-1), { kind: "window.place", window: "terminal", width: 640 });
   assert.deepEqual(demo.getTimeline()[2], { kind: "cursor.moveTo", target: "#a", ease: "snappy" });
 });
