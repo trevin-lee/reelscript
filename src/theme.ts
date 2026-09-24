@@ -196,7 +196,8 @@ html, body { width: ${W}px; height: ${H}px; background: transparent; }
 .lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
 .url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: ${urlW}px; height: ${TITLE_H - 24}px;
   border-radius: 7px; background: #e6e6ea; color: ${focused ? "#3f3f46" : "#8e8e93"}; font-size: 12.5px;
-  display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+  box-sizing: border-box; padding: 0 12px; line-height: ${TITLE_H - 24}px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ttl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   color: ${focused ? colors.text : colors.dim}; font-size: 13px; font-weight: 500; }
 </style></head><body>
@@ -228,9 +229,15 @@ html, body { width: ${W}px; height: ${H}px; background: transparent; }
   }
 }
 
+/**
+ * What the address pill shows. A local file is a title card or a fixture,
+ * and its file name is nobody's business, so the pill stays blank. A long
+ * path is cut at the end with an ellipsis (see the CSS), never in the
+ * middle: the host is the part worth reading.
+ */
 function displayUrl(url: string): string {
   if (!url) return "";
-  if (url.startsWith("file://")) return url.split("/").pop() ?? url;
+  if (url.startsWith("file://")) return "";
   try {
     const u = new URL(url);
     return u.host + (u.pathname === "/" ? "" : u.pathname);
