@@ -162,6 +162,30 @@ await demo.editor.type('server.get("/health", () => ({ ok: true }));');
 await demo.editor.command("Format Document");
 ```
 
+### Demo the extension you're building
+
+Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied into the render's extensions directory and registered, so no packaging step is needed:
+
+```ts
+await demo.editor.open({ workspace: "./fixtures/project", extensions: ["./"], notifications: true });
+await demo.editor.command("Acme: Deploy to Production");
+```
+
+In GitHub Actions, build the extension first, then render. Everything else is in the container:
+
+```yaml
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    container: ghcr.io/trevin-lee/reelscript:latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: npm ci && npm run compile      # whatever produces your extension's main entry
+      - run: reelscript render demo/demo.ts --out demo.mp4
+```
+
+The extension runs in a real extension host with its Node dependencies, so keep `node_modules` present (or bundle) as you would for `vsce package`. See [examples/extension.ts](examples/extension.ts) and the sample extension in [examples/acme-ext](examples/acme-ext).
+
 The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded once into `~/.cache/reelscript` (about 200 MB; macOS and Linux only) and baked into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time rather than reelscript's frame-stepped clock; its animations are disabled by default so this doesn't show. See [examples/editor.ts](examples/editor.ts).
 
 ## Terminal demos

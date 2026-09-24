@@ -485,7 +485,10 @@ class Engine {
           this.editorServer = new EditorServer();
           const workspace = action.workspace ? resolvePath(this.baseDir, action.workspace) : undefined;
           this.onStatus("starting code-server");
-          await this.editorServer.start({ workspace, extensions: action.extensions, settings: action.settings }, this.onStatus);
+          await this.editorServer.start(
+            { workspace, extensions: action.extensions, settings: action.settings, baseDir: this.baseDir },
+            this.onStatus,
+          );
           await w.page.route("**/__reelscript/fonts/*", (route) => {
             const name = route.request().url().split("/").pop() ?? "";
             route.fulfill({ status: 200, contentType: "font/ttf", body: readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url)) });

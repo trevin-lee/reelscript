@@ -5,10 +5,10 @@
  * extensions exactly as users would see them.
  */
 import { spawn } from "node:child_process";
-import { cpSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { cacheDir } from "./tts.js";
@@ -117,9 +117,47 @@ function freePort(): Promise<number> {
 export interface EditorServerConfig {
   /** Folder to open. Copied to a temp dir so the demo never edits the source. */
   workspace?: string;
-  /** Extension ids (from Open VSX) or paths to .vsix files. */
+  /**
+   * Extensions to load: Open VSX ids ("esbenp.prettier-vscode"), paths to
+   * .vsix files, or paths to extension folders (a directory with a
+   * package.json, e.g. the extension you're developing). Paths resolve
+   * against `baseDir`.
+   */
   extensions?: string[];
   settings?: Record<string, unknown>;
+  baseDir?: string;
+}
+
+/**
+ * Copy an unpacked extension folder into the extensions dir under the name
+ * VS Code expects and register it in the directory's manifest. Returns the
+ * copy's path.
+ */
+export function registerExtensionFolder(folder: string, extensionsDir: string): string {
+  const pkg = JSON.parse(readFileSync(join(folder, "package.json"), "utf8")) as { name?: string; publisher?: string; version?: string };
+  if (!pkg.name || !pkg.publisher) {
+    throw new Error(`reelscript: ${folder}/package.json needs "name" and "publisher" to load as an extension`);
+  }
+  const version = pkg.version ?? "0.0.0";
+  const id = `${pkg.publisher}.${pkg.name}`;
+  const relative = `${id}-${version}`;
+  const target = join(extensionsDir, relative);
+  rmSync(target, { recursive: true, force: true });
+  cpSync(folder, target, { recursive: true, dereference: true });
+  // VS Code only loads user extensions listed in the directory's manifest,
+  // so register the copy the way `--install-extension` would.
+  const manifestPath = join(extensionsDir, "extensions.json");
+  const manifest: Array<{ identifier: { id: string } }> = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : [];
+  const kept = manifest.filter((e) => e.identifier.id.toLowerCase() !== id.toLowerCase());
+  kept.push({
+    identifier: { id },
+    version,
+    location: { $mid: 1, path: target, scheme: "file" },
+    relativeLocation: relative,
+    metadata: { installedTimestamp: Date.now(), pinned: true, source: "vsix" },
+  } as never);
+  writeFileSync(manifestPath, JSON.stringify(kept));
+  return target;
 }
 
 /** One code-server process for the render, on a random local port. */
@@ -146,9 +184,17 @@ export class EditorServer {
     else mkdirSync(this.workspace);
 
     const common = ["--config", join(this.root, "config.yaml"), "--user-data-dir", userData, "--extensions-dir", extensionsDir];
+    const baseDir = config.baseDir ?? process.cwd();
     for (const ext of config.extensions ?? []) {
-      onStatus?.(`installing extension ${ext}`);
-      await run(bin, [...common, "--install-extension", ext]);
+      const looksLikePath = ext.endsWith(".vsix") || ext.includes("/") || ext.startsWith(".");
+      const path = looksLikePath ? resolve(baseDir, ext) : null;
+      if (path && existsSync(path) && statSync(path).isDirectory()) {
+        onStatus?.(`loading extension folder ${ext}`);
+        registerExtensionFolder(path, extensionsDir);
+      } else {
+        onStatus?.(`installing extension ${ext}`);
+        await run(bin, [...common, "--install-extension", path ?? ext]);
+      }
     }
 
     this.port = await freePort();

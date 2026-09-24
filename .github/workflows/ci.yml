@@ -30,12 +30,15 @@ jobs:
         run: npm run example
       - name: Render a frame of the editor example (downloads code-server once, then cached)
         run: node dist/cli.js preview examples/editor.ts --at 9 --out out/editor-frame.png
+      - name: Render a frame of the extension example (loads examples/acme-ext into VS Code)
+        run: node dist/cli.js preview examples/extension.ts --at 10.5 --out out/extension-frame.png
       - uses: actions/upload-artifact@v5
         with:
           name: example-demo
           path: |
             out/basic.mp4
             out/editor-frame.png
+            out/extension-frame.png
           retention-days: 7
 
   # Container image. Built on every PR and push; pushed to GHCR from main as
