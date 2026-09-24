@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The page context is granted clipboard read and write, so Copy buttons in the page under demo work as they do in a real browser.
 - **Address pill.** Blank for `file://` pages (title cards, fixtures), and a long path is cut at the end with an ellipsis instead of being clipped on both sides.
 
 ## 0.2.0

@@ -187,6 +187,9 @@ class Engine {
       deviceScaleFactor: 1,
       colorScheme: "light",
     });
+    // Headless Chromium denies clipboard writes by default, so a "Copy"
+    // button in the page under demo would fail where a real browser succeeds.
+    await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
     if (this.deterministic) await this.context.addInitScript(CLOCK_SHIM);
   }
 
