@@ -1,6 +1,6 @@
 {
   "name": "@reelscript/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Product demos as code. Write a script, render a demo, re-run it in CI when your UI changes.",
   "type": "module",
   "license": "MIT",
