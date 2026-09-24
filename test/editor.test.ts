@@ -17,7 +17,8 @@ test("editor defaults keep typing predictable and the AI panel closed", () => {
   assert.equal(EDITOR_DEFAULT_SETTINGS["chat.disableAIFeatures"], true);
 });
 
-test("editorStyles hides toasts unless asked", () => {
+test("editorStyles hides toasts unless asked, and always the editor watermark", () => {
+  assert.match(editorStyles(false), /editor-group-watermark \{ display: none/);
   assert.match(editorStyles(false), /notifications-toasts \{ display: none/);
   assert.doesNotMatch(editorStyles(true), /notifications-toasts/);
 });

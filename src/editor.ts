@@ -52,6 +52,7 @@ export function editorStyles(notifications: boolean): string {
 @font-face { font-family: "Inter"; font-weight: 100 900; src: url(/__reelscript/fonts/InterVariable.ttf) format("truetype"); }
 .monaco-workbench { font-family: Inter, system-ui, sans-serif !important; }
 .statusbar-item[id="status.workbench.keyboardLayout"] { display: none !important; }
+.editor-group-container .editor-group-watermark { display: none !important; }
 ${notifications ? "" : ".notifications-toasts { display: none !important; }"}`;
 }
 
