@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
  */
 
 export type ThemeName = "macos" | "bare";
-export type WindowKind = "browser" | "terminal";
+export type WindowKind = "browser" | "terminal" | "editor";
 
 export interface RawImage {
   data: Buffer;
@@ -170,31 +170,35 @@ html, body { width: ${w}px; height: ${h}px; }
       const { kind, width, height, focused } = style;
       const W = width + SHADOW_PAD * 2;
       const H = height + TITLE_H + SHADOW_PAD * 2;
-      const terminal = kind === "terminal";
+      const dark = kind !== "browser";
+      const colors =
+        kind === "editor"
+          ? { body: "#1f1f1f", bar: "#181818", line: "#2b2b2b", text: "#cccccc", dim: "#8b8b8b" }
+          : { body: "#1c1c1e", bar: "#2c2c2e", line: "#3a3a3c", text: "#a1a1a6", dim: "#6e6e73" };
       const urlW = Math.min(560, Math.round(width * 0.46));
       const lights = focused
         ? ["#ff5f57", "#febc2e", "#28c840"]
-        : terminal
+        : dark
           ? ["#5a5a5e", "#5a5a5e", "#5a5a5e"]
           : ["#d4d4d8", "#d4d4d8", "#d4d4d8"];
-      const bar = terminal
+      const bar = dark
         ? `<div class="ttl">${escapeHtml(style.title)}</div>`
         : `<div class="url">${escapeHtml(displayUrl(style.url))}</div>`;
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 ${this.css()}
 html, body { width: ${W}px; height: ${H}px; background: transparent; }
 .window { position: absolute; left: ${SHADOW_PAD}px; top: ${SHADOW_PAD}px; width: ${width}px; height: ${height + TITLE_H}px;
-  border-radius: ${RADIUS}px; background: ${terminal ? "#1c1c1e" : "#ffffff"}; overflow: hidden;
+  border-radius: ${RADIUS}px; background: ${dark ? colors.body : "#ffffff"}; overflow: hidden;
   box-shadow: ${focused ? "0 22px 48px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25)" : "0 12px 28px rgba(0,0,0,.28), 0 1px 4px rgba(0,0,0,.2)"}; }
-.title { position: relative; height: ${TITLE_H}px; background: ${terminal ? "#2c2c2e" : "#f3f3f5"};
-  border-bottom: 1px solid ${terminal ? "#3a3a3c" : "#dcdce1"}; }
+.title { position: relative; height: ${TITLE_H}px; background: ${dark ? colors.bar : "#f3f3f5"};
+  border-bottom: 1px solid ${dark ? colors.line : "#dcdce1"}; }
 .lights { position: absolute; left: 16px; top: ${TITLE_H / 2 - 6}px; display: flex; gap: 8px; }
 .lights i { display: block; width: 12px; height: 12px; border-radius: 50%; }
 .url { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); width: ${urlW}px; height: ${TITLE_H - 24}px;
   border-radius: 7px; background: #e6e6ea; color: ${focused ? "#3f3f46" : "#8e8e93"}; font-size: 12.5px;
   display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
 .ttl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  color: ${focused ? "#a1a1a6" : "#6e6e73"}; font-size: 13px; font-weight: 500; }
+  color: ${focused ? colors.text : colors.dim}; font-size: 13px; font-weight: 500; }
 </style></head><body>
 <div class="window"><div class="title">
   <div class="lights"><i style="background:${lights[0]}"></i><i style="background:${lights[1]}"></i><i style="background:${lights[2]}"></i></div>

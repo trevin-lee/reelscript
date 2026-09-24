@@ -38,6 +38,7 @@ await demo.render("out/demo.mp4");
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
 - **A real desktop.** Windows have positions, sizes, focus, and z-order. Open a browser and a terminal side by side, click between them, and the one you click comes to the front. Selectors resolve in the focused window (or the one you name), typing goes to the focused window, and zoom targets can be in any window.
+- **A real VS Code.** `editor.open()` runs code-server (VS Code's open-source build) on a workspace folder and shows it in a window. Open files from the Explorer, type code, run palette commands, and install real extensions from a `.vsix` or Open VSX, so demos of dev tools and extensions look exactly as users see them.
 - **Terminal windows.** `terminal.open()` puts a Terminal-style window on the desktop and `terminal.run()` types a command and streams its output. Declare the output in the script, or run the real command once with `reelscript record` and replay the recording frame-exact on every render.
 - **Narration as code.** `say()` speaks a line while the actions continue, sentences never overlap, and `waitForNarration()` paces the timeline to the voice. The default voice is Kokoro, an open-weights model that runs on CPU with no account, so it works offline and in CI. Plug in any engine through the `tts` option.
 
@@ -108,7 +109,11 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
-| `demo.browser.focus()`, `demo.terminal.focus()` | Bring a window to the front and direct typing to it. |
+| `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open a VS Code window on a folder (copied, so your files are never edited). `extensions` are Open VSX ids or `.vsix` paths; `settings` merge over demo-friendly defaults. |
+| `demo.editor.openFile(path)`, `demo.editor.command(name)` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. |
+| `demo.editor.type(text, { wpm })` | Type at the caret. Defaults turn off auto-closing brackets and auto-indent so typed code lands as written. |
+| `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for Explorer rows and editor tabs, for `cursor.moveTo()`. |
+| `demo.browser.focus()`, `demo.terminal.focus()`, `demo.editor.focus()` | Bring a window to the front and direct typing to it. |
 | `demo.browser.place({ x, y, width, height })`, `demo.terminal.place(...)` | Move or resize a window. `x, y` is the frame origin in desktop pixels; `width, height` is the content size. |
 | `demo.terminal.open({ title, prompt, fontSize, x, y, width, height })` | Open a terminal window and focus it. The first window opened takes the main position; later ones cascade to the lower right unless placed. |
 | `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
@@ -120,8 +125,8 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 Early but working end to end. Roadmap, roughly in order:
 
-- An editor window built on VS Code's web workbench
 - Window open/close animations and drag-to-move
+- Editor: open files by clicking, seed the integrated terminal, per-file caret placement
 - Pseudo-terminal recording for TTY-only tools
 - Captions generated from narration (SRT and burned-in)
 - Auto-zoom that follows the cursor, and zoom transitions with a bit of drift
@@ -143,6 +148,21 @@ await demo.cursor.click();                                        // click raise
 ```
 
 Each window is its own Chromium page; the desktop composites them in z-order with the theme's frames and shadows. See [examples/desktop.ts](examples/desktop.ts).
+
+## Editor demos
+
+```ts
+await demo.editor.open({ workspace: "./acme", extensions: ["esbenp.prettier-vscode"] });
+await demo.cursor.moveTo(demo.editor.file("app.ts"));
+await demo.cursor.click();
+await demo.cursor.moveTo(".monaco-editor .view-lines"); // click into the editor to move keyboard focus
+await demo.cursor.click();
+await demo.press("Control+End");
+await demo.editor.type('server.get("/health", () => ({ ok: true }));');
+await demo.editor.command("Format Document");
+```
+
+The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded once into `~/.cache/reelscript` (about 200 MB; macOS and Linux only) and baked into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time rather than reelscript's frame-stepped clock; its animations are disabled by default so this doesn't show. See [examples/editor.ts](examples/editor.ts).
 
 ## Terminal demos
 

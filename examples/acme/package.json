@@ -1,0 +1,9 @@
+{
+  "name": "acme",
+  "version": "1.4.0",
+  "private": true,
+  "scripts": {
+    "dev": "acme-cli dev",
+    "deploy": "acme-cli deploy --prod"
+  }
+}

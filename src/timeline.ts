@@ -16,6 +16,22 @@ export type Action =
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
   | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; x?: number; y?: number; width?: number; height?: number }
+  | {
+      kind: "editor.open";
+      /** Folder to open, relative to the script. */
+      workspace?: string;
+      /** Extension ids (Open VSX) or .vsix paths. */
+      extensions?: string[];
+      settings?: Record<string, unknown>;
+      /** Show VS Code notification toasts. Default: false */
+      notifications?: boolean;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+    }
+  | { kind: "editor.openFile"; path: string; wpm?: number }
+  | { kind: "editor.command"; command: string; wpm?: number }
   | { kind: "window.focus"; window: string }
   | { kind: "window.place"; window: string; x?: number; y?: number; width?: number; height?: number }
   | {

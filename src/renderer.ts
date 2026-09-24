@@ -17,6 +17,9 @@ import {
   terminalPageHtml,
   type TermEvent,
 } from "./terminal.js";
+import { EditorServer, LINUX_UA, editorStyles, editorTitle } from "./editor.js";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 export interface RenderOptions {
   out: string;
@@ -37,6 +40,8 @@ export interface RenderOptions {
   onStatus?: (message: string) => void;
   /** Where terminal recordings live (for terminal.run without declared output). */
   recordingsDir?: string;
+  /** Directory relative paths in the script (e.g. editor workspaces) resolve against. */
+  baseDir?: string;
   /**
    * Replace the page's clock with a virtual one that advances exactly one
    * frame per rendered frame, so CSS transitions, timers and rAF loops play
@@ -106,6 +111,8 @@ interface Win {
   kind: WindowKind;
   page: Page;
   cdp: CDPSession;
+  /** Editor windows get their own un-shimmed context (VS Code runs on real time). */
+  ctx: BrowserContext | null;
   /** Frame origin in desktop pixels. */
   x: number;
   y: number;
@@ -143,6 +150,11 @@ class Engine {
   private lastClick = -Infinity;
   // terminal
   private termEvents = new Map<number, TermEvent[]>();
+  // editor
+  private editorServer: EditorServer | null = null;
+  private editorFallbackTitle = "";
+  onStatus: (m: string) => void = () => {};
+  baseDir = process.cwd();
   // narration
   private clips = new Map<number, Clip>();
   private narrationEnd = 0;
@@ -180,6 +192,7 @@ class Engine {
 
   async close(): Promise<void> {
     await this.browser?.close();
+    await this.editorServer?.stop();
   }
 
   /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
@@ -233,12 +246,22 @@ class Engine {
     if (geometry.x !== undefined) x = geometry.x;
     if (geometry.y !== undefined) y = geometry.y;
 
-    const page = await this.context.newPage();
+    let ctx: BrowserContext | null = null;
+    if (kind === "editor") {
+      ctx = await this.browser.newContext({
+        viewport: { width, height },
+        deviceScaleFactor: 1,
+        colorScheme: "dark",
+        userAgent: LINUX_UA, // consistent Ctrl-based keybindings on every host
+      });
+    }
+    const page = await (ctx ?? this.context).newPage();
     const win: Win = {
       id,
       kind,
       page,
-      cdp: await this.context.newCDPSession(page),
+      cdp: await (ctx ?? this.context).newCDPSession(page),
+      ctx,
       x,
       y,
       width,
@@ -455,6 +478,54 @@ class Engine {
       }
       case "waitForNarration":
         return { end: Math.max(start, this.narrationEnd) };
+      case "editor.open": {
+        const w = await this.ensureWindow("editor", "editor", action);
+        this.focus(w);
+        if (!this.editorServer) {
+          this.editorServer = new EditorServer();
+          const workspace = action.workspace ? resolvePath(this.baseDir, action.workspace) : undefined;
+          this.onStatus("starting code-server");
+          await this.editorServer.start({ workspace, extensions: action.extensions, settings: action.settings }, this.onStatus);
+          await w.page.route("**/__reelscript/fonts/*", (route) => {
+            const name = route.request().url().split("/").pop() ?? "";
+            route.fulfill({ status: 200, contentType: "font/ttf", body: readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url)) });
+          });
+        }
+        const url = this.editorServer.url();
+        await w.page.goto(url, { waitUntil: "load" });
+        await w.page.waitForSelector(".monaco-workbench .editor-group-container", { timeout: 60_000 });
+        await w.page.addStyleTag({ content: editorStyles(action.notifications ?? false) });
+        await w.page.evaluate(() => Promise.all([document.fonts.load('14px "JetBrains Mono"'), document.fonts.load('13px "Inter"')]));
+        await w.page.waitForTimeout(600);
+        w.url = url;
+        this.editorFallbackTitle = this.editorServer.workspace.split("/").pop() ?? "Code";
+        w.title = editorTitle(await w.page.title(), this.editorFallbackTitle);
+        return { end: start + 400 };
+      }
+      case "editor.openFile":
+      case "editor.command": {
+        const w = this.window("editor");
+        this.focus(w);
+        const text = action.kind === "editor.openFile" ? action.path : action.command;
+        const chars = Array.from(text);
+        const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
+        const typeStart = start + 350;
+        const typeEnd = typeStart + chars.length * msPerChar;
+        const enterAt = typeEnd + 400;
+        await w.page.keyboard.press(action.kind === "editor.openFile" ? "Control+P" : "F1");
+        let next = 0;
+        let entered = false;
+        const flush = async (t: number) => {
+          let batch = "";
+          while (next < chars.length && typeStart + next * msPerChar <= t) batch += chars[next++];
+          if (batch) await w.page.keyboard.type(batch);
+          if (!entered && t >= enterAt) {
+            entered = true;
+            await w.page.keyboard.press("Enter");
+          }
+        };
+        return { end: enterAt + 500, onFrame: flush, onEnd: () => flush(Infinity) };
+      }
       case "window.focus": {
         this.focus(this.window(action.window));
         return null;
@@ -590,6 +661,7 @@ class Engine {
 
   /** Window chrome as an overlay, clipped to the desktop; cached per style and position. */
   private async frameOverlay(w: Win): Promise<OverlayOptions | null> {
+    if (w.kind === "editor") w.title = editorTitle(await w.page.title(), this.editorFallbackTitle);
     const style = { kind: w.kind, width: w.width, height: w.height, title: w.title, url: w.url, focused: w.id === this.focusedId };
     const key = `${JSON.stringify(style)}@${w.x},${w.y}`;
     if (w.frameOverlay?.key === key) return w.frameOverlay.overlay;
@@ -712,6 +784,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const snapshot = options.snapshotAt;
 
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true);
+  if (options.onStatus) engine.onStatus = options.onStatus;
+  if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
 
   // Narration is synthesized up front so clip durations can pace the timeline.

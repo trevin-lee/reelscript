@@ -38,7 +38,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "prepublishOnly": "npm run build && npm test",
     "example:terminal": "npm run build && tsx examples/terminal.ts",
-    "example:desktop": "npm run build && tsx examples/desktop.ts"
+    "example:desktop": "npm run build && tsx examples/desktop.ts",
+    "example:editor": "npm run build && tsx examples/editor.ts"
   },
   "engines": {
     "node": ">=20.6"

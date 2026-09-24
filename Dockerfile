@@ -19,6 +19,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     REELSCRIPT_CACHE=/opt/reelscript/cache
 WORKDIR /opt/reelscript
 COPY package.json package-lock.json ./
+ARG CODE_SERVER_VERSION=4.138.0
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
+ && arch="$(dpkg --print-architecture)" \
+ && mkdir -p "$REELSCRIPT_CACHE/code-server/$CODE_SERVER_VERSION" \
+ && curl -fsSL "https://github.com/coder/code-server/releases/download/v$CODE_SERVER_VERSION/code-server-$CODE_SERVER_VERSION-linux-$arch.tar.gz" \
+    | tar -xz -C "$REELSCRIPT_CACHE/code-server/$CODE_SERVER_VERSION" --strip-components=1 \
+ && rm -rf /var/lib/apt/lists/*
 RUN npm ci --omit=dev \
  && npx playwright install --with-deps chromium-headless-shell \
  # onnxruntime ships binaries for every platform; keep only Linux

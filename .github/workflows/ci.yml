@@ -28,10 +28,14 @@ jobs:
       - run: npm test
       - name: Render the example end to end
         run: npm run example
+      - name: Render a frame of the editor example (downloads code-server once, then cached)
+        run: node dist/cli.js preview examples/editor.ts --at 9 --out out/editor-frame.png
       - uses: actions/upload-artifact@v5
         with:
           name: example-demo
-          path: out/basic.mp4
+          path: |
+            out/basic.mp4
+            out/editor-frame.png
           retention-days: 7
 
   # Container image. Built on every PR and push; pushed to GHCR from main as

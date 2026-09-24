@@ -56,7 +56,7 @@ export interface MoveOptions {
   /** Movement duration in ms. Default: derived from distance. */
   duration?: number;
   /** Window to resolve a selector in. Default: the focused window. */
-  window?: "browser" | "terminal";
+  window?: "browser" | "terminal" | "editor";
 }
 
 /** Window position (frame origin, desktop pixels) and content size. */
@@ -74,7 +74,7 @@ export interface ZoomOptions {
   duration?: number;
   ease?: Ease;
   /** Window to resolve a selector in. Default: the focused window. */
-  window?: "browser" | "terminal";
+  window?: "browser" | "terminal" | "editor";
 }
 
 export interface TypeOptions {
@@ -108,6 +108,17 @@ export interface RunOptions {
   speed?: number;
   /** Cap silences in recorded output, in ms. Default: 700 */
   maxGapMs?: number;
+}
+
+export interface EditorOptions {
+  /** Folder to open, relative to the script. It's copied, so the demo never edits your files. */
+  workspace?: string;
+  /** Extensions to install first: Open VSX ids like "esbenp.prettier-vscode" or paths to .vsix files. */
+  extensions?: string[];
+  /** VS Code settings merged over reelscript's demo defaults. */
+  settings?: Record<string, unknown>;
+  /** Show notification toasts. Default: false */
+  notifications?: boolean;
 }
 
 export interface GotoOptions {
@@ -148,7 +159,7 @@ class Zoom {
 class Win {
   constructor(
     protected demo: Demo,
-    readonly id: "browser" | "terminal",
+    readonly id: "browser" | "terminal" | "editor",
   ) {}
 
   /** Bring this window to the front and direct typing to it. */
@@ -197,11 +208,48 @@ class TerminalWindow extends Win {
   }
 }
 
+class EditorWindow extends Win {
+  constructor(demo: Demo) {
+    super(demo, "editor");
+  }
+
+  /** Open a real VS Code (code-server) window on a workspace folder and focus it. */
+  async open(opts: EditorOptions & WindowGeometry = {}): Promise<void> {
+    this.demo._push({ kind: "editor.open", ...opts });
+  }
+
+  /** Open a file through Quick Open (Ctrl+P), typing its name. */
+  async openFile(path: string, opts: TypeOptions = {}): Promise<void> {
+    this.demo._push({ kind: "editor.openFile", path, ...opts });
+  }
+
+  /** Run a command through the Command Palette, typing its name. */
+  async command(command: string, opts: TypeOptions = {}): Promise<void> {
+    this.demo._push({ kind: "editor.command", command, ...opts });
+  }
+
+  /** Type into the editor at the caret. */
+  async type(text: string, opts: TypeOptions = {}): Promise<void> {
+    this.demo._push({ kind: "type", text, ...opts });
+  }
+
+  /** Selector for a file or folder row in the Explorer, for cursor.moveTo(). */
+  file(name: string): string {
+    return `.explorer-folders-view .monaco-list-row[aria-label*="${name}"]`;
+  }
+
+  /** Selector for an open editor tab. */
+  tab(name: string): string {
+    return `.tabs-container .tab[aria-label*="${name}"]`;
+  }
+}
+
 export class Demo {
   readonly cursor = new Cursor(this);
   readonly zoom = new Zoom(this);
   readonly browser = new Browser(this);
   readonly terminal = new TerminalWindow(this);
+  readonly editor = new EditorWindow(this);
 
   private actions: Action[] = [];
 
@@ -301,6 +349,7 @@ export class Demo {
       pronunciations: this.options.pronunciations,
       snapshotAt,
       recordingsDir: this.recordingsDir(),
+      baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {
