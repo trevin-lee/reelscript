@@ -103,13 +103,13 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a selector or `{x, y}` in the focused window, or in `window`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
-| `demo.cursor.click({ button })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. |
+| `demo.cursor.click({ button, duration })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. `duration: 0` takes no video time, so a following `waitFor` cuts straight to the page the click led to. |
 | `demo.zoom.to(target, { scale, duration, ease, window, within })` | Animate a zoom centred on a target. Runs alongside the actions that follow. `within: "window"` keeps the view inside the target's window, so the desktop never shows past its edge. |
 | `demo.zoom.out({ duration, ease })` | Return to 1x. |
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
-| `demo.waitFor(selector, { window, timeout })` | Hold the camera, off camera, until the selector is visible. The page's clock keeps running, so a page can load without its loading being filmed. |
+| `demo.waitFor(selector, { window, timeout, settle })` | Hold the camera, off camera, until the selector is visible (then `settle` ms more). The page's clock keeps running, so a page can load without its loading being filmed. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open a VS Code window on a folder (copied, so your files are never edited). `extensions` are Open VSX ids or `.vsix` paths; `settings` merge over demo-friendly defaults. |
 | `demo.editor.openFile(path)`, `demo.editor.command(name)` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. |
 | `demo.editor.type(text, { wpm })` | Type at the caret. Defaults turn off auto-closing brackets and auto-indent so typed code lands as written. |

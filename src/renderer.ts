@@ -438,7 +438,7 @@ class Engine {
           if (this.inContent(w, local)) await w.page.mouse.click(local.x, local.y, { button: action.button ?? "left" });
         }
         this.lastClick = start;
-        return { end: start + DEFAULTS.clickDuration };
+        return { end: start + (action.duration ?? DEFAULTS.clickDuration) };
       }
       case "type": {
         const w = this.focused();
@@ -473,6 +473,10 @@ class Engine {
         const deadline = Date.now() + (action.timeout ?? 15_000);
         while (!(await loc.isVisible())) {
           if (Date.now() > deadline) throw new Error(`reelscript: waitFor "${action.target}" timed out in the ${w.id} window`);
+          await this.advanceClock(this.frameMs);
+          await new Promise((r) => setTimeout(r, 16));
+        }
+        for (let ms = 0; ms < (action.settle ?? 0); ms += this.frameMs) {
           await this.advanceClock(this.frameMs);
           await new Promise((r) => setTimeout(r, 16));
         }

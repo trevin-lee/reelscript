@@ -7,13 +7,13 @@ export type Action =
   | { kind: "browser.goto"; url: string; settle?: number }
   | { kind: "browser.mockAPI"; pattern: string; response: unknown; status?: number }
   | { kind: "cursor.moveTo"; target: Target; ease?: Ease; duration?: number; window?: string }
-  | { kind: "cursor.click"; button?: "left" | "right" }
+  | { kind: "cursor.click"; button?: "left" | "right"; duration?: number }
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
   | { kind: "type"; target?: string; text: string; wpm?: number }
   | { kind: "press"; key: string }
   | { kind: "wait"; ms: number }
-  | { kind: "waitFor"; target: string; window?: string; timeout?: number }
+  | { kind: "waitFor"; target: string; window?: string; timeout?: number; settle?: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
   | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; x?: number; y?: number; width?: number; height?: number }

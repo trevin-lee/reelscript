@@ -101,6 +101,12 @@ export interface WaitForOptions {
   window?: "browser" | "terminal" | "editor";
   /** Give up after this many ms of real time. Default: 15000 */
   timeout?: number;
+  /**
+   * Once the selector is visible, run the page's clock this many ms more,
+   * still off camera, for whatever the page does next (a layout pass, a
+   * view fitting itself to its content). Default: 0
+   */
+  settle?: number;
 }
 
 export interface TypeOptions {
@@ -164,7 +170,13 @@ class Cursor {
     this.demo._push({ kind: "cursor.moveTo", target, ...opts });
   }
 
-  async click(opts: { button?: "left" | "right" } = {}): Promise<void> {
+  /**
+   * Click at the cursor. The click takes `duration` ms of video (default
+   * 180), while its ripple plays. With 0, the next action starts at once:
+   * follow it with waitFor() and the frame after the click is the page the
+   * click led to, not the page on its way there.
+   */
+  async click(opts: { button?: "left" | "right"; duration?: number } = {}): Promise<void> {
     this.demo._push({ kind: "cursor.click", ...opts });
   }
 }

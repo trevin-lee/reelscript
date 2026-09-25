@@ -17,6 +17,17 @@ test("waitFor and a zoom kept within the window are recorded", async () => {
   ]);
 });
 
+test("a click can take no video time, and waitFor can settle", async () => {
+  const demo = createDemo();
+  await demo.browser.goto("https://example.test");
+  await demo.cursor.click({ duration: 0 });
+  await demo.waitFor("#next", { settle: 100 });
+  assert.deepEqual(demo.getTimeline().slice(1), [
+    { kind: "cursor.click", duration: 0 },
+    { kind: "waitFor", target: "#next", settle: 100 },
+  ]);
+});
+
 test("without a menu bar the window moves up into its place", () => {
   const withBar = createTheme("macos", noRaster);
   const without = createTheme("macos", noRaster, false);
