@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createDemo } from "../src/index.js";
-import { centreWithin } from "../src/renderer.js";
+import { centreWithin, zoomAt } from "../src/renderer.js";
 import { createTheme } from "../src/theme.js";
 
 const noRaster = async () => Buffer.alloc(0);
@@ -46,4 +46,16 @@ test("centreWithin keeps a view inside a span, or centres it when the span is na
   assert.equal(centreWithin(10, 400, 0, 1000), 200);
   // Wider than the span: the middle of the span.
   assert.equal(centreWithin(10, 1200, 100, 1100), 600);
+});
+
+test("a zoom that replaces another starts where the other has got to", () => {
+  const rest = { scale: 1, cx: 800, cy: 450 };
+  // An instant zoom to 1.5, set at t=1000 and replaced at the same instant:
+  // the new one starts from 1.5, not from the frame before.
+  const instant = { from: rest, to: { scale: 1.5, cx: 700, cy: 400 }, start: 1000, dur: 0, ease: "smooth" as const };
+  assert.deepEqual(zoomAt(instant, rest, 1000), { scale: 1.5, cx: 700, cy: 400 });
+  // Halfway through a linear one.
+  const linear = { from: rest, to: { scale: 2, cx: 600, cy: 350 }, start: 0, dur: 1000, ease: "linear" as const };
+  assert.deepEqual(zoomAt(linear, rest, 500), { scale: 1.5, cx: 700, cy: 400 });
+  assert.deepEqual(zoomAt(null, rest, 500), rest);
 });

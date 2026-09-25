@@ -494,12 +494,12 @@ class Engine {
           cy = centreWithin(cy, H / scale, w.y, w.y + this.titleH + w.height);
         }
         const to: ZoomState = { scale, cx, cy };
-        this.zoomAnim = { from: { ...this.zoom }, to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
+        this.zoomAnim = { from: zoomAt(this.zoomAnim, this.zoom, start), to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
         return null;
       }
       case "zoom.out": {
         this.zoomAnim = {
-          from: { ...this.zoom },
+          from: zoomAt(this.zoomAnim, this.zoom, start),
           to: { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 },
           start,
           dur: action.duration ?? DEFAULTS.zoomDuration,
@@ -780,6 +780,18 @@ class Engine {
     if (overlays.length) pipeline = pipeline.composite(overlays);
     return pipeline.removeAlpha().raw().toBuffer();
   }
+}
+
+/**
+ * The zoom at time `t`: as far as the running animation has got, or `rest`
+ * when none is running. A new zoom starts from here, so one that replaces
+ * another before a frame has been drawn (two at the same instant) starts
+ * where the first would have put the camera, not where the last frame was.
+ */
+export function zoomAt(anim: Tween<ZoomState> | null, rest: ZoomState, t: number): ZoomState {
+  if (!anim) return { ...rest };
+  const p = progress(t, anim.start, anim.dur, anim.ease);
+  return { scale: lerp(anim.from.scale, anim.to.scale, p), cx: lerp(anim.from.cx, anim.to.cx, p), cy: lerp(anim.from.cy, anim.to.cy, p) };
 }
 
 /**
