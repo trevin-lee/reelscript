@@ -43,3 +43,29 @@ test("page clock advances exactly one frame per step", async () => {
     await browser.close();
   }
 });
+
+test("a finished animation with a fill mode stays finished", async () => {
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 600 } });
+    await ctx.addInitScript(CLOCK_SHIM);
+    const page = await ctx.newPage();
+    await page.setContent(`<style>
+      @keyframes rise { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: none } }
+      h1 { animation: rise 100ms linear both; }
+    </style><h1>Title</h1>`);
+    const advance = (ms: number) =>
+      page.evaluate((ms) => (window as unknown as { __reelscript_advance: (n: number) => void }).__reelscript_advance(ms), ms);
+    const times: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      await advance(20);
+      times.push(Number(await page.evaluate(() => document.getAnimations()[0]?.currentTime ?? -1)));
+    }
+    // 0, 20, 40, 60, 80, then finished at 100 and held there; never back to 0.
+    assert.deepEqual(times.slice(0, 5), [0, 20, 40, 60, 80]);
+    assert.ok(times.slice(5).every((t) => t === 100), `restarted: ${times.join(",")}`);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("h1")!).opacity), "1");
+  } finally {
+    await browser.close();
+  }
+});

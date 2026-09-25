@@ -16,6 +16,10 @@ export const CLOCK_SHIM = String.raw`
   const timers = new Map();
   const rafs = new Map();
   const tracked = new WeakMap(); // Animation -> virtual currentTime
+  // Animations that ran to their end. One with a fill mode stays in
+  // document.getAnimations() after it finishes, and must not be taken for
+  // a new one and started over on the next frame.
+  const finished = new WeakSet();
   const epoch = Date.now();
   const RealDate = Date;
 
@@ -64,6 +68,7 @@ export const CLOCK_SHIM = String.raw`
     for (const cb of cbs) call(cb, [now]);
     // Step every running CSS transition / animation by exactly ms.
     for (const a of document.getAnimations()) {
+      if (finished.has(a)) continue;
       let ct = tracked.get(a);
       if (ct === undefined) {
         // New since last frame: restart it on this frame boundary.
@@ -76,6 +81,7 @@ export const CLOCK_SHIM = String.raw`
       const end = timing ? timing.endTime : Infinity;
       if (ct >= end) {
         tracked.delete(a);
+        finished.add(a);
         a.playbackRate = 1;
         a.finish();
       } else {
