@@ -9,7 +9,7 @@
 import { render as renderTimeline, type RenderResult } from "./renderer.js";
 import type { Action, Target } from "./timeline.js";
 import type { Ease } from "./easing.js";
-import type { ThemeName } from "./theme.js";
+import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import { recordCommand, saveRecording } from "./terminal.js";
@@ -17,7 +17,7 @@ import { dirname, join, resolve } from "node:path";
 
 export type { Action, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
-export type { ThemeName } from "./theme.js";
+export type { Menubar, ThemeName } from "./theme.js";
 export type { RenderOptions, RenderResult } from "./renderer.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
@@ -55,6 +55,12 @@ export interface DemoOptions {
    * `address: (url) => url.replace("http://localhost:3000", "https://example.com")`.
    */
   address?: (url: string) => string;
+  /**
+   * The macOS theme's menu bar. `false` leaves it out, and the first window
+   * moves up into its place; `{ app, clock }` sets what it says. Default:
+   * "reelscript" and a fixed clock.
+   */
+  menubar?: Menubar;
 }
 
 export interface MoveOptions {
@@ -81,6 +87,20 @@ export interface ZoomOptions {
   ease?: Ease;
   /** Window to resolve a selector in. Default: the focused window. */
   window?: "browser" | "terminal" | "editor";
+  /**
+   * `"window"` keeps the zoomed view inside the target's window, title bar
+   * included, so the desktop behind it never shows. The view is moved, not
+   * the target: aim near a window's edge and the target is off centre.
+   * Default: the whole desktop.
+   */
+  within?: "window";
+}
+
+export interface WaitForOptions {
+  /** Window to look in. Default: the focused window. */
+  window?: "browser" | "terminal" | "editor";
+  /** Give up after this many ms of real time. Default: 15000 */
+  timeout?: number;
 }
 
 export interface TypeOptions {
@@ -281,6 +301,15 @@ export class Demo {
   }
 
   /**
+   * Hold the camera until `selector` is visible. Off camera: no video time
+   * passes, but the page's clock keeps running, so a page that needs time
+   * to load, fetch or animate gets it without its loading being filmed.
+   */
+  async waitFor(selector: string, opts: WaitForOptions = {}): Promise<void> {
+    this._push({ kind: "waitFor", target: selector, ...opts });
+  }
+
+  /**
    * Narrate. Starts speaking now (or when the previous sentence finishes)
    * while the following actions continue. Use waitForNarration() to hold
    * the timeline until speech ends.
@@ -354,6 +383,7 @@ export class Demo {
       voice: this.options.voice,
       pronunciations: this.options.pronunciations,
       address: this.options.address,
+      menubar: this.options.menubar,
       snapshotAt,
       recordingsDir: this.recordingsDir(),
       baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),

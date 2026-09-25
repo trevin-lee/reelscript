@@ -4,7 +4,7 @@ import { mkdirSync, unlinkSync } from "node:fs";
 import { dirname, extname } from "node:path";
 import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
-import { createTheme, type FrameImage, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
+import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
 import { CLOCK_SHIM } from "./clock.js";
@@ -39,6 +39,8 @@ export interface RenderOptions {
   pronunciations?: Record<string, string>;
   /** Rewrites a page URL before the address pill shows it. */
   address?: (url: string) => string;
+  /** The macOS theme's menu bar, or `false` for none. */
+  menubar?: Menubar;
   onStatus?: (message: string) => void;
   /** Where terminal recordings live (for terminal.run without declared output). */
   recordingsDir?: string;
@@ -169,8 +171,11 @@ class Engine {
     desktop: [number, number] | undefined,
     themeName: ThemeName,
     private deterministic: boolean,
+    menubar: Menubar = {},
+    /** One frame of page time, for steps that run the clock off camera. */
+    private frameMs = 1000 / DEFAULTS.fps,
   ) {
-    this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent));
+    this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar);
     this.desktop = desktop ?? this.theme.defaultDesktop(viewport);
     this.cursor = { x: this.desktop[0] / 2, y: this.desktop[1] / 2 };
     this.zoom = { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 };
@@ -459,9 +464,32 @@ class Engine {
       }
       case "wait":
         return { end: start + action.ms };
+      case "waitFor": {
+        // Off camera: the page's clock runs a frame at a time, with real
+        // time between steps for the page to lay out and paint, until the
+        // target shows. No frame is filmed and no video time passes.
+        const w = action.window ? this.window(action.window) : this.focused();
+        const loc = w.page.locator(action.target).first();
+        const deadline = Date.now() + (action.timeout ?? 15_000);
+        while (!(await loc.isVisible())) {
+          if (Date.now() > deadline) throw new Error(`reelscript: waitFor "${action.target}" timed out in the ${w.id} window`);
+          await this.advanceClock(this.frameMs);
+          await new Promise((r) => setTimeout(r, 16));
+        }
+        return null;
+      }
       case "zoom.to": {
         const r = await this.resolveRect(action.target, action.window);
-        const to: ZoomState = { scale: action.scale ?? DEFAULTS.zoomScale, cx: r.x + r.w / 2, cy: r.y + r.h / 2 };
+        const scale = action.scale ?? DEFAULTS.zoomScale;
+        let cx = r.x + r.w / 2;
+        let cy = r.y + r.h / 2;
+        if (action.within === "window") {
+          const w = action.window ? this.window(action.window) : this.focused();
+          const [W, H] = this.desktop;
+          cx = centreWithin(cx, W / scale, w.x, w.x + w.width);
+          cy = centreWithin(cy, H / scale, w.y, w.y + this.titleH + w.height);
+        }
+        const to: ZoomState = { scale, cx, cy };
         this.zoomAnim = { from: { ...this.zoom }, to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
         return null;
       }
@@ -750,6 +778,16 @@ class Engine {
   }
 }
 
+/**
+ * Where to centre a view `size` wide so that it stays between `lo` and
+ * `hi`: as near `c` as it can be, or the middle when the span is narrower
+ * than the view.
+ */
+export function centreWithin(c: number, size: number, lo: number, hi: number): number {
+  if (hi - lo <= size) return (lo + hi) / 2;
+  return clamp(c, lo + size / 2, hi - size / 2);
+}
+
 /** Clip a raw RGBA image to the desktop bounds and return it as an overlay (sharp rejects out-of-bounds overlays). */
 async function clipRaw(img: RawImage, left: number, top: number, W: number, H: number): Promise<OverlayOptions | null> {
   let { width, height } = img;
@@ -796,7 +834,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const frameMs = 1000 / fps;
   const snapshot = options.snapshotAt;
 
-  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true);
+  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, options.menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
   if (options.address) engine.address = options.address;
   if (options.baseDir) engine.baseDir = options.baseDir;

@@ -99,16 +99,17 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, desktop, fps, deterministic, gif, voice, tts, pronunciations })` | `theme`: `"macos"` or `"bare"`. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
+| `createDemo({ theme, viewport, desktop, fps, deterministic, gif, voice, tts, pronunciations, address, menubar })` | `theme`: `"macos"` or `"bare"`. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). `address` rewrites what the address pill shows; `menubar` sets the macOS menu bar's `{ app, clock }`, or `false` leaves it out. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a selector or `{x, y}` in the focused window, or in `window`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
 | `demo.cursor.click({ button })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. |
-| `demo.zoom.to(target, { scale, duration, ease, window })` | Animate a zoom centred on a target. Runs alongside the actions that follow. |
+| `demo.zoom.to(target, { scale, duration, ease, window, within })` | Animate a zoom centred on a target. Runs alongside the actions that follow. `within: "window"` keeps the view inside the target's window, so the desktop never shows past its edge. |
 | `demo.zoom.out({ duration, ease })` | Return to 1x. |
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
+| `demo.waitFor(selector, { window, timeout })` | Hold the camera, off camera, until the selector is visible. The page's clock keeps running, so a page can load without its loading being filmed. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open a VS Code window on a folder (copied, so your files are never edited). `extensions` are Open VSX ids or `.vsix` paths; `settings` merge over demo-friendly defaults. |
 | `demo.editor.openFile(path)`, `demo.editor.command(name)` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. |
 | `demo.editor.type(text, { wpm })` | Type at the caret. Defaults turn off auto-closing brackets and auto-indent so typed code lands as written. |

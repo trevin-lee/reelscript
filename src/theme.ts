@@ -125,14 +125,22 @@ class MacosTheme implements Theme {
   private frameCache = new Map<string, Promise<FrameImage>>();
   private maskCache = new Map<string, Promise<RawImage>>();
 
-  constructor(private rasterize: HtmlRasterizer) {}
+  constructor(
+    private rasterize: HtmlRasterizer,
+    private menubar: Menubar = {},
+  ) {}
+
+  /** The menu bar's height, or 0 without one: the window moves up into its place. */
+  private get menubarH(): number {
+    return this.menubar === false ? 0 : MENUBAR_H;
+  }
 
   defaultDesktop([vw, vh]: [number, number]): [number, number] {
-    return [even(vw + PAD_X * 2), even(MENUBAR_H + GAP_TOP + TITLE_H + vh + PAD_BOTTOM)];
+    return [even(vw + PAD_X * 2), even(this.menubarH + GAP_TOP + TITLE_H + vh + PAD_BOTTOM)];
   }
 
   mainPlacement([dw]: [number, number], [w]: [number, number]): { x: number; y: number } {
-    return { x: Math.round((dw - w) / 2), y: MENUBAR_H + GAP_TOP };
+    return { x: Math.round((dw - w) / 2), y: this.menubarH + GAP_TOP };
   }
 
   private css(): string {
@@ -155,7 +163,7 @@ html, body { width: ${w}px; height: ${h}px; }
 .menubar b { font-weight: 600; }
 </style></head><body>
 <div class="wall"></div><div class="glow"></div>
-<div class="menubar"><b>reelscript</b><span>Tue Sep 23&nbsp;&nbsp;9:41 AM</span></div>
+${this.menubar === false ? "" : `<div class="menubar"><b>${escapeHtml(this.menubar.app ?? "reelscript")}</b><span>${escapeHtml(this.menubar.clock ?? "Tue Sep 23  9:41 AM").replace(/ {2}/g, "&nbsp;&nbsp;")}</span></div>`}
 </body></html>`;
       p = this.rasterize(html, w, h, false).then(toRaw);
       this.bgCache.set(key, p);
@@ -250,12 +258,15 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function createTheme(name: ThemeName, rasterize: HtmlRasterizer): Theme {
+/** The macOS theme's menu bar: its app name and clock, or none at all. */
+export type Menubar = false | { app?: string; clock?: string };
+
+export function createTheme(name: ThemeName, rasterize: HtmlRasterizer, menubar: Menubar = {}): Theme {
   switch (name) {
     case "bare":
       return new BareTheme();
     case "macos":
-      return new MacosTheme(rasterize);
+      return new MacosTheme(rasterize, menubar);
     default:
       throw new Error(`reelscript: unknown theme "${name as string}"`);
   }
