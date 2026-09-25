@@ -236,7 +236,7 @@ html, body { width: ${W}px; height: ${H}px; background: transparent; }
  * middle: the host is the part worth reading.
  */
 function displayUrl(url: string): string {
-  if (!url) return "";
+  if (!url || url === "about:blank") return "";
   if (url.startsWith("file://")) return "";
   try {
     const u = new URL(url);

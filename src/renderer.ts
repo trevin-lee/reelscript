@@ -37,6 +37,8 @@ export interface RenderOptions {
   voice?: string;
   /** Words to respell before synthesis, e.g. { Reelscript: "Reel script" }. */
   pronunciations?: Record<string, string>;
+  /** Rewrites a page URL before the address pill shows it. */
+  address?: (url: string) => string;
   onStatus?: (message: string) => void;
   /** Where terminal recordings live (for terminal.run without declared output). */
   recordingsDir?: string;
@@ -159,6 +161,8 @@ class Engine {
   private clips = new Map<number, Clip>();
   private narrationEnd = 0;
   readonly narration: NarrationCue[] = [];
+  /** Rewrites a page URL before the address pill shows it. */
+  address?: (url: string) => string;
 
   constructor(
     private viewport: [number, number],
@@ -668,7 +672,10 @@ class Engine {
   /** Window chrome as an overlay, clipped to the desktop; cached per style and position. */
   private async frameOverlay(w: Win): Promise<OverlayOptions | null> {
     if (w.kind === "editor") w.title = editorTitle(await w.page.title(), this.editorFallbackTitle);
-    const style = { kind: w.kind, width: w.width, height: w.height, title: w.title, url: w.url, focused: w.id === this.focusedId };
+    // A browser window shows where its page is now, in-page navigation
+    // included, not the address it was opened at.
+    const url = w.kind === "browser" ? (this.address ? this.address(w.page.url()) : w.page.url()) : w.url;
+    const style = { kind: w.kind, width: w.width, height: w.height, title: w.title, url, focused: w.id === this.focusedId };
     const key = `${JSON.stringify(style)}@${w.x},${w.y}`;
     if (w.frameOverlay?.key === key) return w.frameOverlay.overlay;
     const img = await this.theme.frame(style);
@@ -791,6 +798,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true);
   if (options.onStatus) engine.onStatus = options.onStatus;
+  if (options.address) engine.address = options.address;
   if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
 

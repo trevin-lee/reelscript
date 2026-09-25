@@ -49,6 +49,12 @@ export interface DemoOptions {
   recordingsDir?: string;
   /** Print render progress to stderr. Default: true. */
   verbose?: boolean;
+  /**
+   * What the browser window's address pill shows for a page's URL. Default:
+   * the host and path. Use it to show a dev server as the public site:
+   * `address: (url) => url.replace("http://localhost:3000", "https://example.com")`.
+   */
+  address?: (url: string) => string;
 }
 
 export interface MoveOptions {
@@ -347,6 +353,7 @@ export class Demo {
       tts: this.options.tts,
       voice: this.options.voice,
       pronunciations: this.options.pronunciations,
+      address: this.options.address,
       snapshotAt,
       recordingsDir: this.recordingsDir(),
       baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
