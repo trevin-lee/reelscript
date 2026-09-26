@@ -140,6 +140,12 @@ export interface RunOptions {
   speed?: number;
   /** Cap silences in recorded output, in ms. Default: 700 */
   maxGapMs?: number;
+  /**
+   * Show a new prompt once the output ends. Default: true. With false the
+   * command looks as if it is still running, and terminal.print() can go on
+   * with its output.
+   */
+  prompt?: boolean;
 }
 
 export interface EditorOptions {
@@ -244,6 +250,15 @@ class TerminalWindow extends Win {
   async run(command: string, opts: RunOptions = {}): Promise<void> {
     this.demo._push({ kind: "terminal.run", command, ...opts });
   }
+
+  /**
+   * More output, with no command typed: the rest of a command run with
+   * `prompt: false`. Spread over `duration` ms; `prompt: true` ends it with
+   * a new prompt.
+   */
+  async print(text: string, opts: { duration?: number; prompt?: boolean } = {}): Promise<void> {
+    this.demo._push({ kind: "terminal.print", text, ...opts });
+  }
 }
 
 class EditorWindow extends Win {
@@ -317,6 +332,16 @@ export class Demo {
    * passes, but the page's clock keeps running, so a page that needs time
    * to load, fetch or animate gets it without its loading being filmed.
    */
+  /**
+   * Run `fn` at this point of the timeline, off camera: no video time
+   * passes, and the render waits for it. For what the page should see happen
+   * at a given moment and cannot cause itself, such as a change another
+   * client makes on the server.
+   */
+  async call(fn: () => unknown): Promise<void> {
+    this._push({ kind: "call", fn });
+  }
+
   async waitFor(selector: string, opts: WaitForOptions = {}): Promise<void> {
     this._push({ kind: "waitFor", target: selector, ...opts });
   }

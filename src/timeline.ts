@@ -48,7 +48,11 @@ export type Action =
       speed?: number;
       /** Cap silences in recorded output, ms. Default: 700 */
       maxGapMs?: number;
-    };
+      /** Show a new prompt after the output. Default: true */
+      prompt?: boolean;
+    }
+  | { kind: "terminal.print"; text: string; duration?: number; prompt?: boolean }
+  | { kind: "call"; fn: () => unknown };
 
 export type ActionKind = Action["kind"];
 

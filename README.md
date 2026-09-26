@@ -109,6 +109,7 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
+| `demo.call(fn)` | Run a function at this point of the timeline, off camera, and wait for it: for what the page should see happen at that moment and cannot cause itself, such as a change another client makes. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold the camera, off camera, until the selector is visible (then `settle` ms more). The page's clock keeps running, so a page can load without its loading being filmed. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open a VS Code window on a folder (copied, so your files are never edited). `extensions` are Open VSX ids or `.vsix` paths; `settings` merge over demo-friendly defaults. |
 | `demo.editor.openFile(path)`, `demo.editor.command(name)` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. |
@@ -117,7 +118,8 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.browser.focus()`, `demo.terminal.focus()`, `demo.editor.focus()` | Bring a window to the front and direct typing to it. |
 | `demo.browser.place({ x, y, width, height })`, `demo.terminal.place(...)` | Move or resize a window. `x, y` is the frame origin in desktop pixels; `width, height` is the content size. |
 | `demo.terminal.open({ title, prompt, fontSize, x, y, width, height })` | Open a terminal window and focus it. The first window opened takes the main position; later ones cascade to the lower right unless placed. |
-| `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
+| `demo.terminal.print(text, { duration, prompt })` | More output with no command typed, for a command run with `prompt: false`. |
+| `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs, prompt })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
 | `demo.say(text, { voice, speed })` | Queue narration. Starts immediately or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.render(path)` | Render to `.mp4` (H.264) or `.gif` (palette-optimized, 960px / 20fps by default, see `gif` option). Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |

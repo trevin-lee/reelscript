@@ -59,3 +59,17 @@ test("a zoom that replaces another starts where the other has got to", () => {
   assert.deepEqual(zoomAt(linear, rest, 500), { scale: 1.5, cx: 700, cy: 400 });
   assert.deepEqual(zoomAt(null, rest, 500), rest);
 });
+
+test("call, and terminal output that goes on without a prompt, are recorded", async () => {
+  const demo = createDemo();
+  const fn = () => {};
+  await demo.terminal.open();
+  await demo.terminal.run("agent", { output: "working", duration: 300, prompt: false });
+  await demo.call(fn);
+  await demo.terminal.print("done", { duration: 200, prompt: true });
+  const [, run, call, print] = demo.getTimeline();
+  assert.deepEqual(run, { kind: "terminal.run", command: "agent", output: "working", duration: 300, prompt: false });
+  assert.equal(call.kind, "call");
+  assert.equal((call as { fn: unknown }).fn, fn);
+  assert.deepEqual(print, { kind: "terminal.print", text: "done", duration: 200, prompt: true });
+});

@@ -633,10 +633,33 @@ class Engine {
           await this.termWrite(w, out);
           if (!prompted && t >= promptAt) {
             prompted = true;
-            await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
+            if (action.prompt !== false) await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
           }
         };
         return { end: promptAt + 100, onFrame: flush, onEnd: () => flush(Infinity) };
+      }
+      case "terminal.print": {
+        const w = this.window("terminal");
+        const events = this.termEvents.get(index);
+        if (!events) throw new Error("reelscript: terminal events missing (internal)");
+        const lastOut = events.length ? start + events[events.length - 1][0] : start;
+        const endsWithNewline = !events.length || /\n$/.test(events[events.length - 1][1]);
+        let nextEvent = 0;
+        let prompted = false;
+        const flush = async (t: number) => {
+          let out = "";
+          while (nextEvent < events.length && start + events[nextEvent][0] <= t) out += events[nextEvent++][1];
+          await this.termWrite(w, out);
+          if (action.prompt && !prompted && t >= lastOut + 150) {
+            prompted = true;
+            await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
+          }
+        };
+        return { end: lastOut + 250, onFrame: flush, onEnd: () => flush(Infinity) };
+      }
+      case "call": {
+        await action.fn();
+        return null;
       }
       default: {
         const never: never = action;
@@ -875,8 +898,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   // Terminal output: declared in the script, or replayed from a recording.
   const termRuns = actions.flatMap((a, i) => (a.kind === "terminal.run" ? [i] : []));
-  if (termRuns.length) {
+  const termPrints = actions.flatMap((a, i) => (a.kind === "terminal.print" ? [i] : []));
+  if (termRuns.length || termPrints.length) {
     const events = new Map<number, TermEvent[]>();
+    for (const i of termPrints) {
+      const a = actions[i] as Extract<Action, { kind: "terminal.print" }>;
+      events.set(i, scriptedEvents(a.text, a.duration));
+    }
     for (const i of termRuns) {
       const a = actions[i] as Extract<Action, { kind: "terminal.run" }>;
       if (a.output !== undefined) {
