@@ -26,6 +26,8 @@ jobs:
           key: reelscript-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm run typecheck
       - run: npm test
+      - name: Check every example (no rendering)
+        run: npm run build && node dist/cli.js check examples/*.ts
       - name: Render the example end to end
         run: npm run example
       - name: Render a frame of the editor example (downloads code-server once, then cached)

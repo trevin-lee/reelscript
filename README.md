@@ -34,6 +34,7 @@ await demo.render("out/demo.mp4");
 - **Code-first, not a UI timeline.** The demo is a script you version, diff, and review.
 - **Deterministic offline rendering.** Every step is scripted, so frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Perfect 60fps with no dropped frames, and it runs headless in CI.
 - **The page's clock is virtual.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and steps CSS transitions through the Web Animations API, advancing exactly one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is.
+- **A camera that follows the action.** `camera: "follow"` eases in toward each click and the typing caret, holds, and eases back out when things go quiet, with no zoom calls in the script. Or place zooms by hand with `zoom.to()`.
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing. The polish that makes a demo feel produced, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are CSS selectors, and `browser.mockAPI()` returns canned JSON so demos never depend on a live backend, real credentials, or flaky auth.
 - **Clean stage.** The `macos` theme composites the page into a browser window on a mocked macOS desktop, so there is nothing to tidy up before recording.
@@ -86,14 +87,43 @@ jobs:
 
 Scripts may `import { createDemo } from "@reelscript/cli"` without installing the package locally; the CLI resolves it to its own copy.
 
+## Use it from a coding agent (MCP)
+
+`reelscript mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Code or any MCP client can write and iterate on demos itself:
+
+```sh
+claude mcp add reelscript -- npx -y @reelscript/cli mcp
+```
+
+| Tool | What the agent gets |
+| --- | --- |
+| `reelscript_docs` | This README: the API and examples. |
+| `inspect_page` | Visible buttons, links, and inputs on a URL, each with a suggested selector and position, plus a screenshot. |
+| `check_script` | Runs the timeline without rendering; passes, or names the script line that failed. |
+| `preview_frame` | The frame at a given second, as an image the agent can look at. |
+| `render_script` | The final `.mp4` or `.gif`. |
+
+Ask it for "a 20-second demo of creating a project in the app on localhost:3000" and it will inspect the page, write the script, check it, look at frames, and render.
+
 ## CLI
 
 ```sh
 reelscript render  <script.ts> [--out demo.mp4]        # render a script to video
 reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single frame at 2.5s
+reelscript check   <script.ts> [more.ts ...]            # run the timeline without rendering; fail on missing selectors
+reelscript mcp                                          # MCP server for coding agents
 ```
 
 `preview` is the fast way to iterate on a moment of a demo without waiting for the whole video.
+
+`check` is the CI guard for your demos. It drives the real app through the whole timeline with nothing captured or encoded, so it takes about a second for a browser demo, and it fails when the UI changes under a script, pointing at the line:
+
+```text
+reelscript: target "#new-project" was not found or never became visible in the browser window
+  at demo/signup.ts:14:19 (cursor.moveTo)
+```
+
+Run it on every pull request next to your tests; render only on main.
 
 ## API
 
@@ -131,6 +161,7 @@ Early but working end to end. Roadmap, roughly in order:
 - Window open/close animations and drag-to-move
 - Editor: open files by clicking, seed the integrated terminal, per-file caret placement
 - Pseudo-terminal recording for TTY-only tools
+- `reelscript generate`: point it at a URL with a sentence and get a script
 - Captions generated from narration (SRT and burned-in)
 - Auto-zoom that follows the cursor, and zoom transitions with a bit of drift
 - `watch` mode with live preview while editing a script

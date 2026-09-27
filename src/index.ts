@@ -12,13 +12,33 @@ import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
+import type { FollowCamera } from "./renderer.js";
 import { recordCommand, saveRecording } from "./terminal.js";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const LIB_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** "demo.ts:14:7" for the user code that called into the Demo API. */
+function callerLocation(): string {
+  const stack = new Error().stack?.split("\n").slice(1) ?? [];
+  for (const line of stack) {
+    const m = line.match(/\(?((?:file:\/\/)?\/[^():]+):(\d+):(\d+)\)?\s*$/);
+    if (!m) continue;
+    let file = m[1].replace(/^file:\/\//, "");
+    if (file.startsWith(LIB_DIR) || file.includes("node:internal") || file.includes("/node_modules/")) continue;
+    // Scripts run from a temporary .mts copy (CommonJS projects) report the copy's name.
+    if (/\/\.[^/]+\.reelscript\.mts$/.test(file) && process.env.REELSCRIPT_SCRIPT) file = process.env.REELSCRIPT_SCRIPT;
+    const rel = relative(process.cwd(), file);
+    return `${rel.startsWith("..") ? file : rel}:${m[2]}:${m[3]}`;
+  }
+  return "unknown location";
+}
 
 export type { Action, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { Menubar, ThemeName } from "./theme.js";
-export type { RenderOptions, RenderResult } from "./renderer.js";
+export type { RenderOptions, RenderResult, FollowCamera } from "./renderer.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
@@ -35,6 +55,12 @@ export interface DemoOptions {
   desktop?: [number, number];
   /** Output frames per second. Default: 60. */
   fps?: number;
+  /**
+   * "follow" zooms toward clicks and the typing caret automatically and
+   * eases out when things go quiet; pass { scale, holdMs } to tune it.
+   * Default: "manual" (zoom only on zoom.to()).
+   */
+  camera?: "manual" | "follow" | FollowCamera;
   /** Freeze the page clock and step it per frame for reproducible animations. Default: true. */
   deterministic?: boolean;
   /** Applied when rendering to a .gif path. Default: 960px wide at 20fps. */
@@ -328,12 +354,15 @@ export class Demo {
   readonly editor = new EditorWindow(this);
 
   private actions: Action[] = [];
+  /** Where in the user's script each action was created, for error messages. */
+  private sources: string[] = [];
 
   constructor(readonly options: DemoOptions = {}) {}
 
   /** @internal */
   _push(action: Action): void {
     this.actions.push(action);
+    this.sources.push(callerLocation());
   }
 
   /** Type into a field with accelerated, evenly paced keystrokes. */
@@ -415,6 +444,35 @@ export class Demo {
     return files;
   }
 
+  /**
+   * Run the whole timeline against the real app without capturing or
+   * encoding: every selector must resolve, every command must succeed, every
+   * recording must exist. Narration isn't synthesized; its length is
+   * estimated. Throws on the first failure with the script location.
+   */
+  async check(): Promise<RenderResult> {
+    const started = Date.now();
+    const result = await renderTimeline(this.actions, {
+      out: "",
+      check: true,
+      camera: this.options.camera,
+      fps: this.options.fps,
+      viewport: this.options.viewport,
+      desktop: this.options.desktop,
+      theme: this.options.theme,
+      deterministic: this.options.deterministic,
+      recordingsDir: this.recordingsDir(),
+      sources: this.sources,
+      baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
+      onStatus: (m) => process.stderr.write(`reelscript: ${m}\n`),
+    });
+    const script = basename(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "script");
+    process.stderr.write(
+      `reelscript: check passed for ${script}: ${this.actions.length} actions, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
+    );
+    return result;
+  }
+
   async render(outPath: string): Promise<RenderResult> {
     if (process.env.REELSCRIPT_RECORD) {
       const files = await this.recordTerminals();
@@ -425,6 +483,7 @@ export class Demo {
       );
       return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
     }
+    if (process.env.REELSCRIPT_CHECK) return this.check();
     const out = process.env.REELSCRIPT_OUT || outPath;
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
@@ -439,6 +498,7 @@ export class Demo {
       theme: this.options.theme,
       deterministic: this.options.deterministic,
       gif: this.options.gif,
+      camera: this.options.camera,
       tts: this.options.tts,
       voice: this.options.voice,
       pronunciations: this.options.pronunciations,
@@ -446,6 +506,7 @@ export class Demo {
       menubar: this.options.menubar,
       snapshotAt,
       recordingsDir: this.recordingsDir(),
+      sources: this.sources,
       baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose

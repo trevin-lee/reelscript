@@ -4,7 +4,12 @@
  * the script (global install, the container, or `npx`). The import resolves
  * to the copy of the library that is running the CLI.
  */
-const SELF = new URL("./index.js", import.meta.url).href;
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+// Built package: index.js sits next to this file. Running from source (tsx): index.ts.
+const built = new URL("./index.js", import.meta.url);
+const SELF = (existsSync(fileURLToPath(built)) ? built : new URL("./index.ts", import.meta.url)).href;
 
 type Resolve = (
   specifier: string,

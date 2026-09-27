@@ -59,6 +59,16 @@ export interface RenderOptions {
    * instead of encoding a video. Fast way to iterate on a moment of a demo.
    */
   snapshotAt?: number;
+  /** Run the timeline without capturing, encoding, or synthesizing narration (see Demo.check). */
+  check?: boolean;
+  /**
+   * Camera behaviour. "manual" (default) zooms only on zoom.to(); "follow"
+   * zooms toward clicks and the typing caret automatically and eases back
+   * out when things go quiet.
+   */
+  camera?: "manual" | "follow" | FollowCamera;
+  /** Script location of each action, used in error messages. */
+  sources?: string[];
   onProgress?: (info: { frame: number; timeMs: number }) => void;
 }
 
@@ -101,6 +111,19 @@ interface Step {
   end: number;
   onFrame?: (t: number) => Promise<void>;
   onEnd?: () => Promise<void> | void;
+}
+
+export interface FollowCamera {
+  /** Zoom level while following. Default: 1.5 */
+  scale?: number;
+  /** How long to stay zoomed after the last click or keystroke, ms. Default: 1200 */
+  holdMs?: number;
+}
+
+interface Attention {
+  at: number;
+  x: number;
+  y: number;
 }
 
 interface Geometry {
@@ -153,6 +176,14 @@ class Engine {
   private zoom: ZoomState;
   private zoomAnim: Tween<ZoomState> | null = null;
   private lastClick = -Infinity;
+  // follow camera
+  private follow: Required<FollowCamera> | null = null;
+  private attention: Attention | null = null;
+  private manualZoom = false;
+  private lastSampleT = 0;
+  private typing: { win: Win; until: number } | null = null;
+  private lastCaretProbe = -Infinity;
+  private actions: Action[] = [];
   // terminal
   private termEvents = new Map<number, TermEvent[]>();
   // editor
@@ -188,6 +219,31 @@ class Engine {
 
   setTerminalEvents(events: Map<number, TermEvent[]>): void {
     this.termEvents = events;
+  }
+
+  setCamera(camera: RenderOptions["camera"], actions: Action[]): void {
+    this.actions = actions;
+    if (!camera || camera === "manual") return;
+    const opts = camera === "follow" ? {} : camera;
+    this.follow = { scale: opts.scale ?? 1.5, holdMs: opts.holdMs ?? 1200 };
+  }
+
+  private attend(at: number, p: Point): void {
+    if (this.follow) this.attention = { at, x: p.x, y: p.y };
+  }
+
+  /** While typing, keep the camera on the caret (the focused element, which VS Code and xterm keep at the caret). */
+  async followCaret(t: number): Promise<void> {
+    if (!this.follow || !this.typing || t > this.typing.until || t - this.lastCaretProbe < 64) return;
+    this.lastCaretProbe = t;
+    const w = this.typing.win;
+    const r = await w.page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === document.body) return null;
+      const b = el.getBoundingClientRect();
+      return { x: b.left + Math.min(b.width / 2, 300), y: b.top + b.height / 2 };
+    });
+    if (r) this.attend(t, { x: w.x + r.x, y: w.y + this.titleH + r.y });
   }
 
   async open(): Promise<void> {
@@ -430,6 +486,8 @@ class Engine {
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
         const dur = action.duration ?? clamp(Math.round(dist * 0.9 + 200), 250, 1400);
         this.move = { from, to, start, dur, ease: action.ease ?? "smooth" };
+        // Anticipate: if this move ends in a click, start easing the camera toward it now.
+        if (this.actions[index + 1]?.kind === "cursor.click") this.attend(start, to);
         return {
           end: start + dur,
           onEnd: () => {
@@ -446,6 +504,7 @@ class Engine {
           if (this.inContent(w, local)) await w.page.mouse.click(local.x, local.y, { button: action.button ?? "left" });
         }
         this.lastClick = start;
+        this.attend(start, this.cursor);
         return { end: start + (action.duration ?? DEFAULTS.clickDuration) };
       }
       case "type": {
@@ -460,8 +519,10 @@ class Engine {
           while (next < chars.length && firstAt + next * msPerChar <= upTo) batch += chars[next++];
           if (batch) await w.page.keyboard.type(batch);
         };
+        const end = firstAt + chars.length * msPerChar + 120;
+        this.typing = { win: w, until: end };
         return {
-          end: firstAt + chars.length * msPerChar + 120,
+          end,
           onFrame: flush,
           onEnd: () => flush(Infinity),
         };
@@ -503,9 +564,12 @@ class Engine {
         }
         const to: ZoomState = { scale, cx, cy };
         this.zoomAnim = { from: zoomAt(this.zoomAnim, this.zoom, start), to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
+        this.manualZoom = true; // an explicit zoom takes over from the follow camera until zoom.out()
         return null;
       }
       case "zoom.out": {
+        this.manualZoom = false;
+        this.attention = null;
         this.zoomAnim = {
           from: zoomAt(this.zoomAnim, this.zoom, start),
           to: { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 },
@@ -574,6 +638,7 @@ class Engine {
             await w.page.keyboard.press("Enter");
           }
         };
+        this.typing = { win: w, until: enterAt };
         return { end: enterAt + 500, onFrame: flush, onEnd: () => flush(Infinity) };
       }
       case "window.focus": {
@@ -651,6 +716,7 @@ class Engine {
             if (action.prompt !== false) await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
           }
         };
+        this.typing = { win: w, until: promptAt };
         return { end: promptAt + 100, onFrame: flush, onEnd: () => flush(Infinity) };
       }
       case "terminal.print": {
@@ -686,11 +752,14 @@ class Engine {
   /** Time (ms) after which nothing is still animating or speaking. */
   pendingUntil(): number {
     const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
-    return Math.max(zoom, this.narrationEnd);
+    const follow = this.follow && this.attention ? this.attention.at + this.follow.holdMs + 900 : 0;
+    return Math.max(zoom, this.narrationEnd, follow);
   }
 
   /** Advance continuous state (cursor, zoom) to time t. */
   sample(t: number): void {
+    const dt = Math.max(0, t - this.lastSampleT);
+    this.lastSampleT = t;
     if (this.move) {
       const p = progress(t, this.move.start, this.move.dur, this.move.ease);
       this.cursor = { x: lerp(this.move.from.x, this.move.to.x, p), y: lerp(this.move.from.y, this.move.to.y, p) };
@@ -703,7 +772,39 @@ class Engine {
         this.zoom = { ...z.to };
         this.zoomAnim = null;
       }
+    } else if (this.follow && !this.manualZoom) {
+      this.followCamera(t, dt);
     }
+  }
+
+  /**
+   * Ease the camera toward the latest attention point while it's fresh, keep
+   * the cursor inside the zoomed view if it wanders, and ease back to the full
+   * desktop when things go quiet. Exponential smoothing, so motion is
+   * frame-rate independent and deterministic.
+   */
+  private followCamera(t: number, dt: number): void {
+    const f = this.follow!;
+    const [W, H] = this.desktop;
+    const active = this.attention && t - this.attention.at < f.holdMs;
+    let target: ZoomState = { scale: 1, cx: W / 2, cy: H / 2 };
+    if (active && this.attention) {
+      target = { scale: f.scale, cx: this.attention.x, cy: this.attention.y };
+      // Keep the cursor within the inner 70% of the zoomed view.
+      const halfW = (W / f.scale / 2) * 0.7;
+      const halfH = (H / f.scale / 2) * 0.7;
+      if (this.cursor.x > target.cx + halfW) target.cx = this.cursor.x - halfW;
+      if (this.cursor.x < target.cx - halfW) target.cx = this.cursor.x + halfW;
+      if (this.cursor.y > target.cy + halfH) target.cy = this.cursor.y - halfH;
+      if (this.cursor.y < target.cy - halfH) target.cy = this.cursor.y + halfH;
+    }
+    const kScale = 1 - Math.exp(-dt / (active ? 380 : 520));
+    const kPan = 1 - Math.exp(-dt / 320);
+    this.zoom = {
+      scale: this.zoom.scale + (target.scale - this.zoom.scale) * kScale,
+      cx: this.zoom.cx + (target.cx - this.zoom.cx) * kPan,
+      cy: this.zoom.cy + (target.cy - this.zoom.cy) * kPan,
+    };
   }
 
   /** Drive the real mouse in whichever window is under the cursor so hover states render. */
@@ -885,11 +986,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const fps = options.fps ?? DEFAULTS.fps;
   const viewport = options.viewport ?? DEFAULTS.viewport;
   const themeName = options.theme ?? "macos";
-  const frameMs = 1000 / fps;
   const snapshot = options.snapshotAt;
+  // A check steps time coarsely: nothing is captured, only page state matters.
+  const frameMs = options.check ? 50 : 1000 / fps;
 
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, options.menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
+  engine.setCamera(options.camera, actions);
   if (options.address) engine.address = options.address;
   if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
@@ -897,8 +1000,17 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   // Narration is synthesized up front so clip durations can pace the timeline.
   const sayIndexes = actions.flatMap((a, i) => (a.kind === "say" ? [i] : []));
   const isGif = extname(options.out).toLowerCase() === ".gif";
-  const hasAudio = sayIndexes.length > 0 && snapshot === undefined && !isGif;
-  if (sayIndexes.length) {
+  const check = options.check ?? false;
+  const hasAudio = sayIndexes.length > 0 && snapshot === undefined && !isGif && !check;
+  if (sayIndexes.length && check) {
+    // Estimate speech length (~155 wpm) instead of loading the TTS model.
+    const clips = new Map<number, Clip>();
+    for (const i of sayIndexes) {
+      const words = (actions[i] as Extract<Action, { kind: "say" }>).text.split(/\s+/).filter(Boolean).length;
+      clips.set(i, { file: "", seconds: Math.max(0.6, words / 2.6) });
+    }
+    engine.setClips(clips);
+  } else if (sayIndexes.length) {
     const tts = options.tts ?? kokoro();
     options.onStatus?.(`synthesizing narration (${sayIndexes.length} clip${sayIndexes.length === 1 ? "" : "s"})`);
     const clips = new Map<number, Clip>();
@@ -944,7 +1056,14 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   }
 
   const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
-  const encoder = snapshot === undefined ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
+  const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
+  const where = (index: number, err: unknown): Error => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    const loc = options.sources?.[index];
+    if (loc && !e.message.includes(`\n  at ${loc}`)) e.message += `\n  at ${loc} (${actions[index]?.kind})`;
+    return e;
+  };
+  let stepIndex = -1;
 
   await engine.open();
   encoder?.start();
@@ -961,7 +1080,11 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       // Advance the sequential step machine up to time t.
       for (;;) {
         if (step && t >= step.end) {
-          await step.onEnd?.();
+          try {
+            await step.onEnd?.();
+          } catch (err) {
+            throw where(stepIndex, err);
+          }
           nextStart = step.end;
           step = null;
         }
@@ -970,17 +1093,31 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           endAt ??= Math.max(nextStart, engine.pendingUntil()) + DEFAULTS.tailMs;
           break;
         }
-        step = await engine.begin(actions[i], i, nextStart);
+        try {
+          step = await engine.begin(actions[i], i, nextStart);
+        } catch (err) {
+          throw where(i, err);
+        }
+        stepIndex = i;
         i++;
       }
       if (endAt !== null && t >= endAt) break;
 
       engine.sample(t);
-      await engine.syncMouse();
-      if (step?.onFrame) await step.onFrame(t);
+      if (!check) await engine.syncMouse();
+      if (step?.onFrame) {
+        try {
+          await step.onFrame(t);
+        } catch (err) {
+          throw where(stepIndex, err);
+        }
+      }
+      await engine.followCaret(t);
       await engine.advanceClock(frameMs);
 
-      if (snapshot !== undefined) {
+      if (check) {
+        // nothing to capture
+      } else if (snapshot !== undefined) {
         if (t + frameMs / 2 >= snapshot || (endAt !== null && t + frameMs >= endAt)) {
           const rgb = await engine.frame(t);
           mkdirSync(dirname(options.out), { recursive: true });

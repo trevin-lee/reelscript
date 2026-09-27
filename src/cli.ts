@@ -26,8 +26,10 @@ function usage(): never {
 usage:
   reelscript render  <script> [--out demo.mp4]
   reelscript preview <script> --at <seconds> [--out frame.png]
+  reelscript check   <script>            run the timeline without rendering; fail on missing selectors
   reelscript record  <script>            run terminal commands for real and save recordings
   reelscript warmup                      download the narration model into the cache
+  reelscript mcp                         run the MCP server (stdio) for coding agents
 
 env:
   REELSCRIPT_FFMPEG   path to ffmpeg (defaults to bundled ffmpeg-static)`);
@@ -88,10 +90,23 @@ async function main(): Promise<void> {
       await runScript(script);
       break;
     }
+    case "check": {
+      if (!positional.length) usage();
+      for (const script of positional) {
+        process.env.REELSCRIPT_CHECK = "1";
+        await runScript(script);
+      }
+      break;
+    }
     case "record": {
       const script = positional[0] ?? usage();
       process.env.REELSCRIPT_RECORD = "1";
       await runScript(script);
+      break;
+    }
+    case "mcp": {
+      const { serve } = await import("./mcp.js");
+      await serve();
       break;
     }
     case "warmup": {
