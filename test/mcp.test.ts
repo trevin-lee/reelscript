@@ -15,8 +15,10 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     command: process.execPath,
     args: ["--import", "tsx", "src/cli.ts", "mcp"],
     cwd: root,
-    stderr: "ignore",
+    stderr: "pipe",
   });
+  let serverLog = "";
+  transport.stderr?.on("data", (d) => (serverLog += d.toString()));
   const client = new Client({ name: "reelscript-test", version: "0.0.0" });
   await client.connect(transport);
   try {
@@ -52,6 +54,9 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     const frame = (await client.callTool({ name: "preview_frame", arguments: { script: "examples/terminal.ts", at: 2, width: 640 } })).content as Content;
     const image = frame.find((c) => c.type === "image");
     assert.ok(image?.data && image.data.length > 1000, "preview returns a PNG");
+  } catch (err) {
+    if (err instanceof Error) err.message += `\n--- server stderr ---\n${serverLog.slice(-4000)}`;
+    throw err;
   } finally {
     await client.close();
   }
