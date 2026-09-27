@@ -15,13 +15,14 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     command: process.execPath,
     args: ["--import", "tsx", "src/cli.ts", "mcp"],
     cwd: root,
+    env: process.env as Record<string, string>,
     stderr: "pipe",
   });
   let serverLog = "";
   transport.stderr?.on("data", (d) => (serverLog += d.toString()));
   const client = new Client({ name: "reelscript-test", version: "0.0.0" });
-  await client.connect(transport);
   try {
+    await client.connect(transport);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), ["check_script", "inspect_page", "preview_frame", "reelscript_docs", "render_script"]);
     assert.match(client.getInstructions() ?? "", /check_script/);
