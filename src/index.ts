@@ -127,11 +127,24 @@ export interface TerminalOptions {
   prompt?: string;
   /** Default: 15 */
   fontSize?: number;
+  /**
+   * A fixed size in characters, instead of as many as the window holds: for
+   * output recorded at that size, such as a full-screen program, whose
+   * layout depends on it. Make the window big enough to show it.
+   */
+  cols?: number;
+  rows?: number;
 }
 
 export interface RunOptions {
   /** Output to show. Omit to replay a recording made with `reelscript record`. */
   output?: string;
+  /**
+   * Output as timed chunks, [ms, text], escape codes and all: a recording
+   * made elsewhere, of a full-screen program, say. Played with `speed` and
+   * `maxGapMs` like a recording.
+   */
+  events?: [number, string][];
   /** Spread declared output over this many ms. */
   duration?: number;
   /** Typing speed for the command. Default: 300 */
@@ -253,10 +266,14 @@ class TerminalWindow extends Win {
 
   /**
    * More output, with no command typed: the rest of a command run with
-   * `prompt: false`. Spread over `duration` ms; `prompt: true` ends it with
-   * a new prompt.
+   * `prompt: false`. Spread over `duration` ms, or given as timed `events`
+   * (played like `run`'s, and `text` is then ignored); `prompt: true` ends
+   * it with a new prompt.
    */
-  async print(text: string, opts: { duration?: number; prompt?: boolean } = {}): Promise<void> {
+  async print(
+    text: string,
+    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGapMs?: number } = {},
+  ): Promise<void> {
     this.demo._push({ kind: "terminal.print", text, ...opts });
   }
 }
@@ -379,12 +396,12 @@ export class Demo {
     return join(dirname(resolve(script)), "recordings");
   }
 
-  /** Run every terminal command that has no declared output and save its recording. */
+  /** Run every terminal command that has no declared output or events and save its recording. */
   async recordTerminals(): Promise<string[]> {
     const dir = this.recordingsDir();
     const files: string[] = [];
     for (const a of this.actions) {
-      if (a.kind !== "terminal.run" || a.output !== undefined) continue;
+      if (a.kind !== "terminal.run" || a.output !== undefined || a.events) continue;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const rec = await recordCommand(a.command);
       files.push(saveRecording(dir, rec));

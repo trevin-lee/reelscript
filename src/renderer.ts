@@ -597,6 +597,13 @@ class Engine {
             await new Promise((r) => setTimeout(r, 25));
           }
         }
+        if (action.cols && action.rows) {
+          dims = await w.page.evaluate(
+            ([cols, rows]) =>
+              (window as unknown as { __rsTerm: { resize: (c: number, r: number) => { cols: number; rows: number } } }).__rsTerm.resize(cols, rows),
+            [action.cols, action.rows] as const,
+          );
+        }
         w.termPrompt = action.prompt ?? DEFAULTS.terminalPrompt;
         await this.termWrite(w, w.termPrompt);
         w.url = TERMINAL_URL;
@@ -903,10 +910,14 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     const events = new Map<number, TermEvent[]>();
     for (const i of termPrints) {
       const a = actions[i] as Extract<Action, { kind: "terminal.print" }>;
-      events.set(i, scriptedEvents(a.text, a.duration));
+      events.set(i, a.events ? playbackEvents(a.events, { speed: a.speed, maxGapMs: a.maxGapMs }) : scriptedEvents(a.text ?? "", a.duration));
     }
     for (const i of termRuns) {
       const a = actions[i] as Extract<Action, { kind: "terminal.run" }>;
+      if (a.events) {
+        events.set(i, playbackEvents(a.events, { speed: a.speed, maxGapMs: a.maxGapMs }));
+        continue;
+      }
       if (a.output !== undefined) {
         events.set(i, scriptedEvents(a.output, a.duration));
         continue;

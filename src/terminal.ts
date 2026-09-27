@@ -183,7 +183,8 @@ html, body { margin: 0; height: 100%; background: ${THEME.background}; overflow:
   term.focus(); // draws the block cursor; unfocused xterm shows only an outline
   window.__rsTerm = {
     write: (s) => { term.write(s); },
-    fit: () => { fit.fit(); return { cols: term.cols, rows: term.rows }; },
+    fit: () => { if (!window.__rsFixed) fit.fit(); return { cols: term.cols, rows: term.rows }; },
+    resize: (cols, rows) => { window.__rsFixed = true; term.resize(cols, rows); return { cols: term.cols, rows: term.rows }; },
     get cols() { return term.cols; },
     get rows() { return term.rows; },
     ready: true,

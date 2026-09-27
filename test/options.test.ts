@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDemo } from "../src/index.js";
+import { createDemo, playbackEvents } from "../src/index.js";
 import { centreWithin, zoomAt } from "../src/renderer.js";
 import { createTheme } from "../src/theme.js";
 
@@ -72,4 +72,18 @@ test("call, and terminal output that goes on without a prompt, are recorded", as
   assert.equal(call.kind, "call");
   assert.equal((call as { fn: unknown }).fn, fn);
   assert.deepEqual(print, { kind: "terminal.print", text: "done", duration: 200, prompt: true });
+});
+
+test("a terminal can have a fixed size, and play timed output made elsewhere", async () => {
+  const demo = createDemo();
+  const events: [number, string][] = [[0, "\x1b[2J"], [400, "hello"], [5000, " world"]];
+  await demo.terminal.open({ cols: 80, rows: 24 });
+  await demo.terminal.run("tool", { events, speed: 2, maxGapMs: 1000, prompt: false });
+  await demo.terminal.print("", { events, speed: 4 });
+  const [open, run, print] = demo.getTimeline();
+  assert.deepEqual(open, { kind: "terminal.open", cols: 80, rows: 24 });
+  assert.deepEqual(run, { kind: "terminal.run", command: "tool", events, speed: 2, maxGapMs: 1000, prompt: false });
+  assert.deepEqual(print, { kind: "terminal.print", text: "", events, speed: 4 });
+  // Played the way a recording is: long gaps capped, then sped up.
+  assert.deepEqual(playbackEvents(events, { speed: 2, maxGapMs: 1000 }), [[0, "\x1b[2J"], [200, "hello"], [700, " world"]]);
 });

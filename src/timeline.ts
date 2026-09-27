@@ -16,7 +16,7 @@ export type Action =
   | { kind: "waitFor"; target: string; window?: string; timeout?: number; settle?: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
-  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; x?: number; y?: number; width?: number; height?: number }
+  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; cols?: number; rows?: number; x?: number; y?: number; width?: number; height?: number }
   | {
       kind: "editor.open";
       /** Folder to open, relative to the script. */
@@ -40,6 +40,8 @@ export type Action =
       command: string;
       /** Declared output. Omit to replay a recording made by `reelscript record`. */
       output?: string;
+      /** Output as timed chunks, [ms, text], e.g. a recording made elsewhere. Played with `speed` and `maxGapMs`. */
+      events?: [number, string][];
       /** Spread declared output over this many ms. */
       duration?: number;
       /** Typing speed for the command. */
@@ -51,7 +53,7 @@ export type Action =
       /** Show a new prompt after the output. Default: true */
       prompt?: boolean;
     }
-  | { kind: "terminal.print"; text: string; duration?: number; prompt?: boolean }
+  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
   | { kind: "call"; fn: () => unknown };
 
 export type ActionKind = Action["kind"];

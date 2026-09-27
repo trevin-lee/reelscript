@@ -117,9 +117,9 @@ reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single fram
 | `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for Explorer rows and editor tabs, for `cursor.moveTo()`. |
 | `demo.browser.focus()`, `demo.terminal.focus()`, `demo.editor.focus()` | Bring a window to the front and direct typing to it. |
 | `demo.browser.place({ x, y, width, height })`, `demo.terminal.place(...)` | Move or resize a window. `x, y` is the frame origin in desktop pixels; `width, height` is the content size. |
-| `demo.terminal.open({ title, prompt, fontSize, x, y, width, height })` | Open a terminal window and focus it. The first window opened takes the main position; later ones cascade to the lower right unless placed. |
-| `demo.terminal.print(text, { duration, prompt })` | More output with no command typed, for a command run with `prompt: false`. |
-| `demo.terminal.run(cmd, { output, duration, wpm, speed, maxGapMs, prompt })` | Type `cmd`. With `output`, stream that text. Without it, replay the recording for `cmd` from `recordings/`. |
+| `demo.terminal.open({ title, prompt, fontSize, cols, rows, x, y, width, height })` | Open a terminal window and focus it. The first window opened takes the main position; later ones cascade to the lower right unless placed. `cols` and `rows` fix its size in characters, for output laid out at that size. |
+| `demo.terminal.print(text, { duration, events, speed, maxGapMs, prompt })` | More output with no command typed, for a command run with `prompt: false`. |
+| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGapMs, prompt })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks. Without either, replay the recording for `cmd` from `recordings/`. |
 | `demo.say(text, { voice, speed })` | Queue narration. Starts immediately or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.render(path)` | Render to `.mp4` (H.264) or `.gif` (palette-optimized, 960px / 20fps by default, see `gif` option). Honours `REELSCRIPT_OUT` and `REELSCRIPT_SNAPSHOT_AT`, which the CLI uses. |
@@ -205,7 +205,7 @@ Declared output never executes anything, so it renders identically everywhere. F
 reelscript record examples/terminal.ts
 ```
 
-once (or in CI whenever your CLI changes): it executes every `terminal.run` that has no `output`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. Rendering replays the recording with long silences capped (`maxGapMs`) and optional `speed`, and never needs the tool installed. Commit the recordings; they're small JSON. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars may print their non-interactive output.
+once (or in CI whenever your CLI changes): it executes every `terminal.run` that has no `output`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. Rendering replays the recording with long silences capped (`maxGapMs`) and optional `speed`, and never needs the tool installed. Commit the recordings; they're small JSON. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars may print their non-interactive output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema), and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`.
 
 See [examples/terminal.ts](examples/terminal.ts).
 
