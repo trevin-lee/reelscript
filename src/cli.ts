@@ -11,11 +11,23 @@
  */
 
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire, register } from "node:module";
 
-// Let scripts import "@reelscript/cli" without a local install (see resolve-self.ts).
-register(new URL("./resolve-self.js", import.meta.url));
+// Let scripts import "@reelscript/cli" without a local install (global, npx,
+// the container): resolve it to the copy of the library running this CLI.
+// Registered as an inline module so there's no hook file to resolve, which
+// newer Node versions load in a separate thread without the TS loader.
+{
+  const built = new URL("./index.js", import.meta.url);
+  const self = (existsSync(fileURLToPath(built)) ? built : new URL("./index.ts", import.meta.url)).href;
+  const hook = `export async function resolve(specifier, context, next) {
+  if (specifier === "@reelscript/cli") return { url: ${JSON.stringify(self)}, shortCircuit: true };
+  return next(specifier, context);
+}`;
+  register(`data:text/javascript,${encodeURIComponent(hook)}`);
+}
 
 const require = createRequire(import.meta.url);
 const version: string = require("../package.json").version;

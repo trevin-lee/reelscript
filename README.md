@@ -246,7 +246,7 @@ See [examples/terminal.ts](examples/terminal.ts).
 
 GIF output has no audio track; narration still paces the timeline. Render to `.mp4` for sound.
 
-To skip the model entirely, install with `npm install --omit=optional` and pass your own `tts` engine, or don't call `say()`.
+`kokoro-js` is an optional dependency that's only loaded when a script calls `say()`, so scripts without narration never touch it. Don't install with `--omit=optional` to avoid it: npm also ships sharp's platform binaries as optional dependencies, and image processing breaks without them. To use a different voice engine, pass your own `tts`.
 
 ## Requirements
 
