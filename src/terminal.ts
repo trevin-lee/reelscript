@@ -46,6 +46,16 @@ export function loadRecording(dir: string, command: string): TermRecording | nul
   return JSON.parse(readFileSync(file, "utf8")) as TermRecording;
 }
 
+/**
+ * A line feed as a new line: what a terminal's line discipline does to a
+ * program's output, and what declared output and `reelscript record`
+ * recordings (made without a pseudo-terminal) expect. Output recorded from
+ * a pseudo-terminal has had it done already, and is written as it is.
+ */
+export function withCarriageReturns(text: string): string {
+  return text.replace(/(?<!\r)\n/g, "\r\n");
+}
+
 /** Turn declared output into evenly paced line events. */
 export function scriptedEvents(output: string, durationMs?: number): TermEvent[] {
   const lines = output.replace(/\r\n/g, "\n").split("\n");
@@ -173,7 +183,7 @@ html, body { margin: 0; height: 100%; background: ${THEME.background}; overflow:
   const Fit = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
   const term = new T({
     fontFamily: '"JetBrains Mono", monospace', fontSize: ${fontSize}, lineHeight: 1.3,
-    cursorBlink: true, cursorStyle: "block", convertEol: true, scrollback: 0,
+    cursorBlink: true, cursorStyle: "block", convertEol: false, scrollback: 0,
     theme: ${JSON.stringify(THEME)},
   });
   const fit = new Fit();

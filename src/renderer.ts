@@ -14,6 +14,7 @@ import {
   loadRecording,
   playbackEvents,
   scriptedEvents,
+  withCarriageReturns,
   terminalPageHtml,
   type TermEvent,
 } from "./terminal.js";
@@ -382,8 +383,15 @@ class Engine {
 
   // ------------------------------------------------------------ terminal
 
-  private async termWrite(w: Win, text: string): Promise<void> {
+  /**
+   * Writes to a terminal. A line feed starts a new line, as in a script or
+   * a `reelscript record` recording; `raw` output, from a pseudo-terminal,
+   * already has its carriage returns, and a bare line feed there moves down
+   * a row and keeps the column, which full-screen programs rely on.
+   */
+  private async termWrite(w: Win, text: string, raw = false): Promise<void> {
     if (!text) return;
+    if (!raw) text = withCarriageReturns(text);
     await w.page.evaluate((s) => {
       (window as unknown as { __rsTerm: { write: (s: string) => void } }).__rsTerm.write(s);
     }, text);
@@ -637,7 +645,7 @@ class Engine {
           }
           let out = "";
           while (nextEvent < events.length && outStart + events[nextEvent][0] <= t) out += events[nextEvent++][1];
-          await this.termWrite(w, out);
+          await this.termWrite(w, out, !!action.events);
           if (!prompted && t >= promptAt) {
             prompted = true;
             if (action.prompt !== false) await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
@@ -656,7 +664,7 @@ class Engine {
         const flush = async (t: number) => {
           let out = "";
           while (nextEvent < events.length && start + events[nextEvent][0] <= t) out += events[nextEvent++][1];
-          await this.termWrite(w, out);
+          await this.termWrite(w, out, !!action.events);
           if (action.prompt && !prompted && t >= lastOut + 150) {
             prompted = true;
             await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
