@@ -128,6 +128,12 @@ export interface TerminalOptions {
   /** Default: 15 */
   fontSize?: number;
   /**
+   * Line height, as a multiple of the font's. Default: 1.3. 1 is what most
+   * terminal apps use, and joins block characters from row to row, as
+   * full-screen programs that draw with them expect.
+   */
+  lineHeight?: number;
+  /**
    * A fixed size in characters, instead of as many as the window holds: for
    * output recorded at that size, such as a full-screen program, whose
    * layout depends on it. Make the window big enough to show it.

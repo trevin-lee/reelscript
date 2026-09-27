@@ -588,7 +588,7 @@ class Engine {
         const w = await this.ensureWindow("terminal", "terminal", action);
         this.focus(w);
         if (!w.termRouted) {
-          const html = terminalPageHtml(action.fontSize);
+          const html = terminalPageHtml(action.fontSize, action.lineHeight);
           await w.page.route(`${TERMINAL_URL}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: html }));
           w.termRouted = true;
         }

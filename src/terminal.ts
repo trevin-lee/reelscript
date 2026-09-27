@@ -156,11 +156,12 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-let pageCache = new Map<number, string>();
+let pageCache = new Map<string, string>();
 
 /** Self-contained HTML for the terminal page (xterm + font inlined). */
-export function terminalPageHtml(fontSize = 15): string {
-  let html = pageCache.get(fontSize);
+export function terminalPageHtml(fontSize = 15, lineHeight = 1.3): string {
+  const key = `${fontSize}/${lineHeight}`;
+  let html = pageCache.get(key);
   if (html) return html;
   const require = createRequire(import.meta.url);
   const xtermJs = readFileSync(require.resolve("@xterm/xterm/lib/xterm.js"), "utf8");
@@ -182,7 +183,7 @@ html, body { margin: 0; height: 100%; background: ${THEME.background}; overflow:
   const T = window.Terminal || (window.xterm && window.xterm.Terminal);
   const Fit = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
   const term = new T({
-    fontFamily: '"JetBrains Mono", monospace', fontSize: ${fontSize}, lineHeight: 1.3,
+    fontFamily: '"JetBrains Mono", monospace', fontSize: ${fontSize}, lineHeight: ${lineHeight},
     cursorBlink: true, cursorStyle: "block", convertEol: false, scrollback: 0,
     theme: ${JSON.stringify(THEME)},
   });
@@ -201,6 +202,6 @@ html, body { margin: 0; height: 100%; background: ${THEME.background}; overflow:
   };
 })();
 </script></body></html>`;
-  pageCache.set(fontSize, html);
+  pageCache.set(key, html);
   return html;
 }

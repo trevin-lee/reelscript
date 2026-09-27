@@ -16,7 +16,7 @@ export type Action =
   | { kind: "waitFor"; target: string; window?: string; timeout?: number; settle?: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
-  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; cols?: number; rows?: number; x?: number; y?: number; width?: number; height?: number }
+  | { kind: "terminal.open"; title?: string; prompt?: string; fontSize?: number; lineHeight?: number; cols?: number; rows?: number; x?: number; y?: number; width?: number; height?: number }
   | {
       kind: "editor.open";
       /** Folder to open, relative to the script. */
