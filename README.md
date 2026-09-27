@@ -129,7 +129,7 @@ Run it on every pull request next to your tests; render only on main.
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, desktop, fps, deterministic, gif, voice, tts, pronunciations, address, menubar })` | `theme`: `"macos"` or `"bare"`. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). `address` rewrites what the address pill shows; `menubar` sets the macOS menu bar's `{ app, clock }`, or `false` leaves it out. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
+| `createDemo({ theme, viewport, desktop, fps, camera, deterministic, gif, voice, tts, pronunciations, address, menubar })` | `theme`: `"macos"` or `"bare"`. `camera: "follow"` zooms toward clicks and typing automatically; `{ scale, holdMs }` tunes it. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). `address` rewrites what the address pill shows; `menubar` sets the macOS menu bar's `{ app, clock }`, or `false` leaves it out. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a selector or `{x, y}` in the focused window, or in `window`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
