@@ -5,7 +5,8 @@
  * extensions exactly as users would see them.
  */
 import { spawn } from "node:child_process";
-import { cpSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -134,6 +135,81 @@ export interface EditorServerConfig {
  * VS Code expects and register it in the directory's manifest. Returns the
  * copy's path.
  */
+interface ManifestEntry {
+  identifier: { id: string; uuid?: string };
+  version: string;
+  location: { $mid: number; path: string; scheme: string };
+  relativeLocation: string;
+  metadata?: Record<string, unknown>;
+}
+
+function readManifest(extensionsDir: string): ManifestEntry[] {
+  const path = join(extensionsDir, "extensions.json");
+  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as ManifestEntry[]) : [];
+}
+
+/** Add or replace entries in a directory's manifest (matched by extension id). */
+function writeManifestEntries(extensionsDir: string, entries: ManifestEntry[]): void {
+  const ids = new Set(entries.map((e) => e.identifier.id.toLowerCase()));
+  const kept = readManifest(extensionsDir).filter((e) => !ids.has(e.identifier.id.toLowerCase()));
+  writeFileSync(join(extensionsDir, "extensions.json"), JSON.stringify([...kept, ...entries]));
+}
+
+/**
+ * Copy every extension from an installed extensions directory (a cache
+ * entry) into a render's own extensions directory and register them there,
+ * with locations rewritten to the copies.
+ */
+export function copyInstalledExtensions(fromDir: string, toDir: string): string[] {
+  const entries = readManifest(fromDir);
+  const copied: ManifestEntry[] = [];
+  for (const e of entries) {
+    const src = join(fromDir, e.relativeLocation);
+    if (!existsSync(src)) continue;
+    const dest = join(toDir, e.relativeLocation);
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(src, dest, { recursive: true, dereference: true });
+    copied.push({ ...e, location: { ...e.location, path: dest } });
+  }
+  writeManifestEntries(toDir, copied);
+  return copied.map((e) => e.identifier.id);
+}
+
+/**
+ * An Open VSX id or .vsix, installed once into its own cache directory and
+ * reused after that. Open VSX ids are cached by the exact string, so pin a
+ * version with "publisher.name@1.2.3"; .vsix files are cached by content.
+ */
+async function cachedInstall(bin: string, spec: string, vsixPath: string | null, onStatus?: (m: string) => void): Promise<string> {
+  const key = vsixPath
+    ? `vsix-${createHash("sha1").update(readFileSync(vsixPath)).digest("hex").slice(0, 16)}`
+    : `openvsx-${spec.toLowerCase().replace(/[^a-z0-9.@-]+/g, "_")}`;
+  const entry = join(cacheDir(), "code-server", "extension-cache", key);
+  if (existsSync(join(entry, "extensions.json"))) return entry;
+  onStatus?.(`installing extension ${spec} (cached after this)`);
+  const scratch = mkdtempSync(join(tmpdir(), "reelscript-ext-"));
+  try {
+    mkdirSync(join(scratch, "ext"));
+    mkdirSync(join(scratch, "user"));
+    writeFileSync(join(scratch, "config.yaml"), "auth: none\n");
+    await run(bin, [
+      "--config", join(scratch, "config.yaml"),
+      "--user-data-dir", join(scratch, "user"),
+      "--extensions-dir", join(scratch, "ext"),
+      "--install-extension", vsixPath ?? spec,
+    ]);
+    if (!existsSync(join(scratch, "ext", "extensions.json"))) {
+      throw new Error(`reelscript: installing extension ${spec} produced nothing`);
+    }
+    mkdirSync(join(cacheDir(), "code-server", "extension-cache"), { recursive: true });
+    rmSync(entry, { recursive: true, force: true });
+    renameSync(join(scratch, "ext"), entry);
+    return entry;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export function registerExtensionFolder(folder: string, extensionsDir: string): string {
   const pkg = JSON.parse(readFileSync(join(folder, "package.json"), "utf8")) as { name?: string; publisher?: string; version?: string };
   if (!pkg.name || !pkg.publisher) {
@@ -147,17 +223,15 @@ export function registerExtensionFolder(folder: string, extensionsDir: string): 
   cpSync(folder, target, { recursive: true, dereference: true });
   // VS Code only loads user extensions listed in the directory's manifest,
   // so register the copy the way `--install-extension` would.
-  const manifestPath = join(extensionsDir, "extensions.json");
-  const manifest: Array<{ identifier: { id: string } }> = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : [];
-  const kept = manifest.filter((e) => e.identifier.id.toLowerCase() !== id.toLowerCase());
-  kept.push({
-    identifier: { id },
-    version,
-    location: { $mid: 1, path: target, scheme: "file" },
-    relativeLocation: relative,
-    metadata: { installedTimestamp: Date.now(), pinned: true, source: "vsix" },
-  } as never);
-  writeFileSync(manifestPath, JSON.stringify(kept));
+  writeManifestEntries(extensionsDir, [
+    {
+      identifier: { id },
+      version,
+      location: { $mid: 1, path: target, scheme: "file" },
+      relativeLocation: relative,
+      metadata: { installedTimestamp: Date.now(), pinned: true, source: "vsix" },
+    },
+  ]);
   return target;
 }
 
@@ -176,7 +250,9 @@ export class EditorServer {
     mkdirSync(join(userData, "User"), { recursive: true });
     writeFileSync(join(userData, "User", "settings.json"), JSON.stringify({ ...EDITOR_DEFAULT_SETTINGS, ...config.settings }, null, 2));
     writeFileSync(join(this.root, "config.yaml"), "auth: none\n");
-    const extensionsDir = join(cacheDir(), "code-server", "extensions");
+    // Each render gets its own extensions directory, so an extension loaded by
+    // one demo never shows up in another. Downloads are cached separately.
+    const extensionsDir = join(this.root, "extensions");
     mkdirSync(extensionsDir, { recursive: true });
 
     const name = config.workspace ? basename(config.workspace) : "workspace";
@@ -189,12 +265,13 @@ export class EditorServer {
     for (const ext of config.extensions ?? []) {
       const looksLikePath = ext.endsWith(".vsix") || ext.includes("/") || ext.startsWith(".");
       const path = looksLikePath ? resolve(baseDir, ext) : null;
-      if (path && existsSync(path) && statSync(path).isDirectory()) {
+      if (path && !existsSync(path)) throw new Error(`reelscript: extension not found: ${path}`);
+      if (path && statSync(path).isDirectory()) {
         onStatus?.(`loading extension folder ${ext}`);
         registerExtensionFolder(path, extensionsDir);
       } else {
-        onStatus?.(`installing extension ${ext}`);
-        await run(bin, [...common, "--install-extension", path ?? ext]);
+        const entry = await cachedInstall(bin, ext, path, onStatus);
+        copyInstalledExtensions(entry, extensionsDir);
       }
     }
 

@@ -7,7 +7,8 @@
  */
 
 import { render as renderTimeline, type RenderResult } from "./renderer.js";
-import type { Action, Target } from "./timeline.js";
+import type { Action, CallContext, Target } from "./timeline.js";
+import { resolveSession } from "./session.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
@@ -35,7 +36,7 @@ function callerLocation(): string {
   return "unknown location";
 }
 
-export type { Action, Target } from "./timeline.js";
+export type { Action, CallContext, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { Menubar, ThemeName } from "./theme.js";
 export type { RenderOptions, RenderResult, FollowCamera } from "./renderer.js";
@@ -47,6 +48,11 @@ export { recordCommand, scriptedEvents, playbackEvents } from "./terminal.js";
 export { render } from "./renderer.js";
 
 export interface DemoOptions {
+  /**
+   * A saved login for browser windows, relative to the script: the file
+   * `reelscript login <url>` writes. Every browser window starts signed in.
+   */
+  session?: string;
   /** Visual chrome around the recorded page. Default: "macos". */
   theme?: ThemeName;
   /** Content size of the first window, in CSS pixels. Default: [1280, 800]. */
@@ -388,9 +394,11 @@ export class Demo {
    * Run `fn` at this point of the timeline, off camera: no video time
    * passes, and the render waits for it. For what the page should see happen
    * at a given moment and cannot cause itself, such as a change another
-   * client makes on the server.
+   * client makes on the server. `fn` receives `{ page, context }`: the
+   * focused window's Playwright page and the browser context, e.g. to set a
+   * cookie or local storage.
    */
-  async call(fn: () => unknown): Promise<void> {
+  async call(fn: (ctx: CallContext) => unknown): Promise<void> {
     this._push({ kind: "call", fn });
   }
 
@@ -464,6 +472,7 @@ export class Demo {
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
       baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
+      session: this.options.session ? resolveSession(this.options.session, dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "."))) : undefined,
       onStatus: (m) => process.stderr.write(`reelscript: ${m}\n`),
     });
     const script = basename(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "script");
@@ -508,6 +517,7 @@ export class Demo {
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
       baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
+      session: this.options.session ? resolveSession(this.options.session, dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "."))) : undefined,
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {

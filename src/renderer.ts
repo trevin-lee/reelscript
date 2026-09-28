@@ -47,6 +47,8 @@ export interface RenderOptions {
   recordingsDir?: string;
   /** Directory relative paths in the script (e.g. editor workspaces) resolve against. */
   baseDir?: string;
+  /** Absolute path of a saved login (storage state) for browser windows. */
+  session?: string;
   /**
    * Replace the page's clock with a virtual one that advances exactly one
    * frame per rendered frame, so CSS transitions, timers and rAF loops play
@@ -190,6 +192,7 @@ class Engine {
   private editorServer: EditorServer | null = null;
   private editorFallbackTitle = "";
   onStatus: (m: string) => void = () => {};
+  session: string | undefined;
   baseDir = process.cwd();
   // narration
   private clips = new Map<number, Clip>();
@@ -252,6 +255,7 @@ class Engine {
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
       colorScheme: "light",
+      storageState: this.session,
     });
     // Headless Chromium denies clipboard writes by default, so a "Copy"
     // button in the page under demo would fail where a real browser succeeds.
@@ -739,7 +743,8 @@ class Engine {
         return { end: lastOut + 250, onFrame: flush, onEnd: () => flush(Infinity) };
       }
       case "call": {
-        await action.fn();
+        const page = this.focusedId ? this.window(this.focusedId).page : undefined;
+        await action.fn({ page, context: this.context });
         return null;
       }
       default: {
@@ -992,6 +997,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, options.menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
+  engine.session = options.session;
   engine.setCamera(options.camera, actions);
   if (options.address) engine.address = options.address;
   if (options.baseDir) engine.baseDir = options.baseDir;

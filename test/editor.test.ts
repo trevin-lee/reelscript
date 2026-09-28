@@ -36,3 +36,17 @@ test("registerExtensionFolder copies the folder and lists it in the manifest", (
   registerExtensionFolder(new URL("../examples/acme-ext", import.meta.url).pathname, dir);
   assert.equal(JSON.parse(readFileSync(join(dir, "extensions.json"), "utf8")).length, 1);
 });
+
+test("copyInstalledExtensions copies a cache entry into a render's own directory", async () => {
+  const { copyInstalledExtensions } = await import("../src/editor.js");
+  const cache = mkdtempSync(join(tmpdir(), "rs-cache-"));
+  registerExtensionFolder(new URL("../examples/acme-ext", import.meta.url).pathname, cache);
+  const renderA = mkdtempSync(join(tmpdir(), "rs-render-a-"));
+  const renderB = mkdtempSync(join(tmpdir(), "rs-render-b-"));
+  assert.deepEqual(copyInstalledExtensions(cache, renderA), ["acme.acme-tools"]);
+  const manifest = JSON.parse(readFileSync(join(renderA, "extensions.json"), "utf8"));
+  assert.equal(manifest[0].location.path, join(renderA, "acme.acme-tools-0.1.0"), "location points at the copy");
+  assert.ok(existsSync(join(renderA, "acme.acme-tools-0.1.0", "extension.js")));
+  // Another render that didn't ask for it has nothing.
+  assert.equal(existsSync(join(renderB, "extensions.json")), false);
+});

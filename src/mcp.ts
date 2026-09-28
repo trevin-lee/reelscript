@@ -25,6 +25,8 @@ Workflow for making a demo:
 5. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
 6. Call render_script for the final video.
 
+If the app needs a login, ask the user to run \`reelscript login <url> --out session.json\` once and pass createDemo({ session: "session.json" }).
+
 Selectors are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
 
 /** How to invoke this package's CLI from a child process (built or from source). */

@@ -40,6 +40,7 @@ usage:
   reelscript preview <script> --at <seconds> [--out frame.png]
   reelscript check   <script>            run the timeline without rendering; fail on missing selectors
   reelscript record  <script>            run terminal commands for real and save recordings
+  reelscript login   <url> [--out session.json]   sign in once in a real browser and save the session
   reelscript warmup                      download the narration model into the cache
   reelscript mcp                         run the MCP server (stdio) for coding agents
 
@@ -119,6 +120,17 @@ async function main(): Promise<void> {
     case "mcp": {
       const { serve } = await import("./mcp.js");
       await serve();
+      break;
+    }
+    case "login": {
+      const url = positional[0] ?? usage();
+      const out = flags.out || "session.json";
+      const { login } = await import("./session.js");
+      const r = await login(url, out);
+      console.error(
+        `reelscript: saved ${r.cookies} cookie${r.cookies === 1 ? "" : "s"} and storage for ${r.origins} origin${r.origins === 1 ? "" : "s"} to ${r.path}\n` +
+          `  Use it with createDemo({ session: "${out}" }). It signs in as you: keep it out of git.`,
+      );
       break;
     }
     case "warmup": {

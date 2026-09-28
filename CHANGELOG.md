@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- **Logged-in apps.** `reelscript login <url>` opens a real browser so you can sign in once, and saves the session to a file. `createDemo({ session: "session.json" })` starts every browser window signed in. A missing session file is a clear error that tells you how to make one.
+- **`demo.call(fn)` gets the page.** `fn` receives `{ page, context }`, the focused window's Playwright page and the browser context, for setup that has to happen off camera.
+- **Editor extensions no longer leak between demos.** Each demo gets its own extensions, so an extension one demo loads never appears in another. Open VSX extensions and `.vsix` files install once and are cached; pin versions with `publisher.name@1.2.3`.
+
 ## 0.3.0
 
 - **`reelscript check`.** Runs a script's whole timeline against the real app with nothing captured or encoded, in about a second for a browser demo, and fails with the script line of the first broken step. Made for pull requests: the demo breaks in CI when the UI changes under it.

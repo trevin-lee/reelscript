@@ -111,6 +111,7 @@ Ask it for "a 20-second demo of creating a project in the app on localhost:3000"
 reelscript render  <script.ts> [--out demo.mp4]        # render a script to video
 reelscript preview <script.ts> --at 2.5 [--out f.png]   # render the single frame at 2.5s
 reelscript check   <script.ts> [more.ts ...]            # run the timeline without rendering; fail on missing selectors
+reelscript login   <url> [--out session.json]           # sign in once in a real browser; save the session for demos
 reelscript mcp                                          # MCP server for coding agents
 ```
 
@@ -129,7 +130,7 @@ Run it on every pull request next to your tests; render only on main.
 
 | Call | What it does |
 | --- | --- |
-| `createDemo({ theme, viewport, desktop, fps, camera, deterministic, gif, voice, tts, pronunciations, address, menubar })` | `theme`: `"macos"` or `"bare"`. `camera: "follow"` zooms toward clicks and typing automatically; `{ scale, holdMs }` tunes it. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). `address` rewrites what the address pill shows; `menubar` sets the macOS menu bar's `{ app, clock }`, or `false` leaves it out. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
+| `createDemo({ session, theme, viewport, desktop, fps, camera, deterministic, gif, voice, tts, pronunciations, address, menubar })` | `theme`: `"macos"` or `"bare"`. `session` is a saved login from `reelscript login`. `camera: "follow"` zooms toward clicks and typing automatically; `{ scale, holdMs }` tunes it. `viewport` is the first window's content size, `desktop` the output size (default: the first window plus margins). `address` rewrites what the address pill shows; `menubar` sets the macOS menu bar's `{ app, clock }`, or `false` leaves it out. Defaults: macos, 1280x800, 60fps, deterministic clock on, Kokoro voice `af_heart`. |
 | `demo.browser.goto(url, { settle })` | Navigate, then hold for `settle` ms (default 400). |
 | `demo.browser.mockAPI(pattern, json, { status })` | Fulfil matching requests with canned JSON. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a selector or `{x, y}` in the focused window, or in `window`. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
@@ -139,7 +140,7 @@ Run it on every pull request next to your tests; render only on main.
 | `demo.type(selector, text, { wpm })` | Focus the field and type at `wpm` (default 300). |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`. |
 | `demo.wait(ms)` | Hold. |
-| `demo.call(fn)` | Run a function at this point of the timeline, off camera, and wait for it: for what the page should see happen at that moment and cannot cause itself, such as a change another client makes. |
+| `demo.call(({ page, context }) => ...)` | Run a function at this point of the timeline, off camera, and wait for it. It gets the focused window's Playwright `page` and the browser `context`: for what the page should see happen at that moment and cannot cause itself, such as a change another client makes. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold the camera, off camera, until the selector is visible (then `settle` ms more). The page's clock keeps running, so a page can load without its loading being filmed. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open a VS Code window on a folder (copied, so your files are never edited). `extensions` are Open VSX ids or `.vsix` paths; `settings` merge over demo-friendly defaults. |
 | `demo.editor.openFile(path)`, `demo.editor.command(name)` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. |
@@ -170,6 +171,23 @@ Early but working end to end. Roadmap, roughly in order:
 - Python bindings over the same timeline
 - A Linux desktop backend (Xvfb in a container) for demos of native apps, targeted by coordinates or accessibility names
 
+## Logged-in apps
+
+Sign in once, by hand, in a real browser. reelscript saves the session (cookies and local storage) to a file:
+
+```sh
+reelscript login https://app.example.com/login --out session.json
+```
+
+Then every browser window in a demo starts signed in:
+
+```ts
+const demo = createDemo({ session: "./session.json" });
+await demo.browser.goto("https://app.example.com/dashboard");
+```
+
+The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
+
 ## Several windows
 
 ```ts
@@ -198,7 +216,7 @@ await demo.editor.command("Format Document");
 
 ### Demo the extension you're building
 
-Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied into the render's extensions directory and registered, so no packaging step is needed:
+Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied in and registered, so no packaging step is needed. Each demo gets its own set of extensions, so one demo's extensions never appear in another. Open VSX extensions and `.vsix` files are installed once and cached after that; pin an Open VSX version with `publisher.name@1.2.3`:
 
 ```ts
 await demo.editor.open({ workspace: "./fixtures/project", extensions: ["./"], notifications: true });

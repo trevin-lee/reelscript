@@ -1,4 +1,13 @@
 import type { Ease } from "./easing.js";
+import type { BrowserContext, Page } from "playwright";
+
+/** What demo.call(fn) receives. */
+export interface CallContext {
+  /** The focused window's page, if any window is open. */
+  page?: Page;
+  /** The browser context shared by browser and terminal windows. */
+  context: BrowserContext;
+}
 
 /** A CSS selector, or an explicit point in page (viewport) coordinates. */
 export type Target = string | { x: number; y: number };
@@ -54,7 +63,7 @@ export type Action =
       prompt?: boolean;
     }
   | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
-  | { kind: "call"; fn: () => unknown };
+  | { kind: "call"; fn: (ctx: CallContext) => unknown };
 
 export type ActionKind = Action["kind"];
 
