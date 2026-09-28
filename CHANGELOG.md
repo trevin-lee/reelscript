@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- **`reelscript check`.** Runs a script's whole timeline against the real app with nothing captured or encoded, in about a second for a browser demo, and fails with the script line of the first broken step. Made for pull requests: the demo breaks in CI when the UI changes under it.
+- **Errors point at your script.** Every failure from `render` or `check` now ends with the line that caused it, like `at demo/signup.ts:14:19 (cursor.moveTo)`.
+- **Follow camera.** `camera: "follow"` zooms toward clicks and the typing caret on its own, starts moving before a click lands, keeps the cursor in view, and eases out when things go quiet. `{ scale, holdMs }` tunes it; `zoom.to()` still takes over when you want a specific shot.
+- **MCP server for coding agents.** `reelscript mcp` gives Claude Code and other MCP clients the docs, page inspection with ready-made selectors, `check`, frame previews as images, and rendering, so an agent can write and iterate on a demo itself.
+- **`demo.waitFor(selector, { window, timeout, settle })`** holds, off camera, until something appears, and **`demo.call(fn)`** runs your own code at a point in the timeline, for changes the page can't cause itself.
+- **`cursor.click({ duration: 0 })`** takes no video time, so a following `waitFor` cuts straight to the result.
+- **`zoom.to(target, { within: "window" })`** keeps a zoom inside the window, and a zoom that replaces another starts from wherever the first one got to.
+- **Terminal:** `terminal.run(cmd, { prompt: false })` and `terminal.print()` for output that keeps coming, recordings made elsewhere as timed events, a fixed `cols` and `rows`, and `lineHeight`.
+- **Desktop:** `address` rewrites what the browser's address pill shows (blank for local files, trimmed with an ellipsis when long), and `menubar` sets the menu bar's app name and clock or removes it.
+- Pages get clipboard access; finished CSS animations stay finished under the frame-stepped clock.
+
 ## Unreleased
 
 - **`demo.waitFor(selector)`.** Holds the camera until the selector is visible while the page's clock keeps running, so a page that loads, fetches or animates gets the time without its loading being filmed. No video time passes.
