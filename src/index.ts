@@ -20,6 +20,22 @@ import { fileURLToPath } from "node:url";
 
 const LIB_DIR = dirname(fileURLToPath(import.meta.url));
 
+/** The script being run: set by the CLI, or the entry file when run directly. */
+function scriptFile(): string {
+  return resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".");
+}
+
+/** Paths written in a script are relative to the script's folder, wherever it's run from. */
+function fromScript(path: string): string {
+  return resolve(dirname(scriptFile()), path);
+}
+
+/** Counts render/check/record calls so the CLI can tell a script that never rendered. */
+function noteRun(): void {
+  const g = globalThis as { __reelscript_runs?: number };
+  g.__reelscript_runs = (g.__reelscript_runs ?? 0) + 1;
+}
+
 /** "demo.ts:14:7" for the user code that called into the Demo API. */
 function callerLocation(): string {
   const stack = new Error().stack?.split("\n").slice(1) ?? [];
@@ -434,9 +450,7 @@ export class Demo {
    */
   /** Directory for terminal recordings: option, else `recordings/` beside the entry script. */
   recordingsDir(): string {
-    if (this.options.recordingsDir) return resolve(this.options.recordingsDir);
-    const script = process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".";
-    return join(dirname(resolve(script)), "recordings");
+    return fromScript(this.options.recordingsDir ?? "recordings");
   }
 
   /** Run every terminal command that has no declared output or events and save its recording. */
@@ -471,11 +485,11 @@ export class Demo {
       deterministic: this.options.deterministic,
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
-      baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
-      session: this.options.session ? resolveSession(this.options.session, dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "."))) : undefined,
+      baseDir: dirname(scriptFile()),
+      session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
       onStatus: (m) => process.stderr.write(`reelscript: ${m}\n`),
     });
-    const script = basename(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "script");
+    const script = basename(scriptFile());
     process.stderr.write(
       `reelscript: check passed for ${script}: ${this.actions.length} actions, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
     );
@@ -483,6 +497,7 @@ export class Demo {
   }
 
   async render(outPath: string): Promise<RenderResult> {
+    noteRun();
     if (process.env.REELSCRIPT_RECORD) {
       const files = await this.recordTerminals();
       process.stderr.write(
@@ -493,7 +508,7 @@ export class Demo {
       return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
     }
     if (process.env.REELSCRIPT_CHECK) return this.check();
-    const out = process.env.REELSCRIPT_OUT || outPath;
+    const out = process.env.REELSCRIPT_OUT || fromScript(outPath);
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
     const verbose = this.options.verbose ?? true;
@@ -516,8 +531,8 @@ export class Demo {
       snapshotAt,
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
-      baseDir: dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || ".")),
-      session: this.options.session ? resolveSession(this.options.session, dirname(resolve(process.env.REELSCRIPT_SCRIPT || process.argv[1] || "."))) : undefined,
+      baseDir: dirname(scriptFile()),
+      session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {

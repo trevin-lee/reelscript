@@ -633,12 +633,14 @@ class Engine {
         await w.page.keyboard.press(action.kind === "editor.openFile" ? "Control+P" : "F1");
         let next = 0;
         let entered = false;
+        const isFile = action.kind === "editor.openFile";
         const flush = async (t: number) => {
           let batch = "";
           while (next < chars.length && typeStart + next * msPerChar <= t) batch += chars[next++];
           if (batch) await w.page.keyboard.type(batch);
           if (!entered && t >= enterAt) {
             entered = true;
+            await this.expectQuickInputMatch(w, text, isFile);
             await w.page.keyboard.press("Enter");
           }
         };
@@ -754,6 +756,31 @@ class Engine {
     }
   }
 
+  /**
+   * Before Enter in Quick Open or the Command Palette, make sure VS Code
+   * found what was typed. Without this, a renamed command or a missing file
+   * would press Enter on whatever VS Code offered instead ("similar commands",
+   * "No matching results") and the demo would pass while showing the wrong
+   * thing. File search is asynchronous, so wait a little for results.
+   */
+  private async expectQuickInputMatch(w: Win, text: string, isFile: boolean): Promise<void> {
+    const deadline = Date.now() + 5000;
+    let label: string | null = null;
+    for (;;) {
+      label = await w.page.evaluate(() => {
+        const row = document.querySelector(".quick-input-list .monaco-list-row.focused") ?? document.querySelector(".quick-input-list .monaco-list-row");
+        return row?.getAttribute("aria-label") ?? null;
+      });
+      const bad = !label || /^No matching (results|commands)|similar commands$/i.test(label);
+      if (!bad) return;
+      if (Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const what = isFile ? `Quick Open found no file matching "${text}"` : `the Command Palette has no command matching "${text}"`;
+    const offered = label && !/^No matching/i.test(label) ? ` (VS Code offered "${label.replace(/, similar commands$/i, "")}" instead)` : "";
+    throw new Error(`reelscript: ${what}${offered}`);
+  }
+
   /** Time (ms) after which nothing is still animating or speaking. */
   pendingUntil(): number {
     const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
@@ -828,11 +855,16 @@ class Engine {
    * our control and slower; CDP grabs the current compositor frame directly.
    */
   private async capture(w: Win): Promise<Buffer> {
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("reelscript: screenshot timed out (page compositor stalled)")), 10_000),
-    );
-    const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
-    return Buffer.from(data, "base64");
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("reelscript: screenshot timed out (page compositor stalled)")), 10_000);
+    });
+    try {
+      const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
+      return Buffer.from(data, "base64");
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Window content as RGBA raw, masked to the theme's rounded corners. */
@@ -1029,6 +1061,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     if (isGif && snapshot === undefined) options.onStatus?.("note: GIF output has no audio; narration is used for pacing only");
   }
 
+  const where = (index: number, err: unknown): Error => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    const loc = options.sources?.[index];
+    if (loc && !e.message.includes(`\n  at ${loc}`)) e.message += `\n  at ${loc} (${actions[index]?.kind})`;
+    return e;
+  };
+
   // Terminal output: declared in the script, or replayed from a recording.
   const termRuns = actions.flatMap((a, i) => (a.kind === "terminal.run" ? [i] : []));
   const termPrints = actions.flatMap((a, i) => (a.kind === "terminal.print" ? [i] : []));
@@ -1050,10 +1089,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       }
       const rec = options.recordingsDir ? loadRecording(options.recordingsDir, a.command) : null;
       if (!rec) {
-        throw new Error(
-          `reelscript: no recording for terminal command "${a.command}".\n` +
-            `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
-            `  reelscript record <script>`,
+        throw where(
+          i,
+          new Error(
+            `reelscript: no recording for terminal command "${a.command}" in ${options.recordingsDir}.\n` +
+              `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
+              `  reelscript record <script>`,
+          ),
         );
       }
       events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGapMs: a.maxGapMs }));
@@ -1063,12 +1105,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
-  const where = (index: number, err: unknown): Error => {
-    const e = err instanceof Error ? err : new Error(String(err));
-    const loc = options.sources?.[index];
-    if (loc && !e.message.includes(`\n  at ${loc}`)) e.message += `\n  at ${loc} (${actions[index]?.kind})`;
-    return e;
-  };
+
   let stepIndex = -1;
 
   await engine.open();

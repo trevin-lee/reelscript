@@ -38,7 +38,7 @@ jobs:
         with:
           name: example-demo
           path: |
-            out/basic.mp4
+            examples/out/basic.mp4
             out/editor-frame.png
             out/extension-frame.png
           retention-days: 7

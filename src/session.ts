@@ -23,7 +23,8 @@ export function resolveSession(path: string, baseDir: string): string {
   if (!existsSync(full)) {
     throw new Error(
       `reelscript: session file not found: ${full}\n` +
-        `  Create it by signing in once:  reelscript login <url of your app> --out ${path}`,
+        `  Paths in a script are relative to the script's folder.\n` +
+        `  Create it by signing in once:  reelscript login <url of your app> --out ${full}`,
     );
   }
   return full;

@@ -63,7 +63,17 @@ function parse(argv: string[]) {
   return { command, flags, positional };
 }
 
+/** Run a script and fail if it never called demo.render(), which would otherwise pass silently. */
 async function runScript(path: string): Promise<void> {
+  const g = globalThis as { __reelscript_runs?: number };
+  const before = g.__reelscript_runs ?? 0;
+  await importScript(path);
+  if ((g.__reelscript_runs ?? 0) === before) {
+    throw new Error(`reelscript: ${path} finished without calling demo.render(), so there was nothing to render, check or record`);
+  }
+}
+
+async function importScript(path: string): Promise<void> {
   const script = resolve(path);
   process.env.REELSCRIPT_SCRIPT = script;
   const { tsImport } = await import("tsx/esm/api");
@@ -129,7 +139,7 @@ async function main(): Promise<void> {
       const r = await login(url, out);
       console.error(
         `reelscript: saved ${r.cookies} cookie${r.cookies === 1 ? "" : "s"} and storage for ${r.origins} origin${r.origins === 1 ? "" : "s"} to ${r.path}\n` +
-          `  Use it with createDemo({ session: "${out}" }). It signs in as you: keep it out of git.`,
+          `  Use it with createDemo({ session: "<path to it from your script's folder>" }). It signs in as you: keep it out of git.`,
       );
       break;
     }
