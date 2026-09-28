@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 /**
- * reelscript CLI
- *
- *   reelscript render  <script.ts> [--out demo.mp4]
- *   reelscript preview <script.ts> --at 2.5 [--out frame.png]
+ * reelscript CLI. See usage() below for every command.
  *
  * Scripts are ordinary TS/JS modules that build a Demo and call
  * `demo.render(...)`. The CLI runs them with tsx, overriding the output via
@@ -32,22 +29,35 @@ import { createRequire, register } from "node:module";
 const require = createRequire(import.meta.url);
 const version: string = require("../package.json").version;
 
-function usage(): never {
-  console.log(`reelscript ${version} — product demos as code
+function usage(exitCode = 1): never {
+  console.log(`reelscript ${version} - product demos as code
 
 usage:
-  reelscript render  <script> [--out demo.mp4]
+  reelscript render  <script> [--out demo.mp4]     render a script to .mp4 or .gif
   reelscript preview <script> --at <seconds> [--out frame.png]
-  reelscript check   <script>            run the timeline without rendering; fail on missing selectors
-  reelscript record  <script>            run terminal commands for real and save recordings
-  reelscript login   <url> [--out session.json]   sign in once in a real browser and save the session
-  reelscript warmup                      download the narration model into the cache
-  reelscript mcp                         run the MCP server (stdio) for coding agents
+                                                   render one frame as a PNG
+  reelscript check   <script> [more scripts...]    run the timeline without rendering; fail on
+                                                   anything missing, with the script line
+  reelscript record  <script> [more...] [--prune]  run terminal commands for real and save
+                                                   recordings; --prune deletes unused ones
+  reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
+  reelscript warmup  [narration] [editor]          download the voice model and VS Code ahead of time
+  reelscript cache   [clear <part|all>]            show or clear what's cached on disk
+  reelscript mcp                                   MCP server (stdio) for coding agents
+  reelscript --version
+
+Paths passed to the CLI are relative to the working directory; paths written
+inside a script are relative to the script's folder.
 
 env:
-  REELSCRIPT_FFMPEG   path to ffmpeg (defaults to bundled ffmpeg-static)`);
-  process.exit(1);
+  REELSCRIPT_CACHE        cache folder (default ~/.cache/reelscript)
+  REELSCRIPT_FFMPEG       ffmpeg to use (default: the bundled ffmpeg-static)
+  REELSCRIPT_CODE_SERVER  code-server binary to use instead of downloading one
+  REELSCRIPT_MODELS       folder for the narration model`);
+  process.exit(exitCode);
 }
+
+const BOOLEAN_FLAGS = new Set(["prune", "help"]);
 
 function parse(argv: string[]) {
   const [command, ...rest] = argv;
@@ -57,7 +67,8 @@ function parse(argv: string[]) {
     const a = rest[i];
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2);
-      flags[k] = v ?? rest[++i] ?? "";
+      // On/off flags never take the next argument as their value.
+      flags[k] = v ?? (BOOLEAN_FLAGS.has(k) ? "" : rest[++i] ?? "");
     } else positional.push(a);
   }
   return { command, flags, positional };
@@ -122,9 +133,27 @@ async function main(): Promise<void> {
       break;
     }
     case "record": {
-      const script = positional[0] ?? usage();
+      if (!positional.length) usage();
       process.env.REELSCRIPT_RECORD = "1";
-      await runScript(script);
+      for (const script of positional) await runScript(script);
+      if ("prune" in flags) {
+        // Remove recordings no given script uses. Scripts in one folder share
+        // its recordings/, so pass every script that uses it.
+        const { readdirSync, rmSync } = await import("node:fs");
+        const { join, relative } = await import("node:path");
+        const used = (globalThis as { __reelscript_recorded?: Map<string, Set<string>> }).__reelscript_recorded ?? new Map();
+        let removed = 0;
+        for (const [dir, files] of used) {
+          for (const name of readdirSync(dir)) {
+            const file = join(dir, name);
+            if (!name.endsWith(".json") || files.has(file)) continue;
+            rmSync(file);
+            removed++;
+            console.error(`reelscript: pruned ${relative(process.cwd(), file)}`);
+          }
+        }
+        console.error(`reelscript: pruned ${removed} unused recording${removed === 1 ? "" : "s"}`);
+      }
       break;
     }
     case "mcp": {
@@ -144,12 +173,44 @@ async function main(): Promise<void> {
       break;
     }
     case "warmup": {
-      const { kokoro } = await import("./tts.js");
-      const t = Date.now();
-      await kokoro().synthesize("Ready.", {});
-      console.log(`narration model ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
+      const parts = positional.length ? positional : ["narration", "editor"];
+      for (const part of parts) {
+        const t = Date.now();
+        if (part === "narration") {
+          const { kokoro } = await import("./tts.js");
+          await kokoro().synthesize("Ready.", {});
+          console.error(`reelscript: narration model ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
+        } else if (part === "editor") {
+          const { ensureCodeServer } = await import("./editor.js");
+          await ensureCodeServer((m) => console.error(`reelscript: ${m}`));
+          console.error(`reelscript: editor ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
+        } else {
+          throw new Error(`reelscript: unknown warmup part "${part}" (narration, editor)`);
+        }
+      }
       break;
     }
+    case "cache": {
+      const { cacheParts, clearCache, formatBytes, sizeOf } = await import("./cache.js");
+      const { cacheDir } = await import("./tts.js");
+      if (positional[0] === "clear") {
+        const part = positional[1] ?? usage();
+        for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`);
+        break;
+      }
+      if (positional.length) usage();
+      console.log(`reelscript cache: ${cacheDir()}`);
+      for (const p of cacheParts()) {
+        const where = p.builtIn ? `  (built in at ${p.path})` : "";
+        console.log(`  ${p.name.padEnd(16)} ${formatBytes(sizeOf(p.path)).padStart(8)}  ${p.description}${where}`);
+      }
+      console.log(`clear a part with: reelscript cache clear <part|all>`);
+      break;
+    }
+    case "--help":
+    case "-h":
+    case "help":
+      usage(0);
     case "--version":
     case "-v":
       console.log(version);

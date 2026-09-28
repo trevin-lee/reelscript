@@ -7,7 +7,8 @@ import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
-import { CLOCK_SHIM } from "./clock.js";
+import { clockShim, dateShim } from "./clock.js";
+import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
 import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
 import {
   TERMINAL_URL,
@@ -42,6 +43,10 @@ export interface RenderOptions {
   address?: (url: string) => string;
   /** The macOS theme's menu bar, or `false` for none. */
   menubar?: Menubar;
+  /** The moment the demo happens at: the page's Date starts here and the menu bar shows it. */
+  clock?: string | Date;
+  /** IANA timezone for the page and the menu bar. Default: "UTC" */
+  timezone?: string;
   onStatus?: (message: string) => void;
   /** Where terminal recordings live (for terminal.run without declared output). */
   recordingsDir?: string;
@@ -193,6 +198,9 @@ class Engine {
   private editorFallbackTitle = "";
   onStatus: (m: string) => void = () => {};
   session: string | undefined;
+  /** The demo's clock (ms since epoch) and timezone; see RenderOptions.clock. */
+  epoch: number;
+  timezone = DEFAULT_TIMEZONE;
   baseDir = process.cwd();
   // narration
   private clips = new Map<number, Clip>();
@@ -211,6 +219,7 @@ class Engine {
     private frameMs = 1000 / DEFAULTS.fps,
   ) {
     this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar);
+    this.epoch = clockEpoch(DEFAULT_CLOCK, DEFAULT_TIMEZONE);
     this.desktop = desktop ?? this.theme.defaultDesktop(viewport);
     this.cursor = { x: this.desktop[0] / 2, y: this.desktop[1] / 2 };
     this.zoom = { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 };
@@ -256,11 +265,12 @@ class Engine {
       deviceScaleFactor: 1,
       colorScheme: "light",
       storageState: this.session,
+      timezoneId: this.timezone,
     });
     // Headless Chromium denies clipboard writes by default, so a "Copy"
     // button in the page under demo would fail where a real browser succeeds.
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    if (this.deterministic) await this.context.addInitScript(CLOCK_SHIM);
+    await this.context.addInitScript(this.deterministic ? clockShim(this.epoch) : dateShim(this.epoch));
   }
 
   async close(): Promise<void> {
@@ -325,6 +335,7 @@ class Engine {
         viewport: { width, height },
         deviceScaleFactor: 1,
         colorScheme: "dark",
+        timezoneId: this.timezone,
         userAgent: LINUX_UA, // consistent Ctrl-based keybindings on every host
       });
     }
@@ -362,6 +373,18 @@ class Engine {
   private focused(): Win {
     if (!this.focusedId) throw new Error("reelscript: no window is open yet (call browser.goto or terminal.open first)");
     return this.window(this.focusedId);
+  }
+
+  /** Take a window off the desktop; focus passes to the topmost one left. */
+  private async closeWindow(w: Win): Promise<void> {
+    this.windows.delete(w.id);
+    if (this.typing?.win === w) this.typing = null;
+    await w.page.close();
+    await w.ctx?.close();
+    if (this.focusedId === w.id) {
+      const top = this.byZ().at(-1);
+      this.focusedId = top ? top.id : null;
+    }
   }
 
   private focus(w: Win): void {
@@ -474,15 +497,20 @@ class Engine {
         this.focus(w);
         await w.page.goto(action.url, { waitUntil: "load" });
         w.url = action.url;
-        return { end: start + (action.settle ?? DEFAULTS.gotoSettle) };
+        return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };
       }
       case "browser.mockAPI": {
-        const w = await this.ensureWindow("browser", "browser");
+        // On the context, so it applies to every window and opens none.
         const { pattern, response, status = 200 } = action;
-        await w.page.route(pattern, (route) =>
+        await this.context.route(pattern, (route) =>
           route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response) }),
         );
         return null;
+      }
+      case "browser.open": {
+        const w = await this.ensureWindow("browser", "browser", action);
+        this.focus(w);
+        return { end: start + 300 };
       }
       case "cursor.moveTo": {
         const to = await this.resolvePoint(action.target, action.window);
@@ -654,6 +682,10 @@ class Engine {
       case "window.place": {
         await this.place(this.window(action.window), action);
         return null;
+      }
+      case "window.close": {
+        await this.closeWindow(this.window(action.window));
+        return { end: start + 200 };
       }
       case "terminal.open": {
         const w = await this.ensureWindow("terminal", "terminal", action);
@@ -1027,8 +1059,15 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   // A check steps time coarsely: nothing is captured, only page state matters.
   const frameMs = options.check ? 50 : 1000 / fps;
 
-  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, options.menubar, frameMs);
+  const timezone = options.timezone ?? DEFAULT_TIMEZONE;
+  const menubar: Menubar =
+    options.menubar === false
+      ? false
+      : { ...options.menubar, clock: options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone) };
+  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
+  engine.timezone = options.timezone ?? DEFAULT_TIMEZONE;
+  engine.epoch = clockEpoch(options.clock ?? DEFAULT_CLOCK, engine.timezone);
   engine.session = options.session;
   engine.setCamera(options.camera, actions);
   if (options.address) engine.address = options.address;

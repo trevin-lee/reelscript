@@ -84,7 +84,7 @@ async function redirectModelCache(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mod: any = await import(url);
   if (!mod.env) throw new Error("reelscript: could not configure the transformers.js model cache");
-  mod.env.cacheDir = join(cacheDir(), "models") + "/";
+  mod.env.cacheDir = (process.env.REELSCRIPT_MODELS ?? join(cacheDir(), "models")) + "/";
 }
 
 /** Kokoro-82M via kokoro-js, loaded lazily on first use. */

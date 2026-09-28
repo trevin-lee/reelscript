@@ -1,0 +1,110 @@
+name: Image
+
+# Builds the container natively for amd64 and arm64, runs a smoke test on
+# each architecture, and (when push is true) publishes one multi-architecture
+# image under the given tags. Called by ci.yml and release.yml.
+
+on:
+  workflow_call:
+    inputs:
+      push:
+        type: boolean
+        default: false
+      tags:
+        description: Newline-separated image tags to publish when push is true
+        type: string
+        default: ""
+
+env:
+  IMAGE: ghcr.io/trevin-lee/reelscript
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: reelscript:test
+          cache-from: type=gha,scope=${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
+      - name: Smoke test on ${{ matrix.slug }}
+        run: |
+          docker run --rm -v "$PWD:/work" reelscript:test check examples/basic.ts examples/terminal.ts examples/editor.ts
+          docker run --rm -v "$PWD:/work" reelscript:test render examples/terminal.ts --out smoke-${{ matrix.slug }}.mp4
+          test -s smoke-${{ matrix.slug }}.mp4
+          docker run --rm reelscript:test --version
+      - uses: docker/login-action@v3
+        if: inputs.push
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push by digest
+        id: push
+        if: inputs.push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.slug }}
+      - name: Export digest
+        if: inputs.push
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v5
+        if: inputs.push
+        with:
+          name: digests-${{ matrix.slug }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  publish:
+    if: inputs.push
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the multi-architecture image
+        working-directory: /tmp/digests
+        env:
+          TAGS: ${{ inputs.tags }}
+        run: |
+          args=()
+          while IFS= read -r tag; do [ -n "$tag" ] && args+=(-t "$tag"); done <<< "$TAGS"
+          docker buildx imagetools create "${args[@]}" $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$(printf '%s\n' "$TAGS" | head -1)"

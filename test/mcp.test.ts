@@ -24,7 +24,9 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["check_script", "inspect_page", "preview_frame", "reelscript_docs", "render_script"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["check_script", "inspect_page", "preview_frame", "record_script", "reelscript_docs", "render_script"]);
+    const readOnly = tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name).sort();
+    assert.deepEqual(readOnly, ["inspect_page", "reelscript_docs"], "only tools that can't change anything claim to be read-only");
     assert.match(client.getInstructions() ?? "", /check_script/);
 
     const docs = (await client.callTool({ name: "reelscript_docs" })).content as Content;

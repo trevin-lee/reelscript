@@ -184,7 +184,7 @@ async function cachedInstall(bin: string, spec: string, vsixPath: string | null,
   const key = vsixPath
     ? `vsix-${createHash("sha1").update(readFileSync(vsixPath)).digest("hex").slice(0, 16)}`
     : `openvsx-${spec.toLowerCase().replace(/[^a-z0-9.@-]+/g, "_")}`;
-  const entry = join(cacheDir(), "code-server", "extension-cache", key);
+  const entry = join(cacheDir(), "extensions", key);
   if (existsSync(join(entry, "extensions.json"))) return entry;
   onStatus?.(`installing extension ${spec} (cached after this)`);
   const scratch = mkdtempSync(join(tmpdir(), "reelscript-ext-"));
@@ -201,7 +201,7 @@ async function cachedInstall(bin: string, spec: string, vsixPath: string | null,
     if (!existsSync(join(scratch, "ext", "extensions.json"))) {
       throw new Error(`reelscript: installing extension ${spec} produced nothing`);
     }
-    mkdirSync(join(cacheDir(), "code-server", "extension-cache"), { recursive: true });
+    mkdirSync(join(cacheDir(), "extensions"), { recursive: true });
     rmSync(entry, { recursive: true, force: true });
     renameSync(join(scratch, "ext"), entry);
     return entry;

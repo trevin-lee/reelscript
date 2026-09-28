@@ -45,33 +45,18 @@ jobs:
 
   # Container image. Built on every PR and push; pushed to GHCR from main as
   # :main and :sha-<commit>. Releases add :<version> and :latest (release.yml).
+  # Container image for amd64 and arm64, smoke-tested natively on each.
+  # Pushes from main publish :main and :sha-<commit>.
   image:
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/image.yml
     permissions:
       contents: read
       packages: write
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v5
-      - id: meta
-        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        if: github.event_name == 'push'
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: ${{ github.event_name == 'push' }}
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE }}:main
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+    with:
+      push: ${{ github.event_name == 'push' }}
+      tags: |
+        ghcr.io/trevin-lee/reelscript:main
+        ghcr.io/trevin-lee/reelscript:sha-${{ github.sha }}
 
   # The README GIF is a demo of reelscript made with reelscript, rendered by
   # the image that was just published. Committed back if the pixels changed.
@@ -97,9 +82,9 @@ jobs:
           restore-keys: reelscript-tts-
       - name: Render the demo with the published image
         run: |
-          mkdir -p ~/.cache/reelscript/tts
-          docker run --rm -v "$PWD:/work" -v "$HOME/.cache/reelscript/tts:/opt/reelscript/cache/tts" \
-            "$IMAGE:${{ needs.image.outputs.tag }}" render examples/basic.ts --out docs/demo.gif
+          mkdir -p ~/.cache/reelscript
+          docker run --rm -v "$PWD:/work" -v "$HOME/.cache/reelscript:/cache" \
+            "$IMAGE:sha-${{ github.sha }}" render examples/basic.ts --out docs/demo.gif
           sudo chown -R "$(id -u):$(id -g)" ~/.cache/reelscript
       - name: Commit the demo if it changed
         run: |

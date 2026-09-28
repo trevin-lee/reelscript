@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDemo, playbackEvents } from "../src/index.js";
+import { createDemo } from "../src/index.js";
+import { playbackEvents } from "../src/terminal.js";
 import { withCarriageReturns } from "../src/terminal.js";
 import { centreWithin, zoomAt } from "../src/renderer.js";
 import { createTheme } from "../src/theme.js";

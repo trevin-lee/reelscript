@@ -13,7 +13,7 @@ export interface CallContext {
 export type Target = string | { x: number; y: number };
 
 export type Action =
-  | { kind: "browser.goto"; url: string; settle?: number }
+  | { kind: "browser.goto"; url: string; hold?: number; /** @deprecated use hold */ settle?: number }
   | { kind: "browser.mockAPI"; pattern: string; response: unknown; status?: number }
   | { kind: "cursor.moveTo"; target: Target; ease?: Ease; duration?: number; window?: string }
   | { kind: "cursor.click"; button?: "left" | "right"; duration?: number }
@@ -43,6 +43,8 @@ export type Action =
   | { kind: "editor.openFile"; path: string; wpm?: number }
   | { kind: "editor.command"; command: string; wpm?: number }
   | { kind: "window.focus"; window: string }
+  | { kind: "window.close"; window: string }
+  | { kind: "browser.open"; x?: number; y?: number; width?: number; height?: number }
   | { kind: "window.place"; window: string; x?: number; y?: number; width?: number; height?: number }
   | {
       kind: "terminal.run";

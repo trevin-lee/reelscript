@@ -55,13 +55,12 @@ function callerLocation(): string {
 export type { Action, CallContext, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { Menubar, ThemeName } from "./theme.js";
-export type { RenderOptions, RenderResult, FollowCamera } from "./renderer.js";
+export type { RenderResult, FollowCamera } from "./renderer.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
 export type { TermEvent, TermRecording } from "./terminal.js";
-export { recordCommand, scriptedEvents, playbackEvents } from "./terminal.js";
-export { render } from "./renderer.js";
+
 
 export interface DemoOptions {
   /**
@@ -69,6 +68,16 @@ export interface DemoOptions {
    * `reelscript login <url>` writes. Every browser window starts signed in.
    */
   session?: string;
+  /**
+   * The moment the demo happens at. The page's Date starts here and the
+   * menu bar shows it, so every render shows the same dates. A Date, or an
+   * ISO string ("2026-03-10T14:30"; without an offset it's a time in
+   * `timezone`). Pass `new Date()` for the real time. Default: Tue Sep 23
+   * 2025, 9:41 AM.
+   */
+  clock?: string | Date;
+  /** IANA timezone for the page and the menu bar clock, e.g. "America/New_York". Default: "UTC" */
+  timezone?: string;
   /** Visual chrome around the recorded page. Default: "macos". */
   theme?: ThemeName;
   /** Content size of the first window, in CSS pixels. Default: [1280, 800]. */
@@ -227,7 +236,9 @@ export interface EditorOptions {
 }
 
 export interface GotoOptions {
-  /** ms to hold on the freshly loaded page. Default: 400 */
+  /** ms to hold, on camera, on the freshly loaded page. Default: 400 */
+  hold?: number;
+  /** @deprecated Renamed to `hold`, since `settle` elsewhere means time off camera. Still works; removed in 1.0. */
   settle?: number;
 }
 
@@ -278,6 +289,11 @@ class Win {
     this.demo._push({ kind: "window.focus", window: this.id });
   }
 
+  /** Take this window off the desktop. Focus passes to the topmost window left. It can be opened again later. */
+  async close(): Promise<void> {
+    this.demo._push({ kind: "window.close", window: this.id });
+  }
+
   /** Move or resize this window. */
   async place(geometry: WindowGeometry): Promise<void> {
     this.demo._push({ kind: "window.place", window: this.id, ...geometry });
@@ -287,6 +303,14 @@ class Win {
 class Browser extends Win {
   constructor(demo: Demo) {
     super(demo, "browser");
+  }
+
+  /**
+   * Open the browser window at a position and size without navigating.
+   * Optional: goto() opens it if it isn't open yet.
+   */
+  async open(geometry: WindowGeometry = {}): Promise<void> {
+    this.demo._push({ kind: "browser.open", ...geometry });
   }
 
   /** Navigate the browser window (opening it if needed) and bring it to the front. */
@@ -402,11 +426,6 @@ export class Demo {
   }
 
   /**
-   * Hold the camera until `selector` is visible. Off camera: no video time
-   * passes, but the page's clock keeps running, so a page that needs time
-   * to load, fetch or animate gets it without its loading being filmed.
-   */
-  /**
    * Run `fn` at this point of the timeline, off camera: no video time
    * passes, and the render waits for it. For what the page should see happen
    * at a given moment and cannot cause itself, such as a change another
@@ -418,6 +437,11 @@ export class Demo {
     this._push({ kind: "call", fn });
   }
 
+  /**
+   * Hold the camera until `selector` is visible. Off camera: no video time
+   * passes, but the page's clock keeps running, so a page that needs time
+   * to load, fetch or animate gets it without its loading being filmed.
+   */
   async waitFor(selector: string, opts: WaitForOptions = {}): Promise<void> {
     this._push({ kind: "waitFor", target: selector, ...opts });
   }
@@ -436,24 +460,22 @@ export class Demo {
     this._push({ kind: "waitForNarration" });
   }
 
-  /** The recorded timeline (useful for tests and debugging). */
+  /** The actions the script queued, in order (useful for tests and debugging). */
   getTimeline(): readonly Action[] {
     return this.actions;
   }
 
-  /**
-   * Render the timeline to a video file. The container is chosen from the
-   * extension: .mp4 (H.264) or .gif (palette-optimized).
-   *
-   * Honors REELSCRIPT_OUT (override output path) and REELSCRIPT_SNAPSHOT_AT
-   * (render a single PNG at that time in ms) so the CLI can drive scripts.
-   */
-  /** Directory for terminal recordings: option, else `recordings/` beside the entry script. */
+  /** @internal Folder for terminal recordings: the `recordingsDir` option, else `recordings/` beside the script. */
   recordingsDir(): string {
     return fromScript(this.options.recordingsDir ?? "recordings");
   }
 
-  /** Run every terminal command that has no declared output or events and save its recording. */
+  /**
+   * @internal Used by `reelscript record`.
+   * Run every terminal command that has no declared output or events and
+   * save its recording. A command that fails is still saved, since a demo
+   * may mean to show a failure, but the exit code is reported.
+   */
   async recordTerminals(): Promise<string[]> {
     const dir = this.recordingsDir();
     const files: string[] = [];
@@ -461,15 +483,26 @@ export class Demo {
       if (a.kind !== "terminal.run" || a.output !== undefined || a.events) continue;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const rec = await recordCommand(a.command);
+      if (rec.exitCode !== 0) {
+        process.stderr.write(
+          `reelscript: warning: "${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is\n`,
+        );
+      }
       files.push(saveRecording(dir, rec));
     }
+    // Let `reelscript record --prune` know which recordings are still in use.
+    const g = globalThis as { __reelscript_recorded?: Map<string, Set<string>> };
+    g.__reelscript_recorded ??= new Map();
+    const used = g.__reelscript_recorded.get(dir) ?? new Set<string>();
+    for (const f of files) used.add(f);
+    g.__reelscript_recorded.set(dir, used);
     return files;
   }
 
   /**
    * Run the whole timeline against the real app without capturing or
-   * encoding: every selector must resolve, every command must succeed, every
-   * recording must exist. Narration isn't synthesized; its length is
+   * encoding: every selector must resolve, every file and command typed into
+   * the editor must be found, and every terminal recording must exist. Narration isn't synthesized; its length is
    * estimated. Throws on the first failure with the script location.
    */
   async check(): Promise<RenderResult> {
@@ -478,6 +511,9 @@ export class Demo {
       out: "",
       check: true,
       camera: this.options.camera,
+      clock: this.options.clock,
+      timezone: this.options.timezone,
+      menubar: this.options.menubar,
       fps: this.options.fps,
       viewport: this.options.viewport,
       desktop: this.options.desktop,
@@ -496,6 +532,13 @@ export class Demo {
     return result;
   }
 
+  /**
+   * Render the timeline. The format follows the extension: .mp4 (H.264, with
+   * narration) or .gif (palette-optimized, silent). `outPath` is relative to
+   * the script's folder. Under the CLI this also does `check`, `preview` and
+   * `record`, which set REELSCRIPT_CHECK, REELSCRIPT_SNAPSHOT_AT,
+   * REELSCRIPT_RECORD and REELSCRIPT_OUT.
+   */
   async render(outPath: string): Promise<RenderResult> {
     noteRun();
     if (process.env.REELSCRIPT_RECORD) {
@@ -528,6 +571,8 @@ export class Demo {
       pronunciations: this.options.pronunciations,
       address: this.options.address,
       menubar: this.options.menubar,
+      clock: this.options.clock,
+      timezone: this.options.timezone,
       snapshotAt,
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
@@ -536,7 +581,7 @@ export class Demo {
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {
-            if (frame > 0 && frame % 30 === 0) {
+            if (frame > 0 && frame % 30 === 0 && process.stderr.isTTY) {
               process.stderr.write(`\rreelscript: frame ${frame}  t=${(timeMs / 1000).toFixed(2)}s`);
             }
           }
@@ -546,7 +591,7 @@ export class Demo {
     if (verbose) {
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       process.stderr.write(
-        `\rreelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frames, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
+        `${process.stderr.isTTY ? "\r" : ""}reelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frames, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
       );
     }
     return result;

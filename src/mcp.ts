@@ -21,13 +21,14 @@ Workflow for making a demo:
 1. Call reelscript_docs once to learn the API.
 2. Call inspect_page on the app's URL to get selectors for the elements you'll click and type into.
 3. Write a script file (see the docs' example) that ends with await demo.render("out/demo.mp4").
-4. Call check_script: it runs the whole timeline without rendering and reports the script line of any failing step. Fix and repeat until it passes.
-5. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
-6. Call render_script for the final video.
+4. If the script runs real terminal commands (terminal.run without output), call record_script to capture them.
+5. Call check_script: it runs the whole timeline without rendering and reports the script line of any failing step. Fix and repeat until it passes.
+6. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
+7. Call render_script for the final video.
 
 If the app needs a login, ask the user to run \`reelscript login <url> --out session.json\` once and pass createDemo({ session: "session.json" }).
 
-Selectors are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
+Targets are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
 
 /** How to invoke this package's CLI from a child process (built or from source). */
 function cli(): string[] {
@@ -109,14 +110,20 @@ export async function serve(): Promise<void> {
         width: z.number().int().optional().describe("Viewport width. Default 1280"),
         height: z.number().int().optional().describe("Viewport height. Default 800"),
         screenshot: z.boolean().optional().describe("Include a screenshot. Default true"),
+        session: z
+          .string()
+          .optional()
+          .describe("Saved login from `reelscript login`, relative to the working directory, to inspect a page behind a sign-in"),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ url, width = 1280, height = 800, screenshot = true }) => {
+    async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
       const { chromium } = await import("playwright");
+      const { resolveSession } = await import("./session.js");
+      const storageState = session ? resolveSession(session, process.cwd()) : undefined;
       const browser = await chromium.launch();
       try {
-        const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 })).newPage();
+        const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, storageState })).newPage();
         await page.goto(url, { waitUntil: "load" });
         const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
         const lines = elements.map((e) => `${e.tag.padEnd(9)} ${e.selector.padEnd(36)} ${JSON.stringify(e.label).padEnd(30)} at ${e.box}`);
@@ -141,7 +148,8 @@ export async function serve(): Promise<void> {
       description:
         "Run a script's whole timeline against the real app without rendering. Passes in seconds, or fails with the script line of the first step whose selector, command, or recording is missing.",
       inputSchema: { script: z.string().describe("Path to the demo script, relative to the working directory") },
-      annotations: { readOnlyHint: true },
+      // Not read-only: it clicks through the real app and runs the script's demo.call() code.
+      annotations: { readOnlyHint: false, openWorldHint: true },
     },
     async ({ script }) => {
       const { code, output } = await runCli(["check", resolve(script)]);
@@ -159,7 +167,8 @@ export async function serve(): Promise<void> {
         at: z.number().describe("Time in seconds"),
         width: z.number().int().optional().describe("Resize the returned image to this width. Default 1280"),
       },
-      annotations: { readOnlyHint: true },
+      // Not read-only: the timeline up to that moment runs against the real app.
+      annotations: { readOnlyHint: false, openWorldHint: true },
     },
     async ({ script, at, width = 1280 }) => {
       const dir = mkdtempSync(join(tmpdir(), "reelscript-preview-"));
@@ -190,6 +199,26 @@ export async function serve(): Promise<void> {
       if (out) args.push("--out", resolve(out));
       const { code, output } = await runCli(args);
       return { content: [text(output || (code === 0 ? "rendered" : "render failed"))], isError: code !== 0 };
+    },
+  );
+
+  server.registerTool(
+    "record_script",
+    {
+      title: "Record a script's terminal commands",
+      description:
+        "Run, for real, every terminal.run command in the script that has no declared output, and save the recordings beside the script so renders can replay them. Runs shell commands on this machine.",
+      inputSchema: {
+        script: z.string().describe("Path to the demo script"),
+        prune: z.boolean().optional().describe("Also delete recordings in that folder the script no longer uses. Default false"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    async ({ script, prune = false }) => {
+      const args = ["record", resolve(script)];
+      if (prune) args.push("--prune");
+      const { code, output } = await runCli(args);
+      return { content: [text(output || (code === 0 ? "recorded" : "record failed"))], isError: code !== 0 };
     },
   );
 

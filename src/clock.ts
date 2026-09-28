@@ -8,7 +8,30 @@
  * own compositor keeps running on real time, so screenshots and input
  * dispatch never stall — only the *content's* clock is deterministic.
  */
-export const CLOCK_SHIM = String.raw`
+/** The page clock shim, starting the page's Date at `epoch` (ms), or at the real time when null. */
+export function clockShim(epoch: number | null): string {
+  return CLOCK_SHIM_SOURCE.replace("__EPOCH__", epoch === null ? "Date.now()" : String(epoch));
+}
+
+/**
+ * For renders without the frame-stepped clock: shift only Date so the page
+ * starts at the pinned time; timers and animations run in real time.
+ */
+export function dateShim(epoch: number): string {
+  return String.raw`
+(() => {
+  const RealDate = Date;
+  const offset = ${epoch} - RealDate.now();
+  class VDate extends RealDate {
+    constructor(...a) { a.length === 0 ? super(RealDate.now() + offset) : super(...a); }
+    static now() { return RealDate.now() + offset; }
+  }
+  window.Date = VDate;
+})();
+`;
+}
+
+const CLOCK_SHIM_SOURCE = String.raw`
 (() => {
   if (window.__reelscript_advance) return;
   let now = 0;
@@ -20,7 +43,7 @@ export const CLOCK_SHIM = String.raw`
   // document.getAnimations() after it finishes, and must not be taken for
   // a new one and started over on the next frame.
   const finished = new WeakSet();
-  const epoch = Date.now();
+  const epoch = __EPOCH__;
   const RealDate = Date;
 
   const g = window;
@@ -92,3 +115,6 @@ export const CLOCK_SHIM = String.raw`
   };
 })();
 `;
+
+/** The page clock shim starting at the real current time (kept for existing imports). */
+export const CLOCK_SHIM = clockShim(null);

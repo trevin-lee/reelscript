@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.0
+
+Closes the gaps a coherence review found in 0.3.1: places where the tool let a broken demo pass, promised more than it did, or behaved differently in two places.
+
+**Changes that can affect existing scripts**
+
+- **Paths in a script are relative to the script's folder**, including `demo.render(path)` and the `recordingsDir` option, which were relative to the working directory. Paths on the command line are still relative to the working directory. A script run from its own folder is unaffected; otherwise its output moves next to it.
+- **The page's date is pinned** to Tuesday, September 23, 2025, 9:41 AM UTC by default, matching the menu bar, instead of the real time at render. Pass `clock: new Date()` for the real time, or set `clock` and `timezone`.
+- **`goto({ settle })` is now `goto({ hold })`**, because `settle` elsewhere means time off camera. `settle` still works on `goto` until 1.0.
+- `render`, `recordCommand`, `scriptedEvents`, and `playbackEvents` are no longer exported; they were internal.
+
+**`check` can be trusted**
+
+- An editor file or command that VS Code can't find fails at its script line, instead of pressing Enter on "No matching results" or a similar command.
+- A script that never calls `demo.render()` fails instead of passing silently.
+- A missing terminal recording names the script line.
+
+**Fixes and additions**
+
+- Renders no longer idle for about 10 seconds after finishing.
+- `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to every window and no longer opens one.
+- `clock` and `timezone` options; the menu bar shows the demo's clock.
+- `reelscript cache` lists what's cached and `reelscript cache clear <part|all>` removes it; `reelscript warmup` also downloads VS Code.
+- `reelscript record` takes several scripts, warns when a command fails, and `--prune` removes recordings no script uses.
+- `reelscript login` and the session-not-found error print the exact paths to use, so following the error can't loop.
+- The container image is built for amd64 and arm64, each tested on its own architecture. VS Code and the voice model are built in, and `/cache` holds what a render adds, so a volume there keeps extensions and spoken lines between runs.
+- MCP: `inspect_page` takes a `session`; a new `record_script` tool; tools that drive the real app are no longer marked read-only.
+- `reelscript --help` exits cleanly, and progress lines are plain in CI logs.
+- The README covers every command, option, and method, and the rules that hold across them.
+
 ## 0.3.1
 
 - **Logged-in apps.** `reelscript login <url>` opens a real browser so you can sign in once, and saves the session to a file. `createDemo({ session: "session.json" })` starts every browser window signed in. A missing session file is a clear error that tells you how to make one.
@@ -12,15 +42,6 @@
 - **Errors point at your script.** Every failure from `render` or `check` now ends with the line that caused it, like `at demo/signup.ts:14:19 (cursor.moveTo)`.
 - **Follow camera.** `camera: "follow"` zooms toward clicks and the typing caret on its own, starts moving before a click lands, keeps the cursor in view, and eases out when things go quiet. `{ scale, holdMs }` tunes it; `zoom.to()` still takes over when you want a specific shot.
 - **MCP server for coding agents.** `reelscript mcp` gives Claude Code and other MCP clients the docs, page inspection with ready-made selectors, `check`, frame previews as images, and rendering, so an agent can write and iterate on a demo itself.
-- **`demo.waitFor(selector, { window, timeout, settle })`** holds, off camera, until something appears, and **`demo.call(fn)`** runs your own code at a point in the timeline, for changes the page can't cause itself.
-- **`cursor.click({ duration: 0 })`** takes no video time, so a following `waitFor` cuts straight to the result.
-- **`zoom.to(target, { within: "window" })`** keeps a zoom inside the window, and a zoom that replaces another starts from wherever the first one got to.
-- **Terminal:** `terminal.run(cmd, { prompt: false })` and `terminal.print()` for output that keeps coming, recordings made elsewhere as timed events, a fixed `cols` and `rows`, and `lineHeight`.
-- **Desktop:** `address` rewrites what the browser's address pill shows (blank for local files, trimmed with an ellipsis when long), and `menubar` sets the menu bar's app name and clock or removes it.
-- Pages get clipboard access; finished CSS animations stay finished under the frame-stepped clock.
-
-## Unreleased
-
 - **`demo.waitFor(selector)`.** Holds the camera until the selector is visible while the page's clock keeps running, so a page that loads, fetches or animates gets the time without its loading being filmed. No video time passes.
 - **`demo.call(fn)`**, **`terminal.print(text)`** and **`terminal.run(cmd, { prompt: false })`.** A function run at a point of the timeline, for a change the page should see happen then, such as another client's edit; and terminal output split around it, with no prompt in between.
 - **Output recorded elsewhere.** `terminal.run` and `terminal.print` take `events`, timed chunks of output with their escape codes, played like a recording; `terminal.open({ cols, rows })` fixes the terminal's size in characters, and `lineHeight` sets its line spacing (1 joins block characters, as in most terminal apps; the default stays 1.3). Together they play back a full-screen program (an agent's TUI, say) recorded at that size with `script -r` or asciinema. Those events are written as they are, as a terminal writes a program's output: a bare line feed moves down a row and keeps the column. Other output still gets a carriage return before each line feed.
