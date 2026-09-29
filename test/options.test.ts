@@ -87,7 +87,7 @@ test("a terminal can have a fixed size, and play timed output made elsewhere", a
   assert.deepEqual(run, { kind: "terminal.run", command: "tool", events, speed: 2, maxGapMs: 1000, prompt: false });
   assert.deepEqual(print, { kind: "terminal.print", text: "", events, speed: 4 });
   // Played the way a recording is: long gaps capped, then sped up.
-  assert.deepEqual(playbackEvents(events, { speed: 2, maxGapMs: 1000 }), [[0, "\x1b[2J"], [200, "hello"], [700, " world"]]);
+  assert.deepEqual(playbackEvents(events, { speed: 2, maxGap: 1000 }), [[0, "\x1b[2J"], [200, "hello"], [700, " world"]]);
   // Declared output gets its carriage returns; one that has them keeps them.
   assert.equal(withCarriageReturns("a\nb\r\nc"), "a\r\nb\r\nc");
 });

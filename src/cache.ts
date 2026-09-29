@@ -12,27 +12,34 @@ export interface CachePart {
   name: string;
   description: string;
   path: string;
-  /** Outside the cache folder (built into the container image): listed, never cleared. */
+  /** Not reelscript's to delete: built into the container, or a binary you pointed at. Listed, never cleared. */
   builtIn: boolean;
+  /** Why it isn't cleared, for the listing. */
+  note?: string;
 }
 
 export function cacheParts(): CachePart[] {
   const root = cacheDir();
-  const part = (name: string, description: string, path: string, override?: string): CachePart => ({
+  // The container marks where its own copies live; only those count as built in.
+  const builtInDir = process.env.REELSCRIPT_BUILTIN;
+  const isBuiltIn = (p: string) => !!builtInDir && p.startsWith(builtInDir);
+  const part = (name: string, description: string, path: string, note?: string): CachePart => ({
     name,
     description,
     path,
-    builtIn: override !== undefined,
+    builtIn: isBuiltIn(path) || note !== undefined,
+    note: isBuiltIn(path) ? `built in at ${path}` : note,
   });
   const codeServer = process.env.REELSCRIPT_CODE_SERVER;
   // A standalone code-server install is <root>/bin/code-server with <root>/lib/vscode;
   // anything else (a system package, a wrapper) is shown as just the binary.
   const install = codeServer ? join(codeServer, "..", "..") : "";
   const editorPath = codeServer ? (existsSync(join(install, "lib", "vscode")) ? install : codeServer) : join(root, "code-server");
+  const editorNote = codeServer && !isBuiltIn(editorPath) ? `REELSCRIPT_CODE_SERVER: ${codeServer}` : undefined;
   return [
-    part("editor", "VS Code (code-server) for editor windows", editorPath, codeServer),
+    part("editor", "VS Code (code-server) for editor windows", editorPath, editorNote),
     part("extensions", "editor extensions installed from Open VSX or .vsix", join(root, "extensions")),
-    part("narration", "the Kokoro voice model", modelsDir(), process.env.REELSCRIPT_MODELS),
+    part("narration", "the Kokoro voice model", modelsDir()),
     part("narration-clips", "spoken lines, reused while their text and voice are unchanged", join(root, "tts")),
   ];
 }
@@ -74,7 +81,7 @@ export function clearCache(name: string): string[] {
   const removed: string[] = [];
   for (const p of targets) {
     if (p.builtIn) {
-      if (name !== "all") throw new Error(`reelscript: ${p.name} is built in here (${p.path}) and isn't cleared`);
+      if (name !== "all") throw new Error(`reelscript: ${p.name} isn't reelscript's to clear here (${p.note})`);
       continue;
     }
     rmSync(p.path, { recursive: true, force: true });

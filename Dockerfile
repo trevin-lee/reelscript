@@ -20,6 +20,7 @@ LABEL org.opencontainers.image.source="https://github.com/trevin-lee/reelscript"
       org.opencontainers.image.description="reelscript: product demos as code" \
       org.opencontainers.image.licenses="MIT"
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    REELSCRIPT_BUILTIN=/opt/reelscript/builtin \
     REELSCRIPT_CODE_SERVER=/opt/reelscript/builtin/code-server/bin/code-server \
     REELSCRIPT_MODELS=/opt/reelscript/builtin/models \
     REELSCRIPT_CACHE=/cache

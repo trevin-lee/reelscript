@@ -63,6 +63,32 @@ export function resolveFfmpeg(explicit?: string): string {
 }
 
 /** Streams raw RGB frames into ffmpeg and produces an H.264 mp4. */
+/** Every ffmpeg reelscript has running, so a failed or interrupted render can stop them. */
+const live = new Set<ChildProcess>();
+
+function track(proc: ChildProcess): void {
+  live.add(proc);
+  proc.on("close", () => live.delete(proc));
+}
+
+/**
+ * Kill every running ffmpeg and wait for it to exit. Left running, ffmpeg
+ * finalizes its output when its input closes (rewriting the file for
+ * faststart), recreating a partial file after it was deleted.
+ */
+export async function stopEncoders(): Promise<void> {
+  await Promise.all(
+    [...live].map(
+      (p) =>
+        new Promise<void>((resolve) => {
+          if (p.exitCode !== null || p.signalCode !== null) return resolve();
+          p.once("close", () => resolve());
+          p.kill("SIGKILL");
+        }),
+    ),
+  );
+}
+
 /** Output formats reelscript can write, by file extension. */
 export const OUTPUT_FORMATS = [".mp4", ".gif"];
 
@@ -99,6 +125,7 @@ export class Encoder {
       out,
     ];
     const proc = spawn(resolveFfmpeg(this.opts.ffmpegPath), args, { stdio: ["pipe", "ignore", "pipe"] });
+    track(proc);
     proc.stderr!.on("data", (d) => (this.stderr += d.toString()));
     this.exit = new Promise((resolve) =>
       proc.on("close", (code) => {
@@ -173,6 +200,7 @@ export async function muxNarration(videoPath: string, cues: NarrationCue[], out:
     out,
   );
   const proc = spawn(resolveFfmpeg(ffmpegPath), args, { stdio: ["ignore", "ignore", "pipe"] });
+  track(proc);
   let stderr = "";
   proc.stderr!.on("data", (d) => (stderr += d.toString()));
   const code = await new Promise<number | null>((resolve, reject) => {

@@ -9,6 +9,7 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - **Paths in a script are relative to the script's folder**, including `demo.render(path)` and the `recordingsDir` option, which were relative to the working directory. Paths on the command line are still relative to the working directory. A script run from its own folder is unaffected; otherwise its output moves next to it.
 - **The page's date is pinned** to Tuesday, September 23, 2025, 9:41 AM UTC by default, matching the menu bar, instead of the real time at render. Pass `clock: new Date()` for the real time, or set `clock` and `timezone`.
 - **`goto({ settle })` is now `goto({ hold })`**, because `settle` elsewhere means time off camera. `settle` still works on `goto` until 1.0.
+- **Clicks and `moveTo` are checked.** A script that moved to an element off screen, or clicked one covered by a window or an overlay, used to pass and film the wrong thing; now it fails at that line. Add `demo.scroll()` or `focus()` where needed.
 - `render`, `recordCommand`, `scriptedEvents`, and `playbackEvents` are no longer exported; they were internal.
 
 **`check` can be trusted**
@@ -38,6 +39,14 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - The page clock handles `Date()` called without `new`, and pages that subclass `Date`.
 - `record --prune` only deletes terminal recordings, never other JSON files in the folder.
 - Node 20.11 or later is required (20.6 to 20.10 couldn't run scripts in projects without `"type": "module"`).
+- **Clicks land where you aimed.** Moving to or zooming on an element outside the visible part of its window fails with a hint to scroll first, and a click on an element covered by another window or an overlay fails at its line instead of clicking what's on top.
+- **`demo.scroll(selector | { by, to })`** scrolls on the frame clock, so scrolling renders the same every time. Chromium's smooth scrolling is off, so keys like PageDown jump instead of animating on their own clock.
+- The page clock also advances inside iframes.
+- A misspelt voice fails `check` at its `say()` line; narration errors name their line; the voice model is released before exit, which fixes a crash on macOS after a failed narrated render.
+- Ctrl-C and termination stop VS Code and remove partial videos and temporary script copies.
+- `record` warns clearly when it stops a command at its two-minute limit.
+- Option names drop their units: `camera: { hold }` and `maxGap`. `holdMs` and `maxGapMs` still work until 1.0.
+- "Built in" in `reelscript cache` now means only the container's own copies; a models folder you set with `REELSCRIPT_MODELS` can be cleared, and a code-server you point at is never deleted.
 - The README covers every command, option, and method, and the rules that hold across them.
 
 ## 0.3.1

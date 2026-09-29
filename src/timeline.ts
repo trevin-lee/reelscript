@@ -22,6 +22,16 @@ export type Action =
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
   | { kind: "press"; key: string }
   | { kind: "wait"; ms: number }
+  | {
+      kind: "scroll";
+      /** Scroll until this element is in view (centered), or by / to a position on the page. */
+      target?: string;
+      by?: number;
+      to?: number;
+      duration?: number;
+      ease?: Ease;
+      window?: string;
+    }
   | { kind: "waitFor"; target: string; window?: string; timeout?: number; settle?: number }
   | { kind: "say"; text: string; voice?: string; speed?: number }
   | { kind: "waitForNarration" }
@@ -60,13 +70,15 @@ export type Action =
       /** Playback speed for recorded output. Default: 1 */
       speed?: number;
       /** Cap silences in recorded output, ms. Default: 700 */
+      maxGap?: number;
+      /** @deprecated Renamed to maxGap. */
       maxGapMs?: number;
       /** Show a new prompt after the output. Default: true */
       prompt?: boolean;
       /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
       cwd?: string;
     }
-  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
+  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };
 
 export type ActionKind = Action["kind"];

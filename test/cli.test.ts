@@ -115,7 +115,7 @@ test("cache: names match warmup, and a custom code-server binary doesn't break t
   const env = { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_CODE_SERVER: "/usr/bin/true" };
   const list = await cli(["cache"], dir, env);
   assert.equal(list.code, 0, list.output);
-  assert.match(list.output, /editor .*built in at \/usr\/bin\/true/);
+  assert.match(list.output, /editor .*REELSCRIPT_CODE_SERVER: \/usr\/bin\/true/);
   assert.match(list.output, /^\s+narration\s/m);
   const clear = await cli(["cache", "clear", "narration"], dir, env);
   assert.equal(clear.code, 0, clear.output);

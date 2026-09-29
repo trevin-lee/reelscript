@@ -6,10 +6,11 @@ import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
-import { Encoder, checkOutputFormat, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
+import { Encoder, checkOutputFormat, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
-import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
+import { DEFAULT_VOICE, applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
+import { onInterrupt } from "./cleanup.js";
 import {
   TERMINAL_URL,
   loadRecording,
@@ -124,6 +125,8 @@ export interface FollowCamera {
   /** Zoom level while following. Default: 1.5 */
   scale?: number;
   /** How long to stay zoomed after the last click or keystroke, ms. Default: 1200 */
+  hold?: number;
+  /** @deprecated Renamed to hold. */
   holdMs?: number;
 }
 
@@ -184,7 +187,7 @@ class Engine {
   private zoomAnim: Tween<ZoomState> | null = null;
   private lastClick = -Infinity;
   // follow camera
-  private follow: Required<FollowCamera> | null = null;
+  private follow: { scale: number; hold: number } | null = null;
   private attention: Attention | null = null;
   private manualZoom = false;
   private lastSampleT = 0;
@@ -237,7 +240,7 @@ class Engine {
     this.actions = actions;
     if (!camera || camera === "manual") return;
     const opts = camera === "follow" ? {} : camera;
-    this.follow = { scale: opts.scale ?? 1.5, holdMs: opts.holdMs ?? 1200 };
+    this.follow = { scale: opts.scale ?? 1.5, hold: opts.hold ?? opts.holdMs ?? 1200 };
   }
 
   private attend(at: number, p: Point): void {
@@ -259,7 +262,18 @@ class Engine {
   }
 
   async open(): Promise<void> {
-    this.browser = await chromium.launch({ headless: true });
+    // Smooth scrolling runs on Chromium's own clock, not the frame-stepped one,
+    // so it's off: keyboard and page scrolls jump, and demo.scroll() animates.
+    this.browser = await chromium.launch({
+      headless: true,
+      args: ["--disable-smooth-scrolling"],
+      // Playwright's own signal handlers exit the process straight away; reelscript's
+      // clean-up closes the browser itself, after stopping VS Code and ffmpeg.
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
+    this.unregisterBrowser = onInterrupt(() => this.browser.close().catch(() => {}));
     this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
@@ -273,7 +287,10 @@ class Engine {
     await this.context.addInitScript(this.deterministic ? clockShim(this.epoch) : dateShim(this.epoch));
   }
 
+  private unregisterBrowser: (() => void) | null = null;
+
   async close(): Promise<void> {
+    this.unregisterBrowser?.();
     await this.browser?.close();
     await this.editorServer?.stop();
   }
@@ -437,12 +454,17 @@ class Engine {
   /** Advance every window's virtual clock by `ms`. */
   async advanceClock(ms: number): Promise<void> {
     if (!this.deterministic) return;
+    // Every frame of every window, iframes included: each has its own clock.
     await Promise.all(
-      [...this.windows.values()].map((w) =>
-        w.page.evaluate((ms) => {
-          const g = window as unknown as { __reelscript_advance?: (ms: number) => void };
-          g.__reelscript_advance?.(ms);
-        }, ms),
+      [...this.windows.values()].flatMap((w) =>
+        w.page.frames().map((f) =>
+          f
+            .evaluate((ms) => {
+              const g = window as unknown as { __reelscript_advance?: (ms: number) => void };
+              g.__reelscript_advance?.(ms);
+            }, ms)
+            .catch(() => {}), // a frame that navigated or went away mid-step
+        ),
       ),
     );
   }
@@ -450,6 +472,54 @@ class Engine {
   // ------------------------------------------------------------ targets
 
   /** Resolve a target to desktop coordinates, searching the given or focused window. */
+  /** The element the cursor last moved to, which a click there is meant to hit. */
+  private aimed: { selector: string; window: string } | null = null;
+
+  /**
+   * A click must land on what the cursor moved to. Another window on top, or
+   * an element covering the target (an overlay, a toast), would take the
+   * click instead, and the demo would carry on showing the wrong thing.
+   */
+  private async expectClickLands(w: Win | null, aimed: { selector: string; window: string }): Promise<void> {
+    if (!w || w.id !== aimed.window) {
+      throw new Error(
+        `reelscript: the click on "${aimed.selector}" would land on ${w ? `the ${w.id} window` : "the desktop"}, ` +
+          `which covers the ${aimed.window} window there; bring it forward first with demo.${aimed.window}.focus()`,
+      );
+    }
+    const local = this.toLocal(w, this.cursor);
+    // No named helper functions inside evaluate: some compilers wrap them in
+    // helpers (__name) that don't exist in the page.
+    let hits: boolean;
+    try {
+      hits = await w.page
+        .locator(aimed.selector)
+        .first()
+        .evaluate(
+          (el, [x, y]) => {
+            let hit = document.elementFromPoint(x, y);
+            while (hit && hit.shadowRoot) {
+              const inner = hit.shadowRoot.elementFromPoint(x, y);
+              if (!inner || inner === hit) break;
+              hit = inner;
+            }
+            if (!hit) return false;
+            // Is the element hit the target, inside it, or around it (crossing shadow roots)?
+            for (let n: Node | null = hit; n; n = n.parentNode || (n as ShadowRoot).host || null) if (n === el) return true;
+            for (let n: Node | null = el; n; n = n.parentNode || (n as ShadowRoot).host || null) if (n === hit) return true;
+            return false;
+          },
+          [local.x, local.y] as [number, number],
+          { timeout: 2000 },
+        );
+    } catch {
+      throw new Error(`reelscript: "${aimed.selector}", which the cursor moved to, was gone before the click`);
+    }
+    if (!hits) {
+      throw new Error(`reelscript: something else in the ${w.id} window covers "${aimed.selector}" where the click would land`);
+    }
+  }
+
   /** A selector's first match once it's visible, or a reelscript error after 3s. */
   private async visible(w: Win, target: string) {
     const loc = w.page.locator(target).first();
@@ -467,6 +537,14 @@ class Engine {
     const loc = await this.visible(w, target);
     const box = await loc.boundingBox();
     if (!box) throw new Error(`reelscript: target "${target}" has no bounding box`);
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    if (cx < 0 || cy < 0 || cx > w.width || cy > w.height) {
+      throw new Error(
+        `reelscript: target "${target}" is outside the visible part of the ${w.id} window; ` +
+          `scroll to it first with demo.scroll(${JSON.stringify(target)})`,
+      );
+    }
     return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
   }
 
@@ -525,6 +603,8 @@ class Engine {
       }
       case "cursor.moveTo": {
         const to = await this.resolvePoint(action.target, action.window);
+        this.aimed =
+          typeof action.target === "string" ? { selector: action.target, window: action.window ?? this.focusedId ?? "" } : null;
         const from = { ...this.cursor };
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
         const dur = action.duration ?? clamp(Math.round(dist * 0.9 + 200), 250, 1400);
@@ -541,6 +621,7 @@ class Engine {
       }
       case "cursor.click": {
         const w = this.windowAt(this.cursor);
+        if (this.aimed) await this.expectClickLands(w, this.aimed);
         if (w) {
           this.focus(w);
           const local = this.toLocal(w, this.cursor);
@@ -577,6 +658,46 @@ class Engine {
       }
       case "wait":
         return { end: start + action.ms };
+      case "scroll": {
+        const w = action.window ? this.window(action.window) : this.focused();
+        this.aimed = null;
+        const range = action.target
+          ? await (await this.visible(w, action.target)).evaluate((el) => {
+              // The nearest scrollable ancestor, or the page. (No named helper
+              // functions in here; see expectClickLands.)
+              let c: Element | null = el.parentElement;
+              while (c) {
+                const oy = getComputedStyle(c).overflowY;
+                if ((oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight) break;
+                c = c.parentElement;
+              }
+              const box = c ?? document.scrollingElement!;
+              (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller = box;
+              const r = el.getBoundingClientRect();
+              const top = c ? c.getBoundingClientRect().top : 0;
+              const view = c ? c.clientHeight : window.innerHeight;
+              const want = box.scrollTop + (r.top - top) - (view - r.height) / 2;
+              return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
+            })
+          : await w.page.evaluate(([by, to]) => {
+              const box = document.scrollingElement!;
+              (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller = box;
+              const want = to ?? box.scrollTop + (by ?? 0);
+              return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
+            }, [action.by ?? null, action.to ?? null] as [number | null, number | null]);
+        const dist = Math.abs(range.to - range.from);
+        const dur = action.duration ?? clamp(Math.round(300 + dist * 0.6), 300, 1600);
+        const ease = action.ease ?? "smooth";
+        const setTo = (y: number) =>
+          w.page.evaluate((y) => {
+            (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller.scrollTo({ top: y, behavior: "instant" });
+          }, y);
+        return {
+          end: start + dur,
+          onFrame: (t: number) => setTo(lerp(range.from, range.to, progress(t, start, dur, ease))),
+          onEnd: () => setTo(range.to),
+        };
+      }
       case "waitFor": {
         // Off camera: the page's clock runs a frame at a time, with real
         // time between steps for the page to lay out and paint, until the
@@ -832,7 +953,7 @@ class Engine {
   /** Time (ms) after which nothing is still animating or speaking. */
   pendingUntil(): number {
     const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
-    const follow = this.follow && this.attention ? this.attention.at + this.follow.holdMs + 900 : 0;
+    const follow = this.follow && this.attention ? this.attention.at + this.follow.hold + 900 : 0;
     return Math.max(zoom, this.narrationEnd, follow);
   }
 
@@ -866,7 +987,7 @@ class Engine {
   private followCamera(t: number, dt: number): void {
     const f = this.follow!;
     const [W, H] = this.desktop;
-    const active = this.attention && t - this.attention.at < f.holdMs;
+    const active = this.attention && t - this.attention.at < f.hold;
     let target: ZoomState = { scale: 1, cx: W / 2, cy: H / 2 };
     if (active && this.attention) {
       target = { scale: f.scale, cx: this.attention.x, cy: this.attention.y };
@@ -1090,11 +1211,28 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
 
+  const where = (index: number, err: unknown): Error => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    const loc = options.sources?.[index];
+    if (loc && !e.message.includes(`\n  at ${loc}`)) e.message += `\n  at ${loc} (${actions[index]?.kind})`;
+    return e;
+  };
+
   // Narration is synthesized up front so clip durations can pace the timeline.
   const sayIndexes = actions.flatMap((a, i) => (a.kind === "say" ? [i] : []));
   const isGif = extname(options.out).toLowerCase() === ".gif";
   const check = options.check ?? false;
   const hasAudio = sayIndexes.length > 0 && snapshot === undefined && !isGif && !check;
+  if (sayIndexes.length) {
+    // A misspelt voice fails here, in check as in render, at its say() line.
+    const tts = options.tts ?? kokoro();
+    for (const i of sayIndexes) {
+      const voice = (actions[i] as Extract<Action, { kind: "say" }>).voice ?? options.voice ?? DEFAULT_VOICE;
+      if (tts.voices && !tts.voices.includes(voice)) {
+        throw where(i, new Error(`reelscript: unknown voice "${voice}". Voices: ${tts.voices.join(", ")}`));
+      }
+    }
+  }
   if (sayIndexes.length && check) {
     // Estimate speech length (~155 wpm) instead of loading the TTS model.
     const clips = new Map<number, Clip>();
@@ -1107,21 +1245,25 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     const tts = options.tts ?? kokoro();
     options.onStatus?.(`synthesizing narration (${sayIndexes.length} clip${sayIndexes.length === 1 ? "" : "s"})`);
     const clips = new Map<number, Clip>();
-    for (const i of sayIndexes) {
-      const a = actions[i] as Extract<Action, { kind: "say" }>;
-      const text = applyPronunciations(a.text, options.pronunciations);
-      clips.set(i, await synthesizeClip(tts, text, { voice: a.voice ?? options.voice, speed: a.speed }));
+    try {
+      for (const i of sayIndexes) {
+        const a = actions[i] as Extract<Action, { kind: "say" }>;
+        const text = applyPronunciations(a.text, options.pronunciations);
+        try {
+          clips.set(i, await synthesizeClip(tts, text, { voice: a.voice ?? options.voice, speed: a.speed }));
+        } catch (err) {
+          throw where(i, err);
+        }
+      }
+    } finally {
+      // Release the voice model now: left loaded, it can crash the process on exit.
+      await tts.dispose?.();
     }
     engine.setClips(clips);
     if (isGif && snapshot === undefined) options.onStatus?.("note: GIF output has no audio; narration is used for pacing only");
   }
 
-  const where = (index: number, err: unknown): Error => {
-    const e = err instanceof Error ? err : new Error(String(err));
-    const loc = options.sources?.[index];
-    if (loc && !e.message.includes(`\n  at ${loc}`)) e.message += `\n  at ${loc} (${actions[index]?.kind})`;
-    return e;
-  };
+
 
   // Terminal output: declared in the script, or replayed from a recording.
   const termRuns = actions.flatMap((a, i) => (a.kind === "terminal.run" ? [i] : []));
@@ -1130,12 +1272,12 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     const events = new Map<number, TermEvent[]>();
     for (const i of termPrints) {
       const a = actions[i] as Extract<Action, { kind: "terminal.print" }>;
-      events.set(i, a.events ? playbackEvents(a.events, { speed: a.speed, maxGapMs: a.maxGapMs }) : scriptedEvents(a.text ?? "", a.duration));
+      events.set(i, a.events ? playbackEvents(a.events, { speed: a.speed, maxGap: a.maxGap ?? a.maxGapMs }) : scriptedEvents(a.text ?? "", a.duration));
     }
     for (const i of termRuns) {
       const a = actions[i] as Extract<Action, { kind: "terminal.run" }>;
       if (a.events) {
-        events.set(i, playbackEvents(a.events, { speed: a.speed, maxGapMs: a.maxGapMs }));
+        events.set(i, playbackEvents(a.events, { speed: a.speed, maxGap: a.maxGap ?? a.maxGapMs }));
         continue;
       }
       if (a.output !== undefined) {
@@ -1153,7 +1295,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           ),
         );
       }
-      events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGapMs: a.maxGapMs }));
+      events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGap: a.maxGap ?? a.maxGapMs }));
     }
     engine.setTerminalEvents(events);
   }
@@ -1165,6 +1307,11 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const partial = join(dirname(options.out), `.${outBase}.partial${outExt}`);
   const videoPath = hasAudio ? join(dirname(options.out), `.${outBase}.video.partial.mp4`) : partial;
   let finished = false;
+  const removePartials = async () => {
+    await stopEncoders(); // first, or ffmpeg rewrites the file after it's removed
+    for (const p of [partial, videoPath]) rmSync(p, { force: true });
+  };
+  const unregisterPartial = onInterrupt(removePartials);
   if (snapshot === undefined && !check) checkOutputFormat(options.out);
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
@@ -1252,7 +1399,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     finished = true;
   } finally {
     await engine.close();
-    if (!finished) for (const p of [partial, videoPath]) rmSync(p, { force: true });
+    unregisterPartial();
+    if (!finished) await removePartials();
   }
 
   return { out: options.out, frames, durationMs: Math.round(t), width, height };

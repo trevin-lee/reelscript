@@ -13,6 +13,7 @@ import { basename, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { cacheDir } from "./tts.js";
+import { interrupted, onInterrupt } from "./cleanup.js";
 
 export const CODE_SERVER_VERSION = "4.138.0";
 
@@ -249,6 +250,8 @@ export class EditorServer {
     this.configKey = JSON.stringify([config.workspace, config.extensions ?? [], config.settings ?? {}]);
     const bin = await ensureCodeServer(onStatus);
     this.root = mkdtempSync(join(tmpdir(), "reelscript-editor-"));
+    // From the moment the folder exists, an interrupt cleans it up.
+    this.unregister = onInterrupt(() => this.stop());
     const userData = join(this.root, "user-data");
     mkdirSync(join(userData, "User"), { recursive: true });
     writeFileSync(join(userData, "User", "settings.json"), JSON.stringify({ ...EDITOR_DEFAULT_SETTINGS, ...config.settings }, null, 2));
@@ -274,11 +277,15 @@ export class EditorServer {
         registerExtensionFolder(path, extensionsDir);
       } else {
         const entry = await cachedInstall(bin, ext, path, onStatus);
+        if (interrupted()) throw new Error("reelscript: interrupted");
         copyInstalledExtensions(entry, extensionsDir);
       }
     }
 
     this.port = await freePort();
+    // Interrupted while starting up: don't launch anything more; the
+    // clean-up registered above removes what was made.
+    if (interrupted()) throw new Error("reelscript: interrupted");
     const proc = spawn(
       bin,
       [
@@ -316,8 +323,21 @@ export class EditorServer {
     return `http://127.0.0.1:${this.port}/?folder=${encodeURIComponent(this.workspace)}`;
   }
 
-  /** Stop code-server and every process it started, then remove its temporary folder. */
-  async stop(): Promise<void> {
+  /**
+   * Stop code-server and every process it started, then remove its temporary
+   * folder. Concurrent calls (Ctrl-C clean-up and the render's own shutdown)
+   * share one stop, so none removes the folder before the processes are gone.
+   */
+  stop(): Promise<void> {
+    this.stopping ??= this.stopNow().finally(() => {
+      this.stopping = null;
+    });
+    return this.stopping;
+  }
+
+  private stopping: Promise<void> | null = null;
+
+  private async stopNow(): Promise<void> {
     const proc = this.proc;
     this.proc = null;
     if (proc?.pid && proc.exitCode === null) {
@@ -330,14 +350,35 @@ export class EditorServer {
         }
       };
       signal("SIGTERM");
-      const timedOut = await Promise.race([exited.then(() => false), new Promise<boolean>((r) => setTimeout(() => r(true), 3000).unref())]);
+      const timedOut = await Promise.race([exited.then(() => false), new Promise<boolean>((r) => setTimeout(() => r(true), 1500).unref())]);
       if (timedOut) signal("SIGKILL");
-      // Children may outlive the parent by a moment; make sure the group is gone.
+      // Children may outlive the parent by a moment; end them, and wait until
+      // none is left, so none can write into the folder after it's removed.
       signal("SIGKILL");
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(-proc.pid, 0);
+        } catch {
+          break; // no process left in the group
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
     }
-    if (this.root) rmSync(this.root, { recursive: true, force: true });
-    this.root = "";
+    this.unregister?.();
+    this.unregister = null;
+    if (this.root) {
+      const root = this.root;
+      this.root = "";
+      rmSync(root, { recursive: true, force: true });
+      // A dying process can still flush one last log line and recreate the
+      // folder; sweep once more after it's had a moment.
+      await new Promise((r) => setTimeout(r, 250));
+      rmSync(root, { recursive: true, force: true });
+    }
   }
+
+  private unregister: (() => void) | null = null;
 
   /** Whether this server was started for the same workspace, extensions and settings. */
   matches(config: EditorServerConfig): boolean {

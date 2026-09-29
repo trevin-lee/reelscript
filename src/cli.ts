@@ -109,9 +109,12 @@ async function importScript(path: string): Promise<void> {
     const { dirname, basename, join } = await import("node:path");
     const tmp = join(dirname(script), `.${basename(script).replace(/\.[cm]?[jt]sx?$/, "")}.reelscript.mts`);
     copyFileSync(script, tmp);
+    const { onInterrupt } = await import("./cleanup.js");
+    const unregister = onInterrupt(() => unlinkSync(tmp));
     try {
       await tsImport(pathToFileURL(tmp).href, import.meta.url);
     } finally {
+      unregister();
       unlinkSync(tmp);
     }
   }
@@ -211,7 +214,7 @@ async function main(): Promise<void> {
       if (positional.length) usage();
       console.log(`reelscript cache: ${cacheDir()}`);
       for (const p of cacheParts()) {
-        const where = p.builtIn ? `  (built in at ${p.path})` : "";
+        const where = p.note ? `  (${p.note})` : "";
         console.log(`  ${p.name.padEnd(16)} ${formatBytes(sizeOf(p.path)).padStart(8)}  ${p.description}${where}`);
       }
       console.log(`clear a part with: reelscript cache clear <part|all>`);
@@ -230,7 +233,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
+  // After Ctrl-C, failures come from the clean-up itself; let it finish and exit.
+  const { interrupted } = await import("./cleanup.js");
+  if (interrupted()) return;
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

@@ -9,12 +9,13 @@
 import { render as renderTimeline, type RenderResult } from "./renderer.js";
 import type { Action, CallContext, Target } from "./timeline.js";
 import { resolveSession } from "./session.js";
+import { interrupted } from "./cleanup.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
-import { recordCommand, saveRecording } from "./terminal.js";
+import { RECORD_TIMEOUT_MS, recordCommand, saveRecording } from "./terminal.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +29,20 @@ function scriptFile(): string {
 /** Paths written in a script are relative to the script's folder, wherever it's run from. */
 function fromScript(path: string): string {
   return resolve(dirname(scriptFile()), path);
+}
+
+/**
+ * After Ctrl-C, the clean-up stops VS Code and ffmpeg under a render that is
+ * still going, so the render fails. That failure isn't the script's: let the
+ * clean-up finish and exit, rather than reporting it and exiting early.
+ */
+async function unlessInterrupted<T>(work: Promise<T>): Promise<T> {
+  try {
+    return await work;
+  } catch (err) {
+    if (interrupted()) await new Promise(() => {}); // the clean-up exits the process
+    throw err;
+  }
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
@@ -88,7 +103,7 @@ export interface DemoOptions {
   fps?: number;
   /**
    * "follow" zooms toward clicks and the typing caret automatically and
-   * eases out when things go quiet; pass { scale, holdMs } to tune it.
+   * eases out when things go quiet; pass { scale, hold } to tune it.
    * Default: "manual" (zoom only on zoom.to()).
    */
   camera?: "manual" | "follow" | FollowCamera;
@@ -166,6 +181,14 @@ export interface WaitForOptions {
   settle?: number;
 }
 
+export interface ScrollOptions {
+  /** ms. Default: from the distance */
+  duration?: number;
+  ease?: Ease;
+  /** Window to scroll. Default: the focused window. */
+  window?: "browser" | "terminal" | "editor";
+}
+
 export interface TypeOptions {
   /** Typing speed in words per minute. Default: 300 */
   wpm?: number;
@@ -210,7 +233,7 @@ export interface RunOptions {
   /**
    * Output as timed chunks, [ms, text], escape codes and all: a recording
    * made elsewhere, of a full-screen program, say. Played with `speed` and
-   * `maxGapMs` like a recording.
+   * `maxGap` like a recording.
    */
   events?: [number, string][];
   /** Spread declared output over this many ms. */
@@ -220,7 +243,11 @@ export interface RunOptions {
   /** Playback speed for recorded output. Default: 1 */
   speed?: number;
   /** Cap silences in recorded output, in ms. Default: 700 */
+  maxGap?: number;
+  /** @deprecated Renamed to maxGap. */
   maxGapMs?: number;
+  /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
+  cwd?: string;
   /**
    * Show a new prompt once the output ends. Default: true. With false the
    * command looks as if it is still running, and terminal.print() can go on
@@ -360,7 +387,7 @@ class TerminalWindow extends Win {
    */
   async print(
     text: string,
-    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGapMs?: number } = {},
+    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGap?: number; maxGapMs?: number } = {},
   ): Promise<void> {
     this.demo._push({ kind: "terminal.print", text, ...opts });
   }
@@ -436,6 +463,16 @@ export class Demo {
   }
 
   /**
+   * Scroll, on camera, stepped with the frame clock: to bring `target` into
+   * view (centered, scrolling its nearest scrollable container), or by / to a
+   * position on the page, e.g. `scroll({ by: 600 })` or `scroll({ to: 0 })`.
+   */
+  async scroll(target: string | { by?: number; to?: number }, opts: ScrollOptions = {}): Promise<void> {
+    if (typeof target === "string") this._push({ kind: "scroll", target, ...opts });
+    else this._push({ kind: "scroll", ...target, ...opts });
+  }
+
+  /**
    * Run `fn` at this point of the timeline, off camera: no video time
    * passes, and the render waits for it. For what the page should see happen
    * at a given moment and cannot cause itself, such as a change another
@@ -493,7 +530,11 @@ export class Demo {
       if (a.kind !== "terminal.run" || a.output !== undefined || a.events) continue;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const rec = await recordCommand(a.command, { cwd: fromScript(a.cwd ?? ".") });
-      if (rec.exitCode !== 0) {
+      if (rec.timedOut) {
+        process.stderr.write(
+          `reelscript: warning: "${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then\n`,
+        );
+      } else if (rec.exitCode !== 0) {
         process.stderr.write(
           `reelscript: warning: "${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is\n`,
         );
@@ -519,7 +560,7 @@ export class Demo {
     noteRun();
     const started = Date.now();
     const verbose = this.options.verbose ?? true;
-    const result = await renderTimeline(this.actions, {
+    const result = await unlessInterrupted(renderTimeline(this.actions, {
       out: "",
       check: true,
       camera: this.options.camera,
@@ -536,7 +577,7 @@ export class Demo {
       baseDir: dirname(scriptFile()),
       session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
-    });
+    }));
     const script = basename(scriptFile());
     if (verbose) process.stderr.write(
       `reelscript: check passed for ${script}: ${this.actions.length} actions, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
@@ -573,7 +614,7 @@ export class Demo {
     const verbose = this.options.verbose ?? true;
     const started = Date.now();
 
-    const result = await renderTimeline(this.actions, {
+    const result = await unlessInterrupted(renderTimeline(this.actions, {
       out,
       fps: this.options.fps,
       viewport: this.options.viewport,
@@ -602,7 +643,7 @@ export class Demo {
             }
           }
         : undefined,
-    });
+    }));
 
     if (verbose) {
       const secs = ((Date.now() - started) / 1000).toFixed(1);

@@ -30,7 +30,7 @@ await demo.render("out/demo.mp4");
 
 - **Code-first, not a UI timeline.** The demo is a script you version, diff, and review.
 - **Deterministic offline rendering.** Frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Every frame is there, and it runs headless in CI.
-- **The page's clock is virtual and pinned.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and steps CSS transitions through the Web Animations API, one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is, and the page's date is the same on every render.
+- **The page's clock is virtual and pinned.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and its iframes and steps CSS transitions through the Web Animations API, one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is, and the page's date is the same on every render.
 - **A camera that follows the action.** `camera: "follow"` eases in toward each click and the typing caret, holds, and eases back out when things go quiet. Or place zooms by hand with `zoom.to()`.
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are Playwright selectors, and `browser.mockAPI()` returns canned JSON so demos needn't depend on a live backend.
@@ -66,8 +66,10 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 
 - **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, and an editor's `workspace` and `extensions`. Paths you pass on the command line are relative to your working directory.
 - **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target can also be a point, `{ x, y }`, in the window's own coordinates.
+- **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
 - **Windows.** There is at most one browser, one terminal, and one editor window. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
-- **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` holds on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed.
+- **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
+- **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page, stepped with the frame clock like everything else. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
 - **The clock.** Every demo happens at the same moment, Tuesday, September 23, 2025, 9:41 AM UTC, unless you set `clock` and `timezone`. The page's `Date` starts there and the menu bar shows it.
 
 ## Logged-in apps
@@ -104,7 +106,11 @@ Each window is its own Chromium page; the desktop composites them in z-order wit
 ## Editor demos
 
 ```ts
-await demo.editor.open({ workspace: "acme", extensions: ["esbenp.prettier-vscode@12.4.0"] });
+await demo.editor.open({
+  workspace: "acme",
+  extensions: ["esbenp.prettier-vscode@12.4.0"],
+  settings: { "editor.defaultFormatter": "esbenp.prettier-vscode" }, // or VS Code asks which formatter to use
+});
 await demo.cursor.moveTo(demo.editor.file("app.ts"));
 await demo.cursor.click();
 await demo.cursor.moveTo(".monaco-editor .view-lines"); // click into the editor to move keyboard focus
@@ -146,7 +152,7 @@ reelscript record demos/terminal.ts
 
 once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
-Rendering replays a recording with long silences capped (`maxGapMs`) and an optional `speed`, and never needs the tool installed. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
+Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command after two minutes and keeps the output up to then, with a warning. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 
@@ -174,7 +180,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -v reelscript-cache:/
   ghcr.io/trevin-lee/reelscript:0.4.0 render demos/signup.ts
 ```
 
-Use the tag that matches your npm version (`latest` is the newest release). `--user` makes the files it writes yours; without it, on Linux they belong to root. What a render adds, editor extensions and spoken lines, goes in `/cache`; mount a volume there, as above, to keep it between runs. In GitHub Actions:
+Use the tag that matches your npm version (`latest` is the newest release). Ctrl-C or a stopped CI job cleans up after itself: VS Code is stopped and no partial video is left beside the output. `--user` makes the files it writes yours; without it, on Linux they belong to root. What a render adds, editor extensions and spoken lines, goes in `/cache`; mount a volume there, as above, to keep it between runs. In GitHub Actions:
 
 ```yaml
 jobs:
@@ -262,6 +268,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`. |
 | `demo.wait(ms)` | Hold, on camera. |
+| `demo.scroll(selector \| { by, to }, { duration, ease, window })` | Scroll, on camera, stepped with the frame clock: to center an element (scrolling its nearest scrollable container), or by / to a position on the page. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold, off camera, until the selector is visible, then run the page's clock `settle` ms more. The page keeps running, so its loading isn't filmed. |
 | `demo.call(({ page, context }) => ...)` | Run your code at this point, off camera, and wait for it. Gets the focused window's Playwright `page` and the browser `context`. |
 | `demo.zoom.to(target, { scale, duration, ease, window, within })` | Animate a zoom centred on a target; runs alongside the actions that follow. `within: "window"` keeps the view inside the target's window. |
@@ -270,10 +277,10 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.browser.open({ x, y, width, height })` | Open the browser window without navigating. Optional; `goto()` opens it too. |
 | `demo.browser.goto(url, { hold })` | Navigate, then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
-| `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from every window with canned JSON. Opens no window. |
+| `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from the browser window with canned JSON. Opens no window. (The editor is VS Code's own page and isn't mocked.) |
 | `demo.terminal.open({ title, prompt, fontSize, lineHeight, cols, rows, x, y, width, height })` | Open a terminal window. `cols` and `rows` fix its size in characters; `lineHeight: 1` (default 1.3) joins block characters, as full-screen programs expect. |
-| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGapMs, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |
-| `demo.terminal.print(text, { duration, events, speed, maxGapMs, prompt })` | More output with no command typed, after a `run` with `prompt: false`. |
+| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGap, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |
+| `demo.terminal.print(text, { duration, events, speed, maxGap, prompt })` | More output with no command typed, after a `run` with `prompt: false`. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open VS Code on a copy of a folder. `extensions` are Open VSX ids, `.vsix` files, or extension folders. `settings` merge over demo-friendly defaults; `notifications: true` shows VS Code's toasts. Reopening with a different workspace, extensions, or settings starts a fresh VS Code. |
 | `demo.editor.openFile(path, { wpm })`, `demo.editor.command(name, { wpm })` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. Fails if VS Code finds no match. |
 | `demo.editor.type(text, { wpm })` | Bring the editor forward and type at its caret. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
@@ -288,7 +295,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `desktop` | first window plus margins | Output size. |
 | `theme` | `"macos"` | `"macos"` draws a desktop, menu bar, and window frames; `"bare"` shows window content only. |
 | `fps` | `60` | Output frame rate. |
-| `camera` | `"manual"` | `"follow"` zooms toward clicks and typing on its own; `{ scale, holdMs }` tunes it. |
+| `camera` | `"manual"` | `"follow"` zooms toward clicks and typing on its own; `{ scale, hold }` tunes it. |
 | `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` gives the real time. |
 | `timezone` | `"UTC"` | IANA timezone for the page and the menu bar. |
 | `session` | none | A saved login from `reelscript login`, relative to the script. |

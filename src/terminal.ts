@@ -18,6 +18,8 @@ export interface TermRecording {
   cols: number;
   rows: number;
   exitCode: number | null;
+  /** Set when the command ran past the time limit and was stopped. */
+  timedOut?: boolean;
   durationMs: number;
   recordedAt: string;
   events: TermEvent[];
@@ -69,9 +71,9 @@ export function scriptedEvents(output: string, durationMs?: number): TermEvent[]
  * Compact a recording's timing for playback: cap long silences, scale by
  * speed, so a real command that stalled for 20s doesn't stall the demo.
  */
-export function playbackEvents(events: TermEvent[], opts: { speed?: number; maxGapMs?: number } = {}): TermEvent[] {
+export function playbackEvents(events: TermEvent[], opts: { speed?: number; maxGap?: number } = {}): TermEvent[] {
   const speed = opts.speed ?? 1;
-  const maxGap = opts.maxGapMs ?? 700;
+  const maxGap = opts.maxGap ?? 700;
   let prev = 0;
   let acc = 0;
   return events.map(([at, text]) => {
@@ -81,6 +83,9 @@ export function playbackEvents(events: TermEvent[], opts: { speed?: number; maxG
     return [Math.round(acc), text];
   });
 }
+
+/** How long `reelscript record` lets a command run before stopping it. */
+export const RECORD_TIMEOUT_MS = 120_000;
 
 export interface RecordOptions {
   cwd?: string;
@@ -105,7 +110,11 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
     const onData = (chunk: Buffer) => events.push([Date.now() - start, chunk.toString("utf8")]);
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
-    const timer = setTimeout(() => child.kill(), opts.timeoutMs ?? 120_000);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, opts.timeoutMs ?? RECORD_TIMEOUT_MS);
     child.on("error", reject);
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -115,6 +124,7 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
         cols,
         rows,
         exitCode: code,
+        ...(timedOut ? { timedOut: true } : {}),
         durationMs: Date.now() - start,
         recordedAt: new Date().toISOString(),
         events,
