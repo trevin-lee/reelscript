@@ -12,7 +12,12 @@ await demo.waitForNarration();
 demo.say("Run it from the command palette.");
 await demo.editor.command("Acme: Deploy to Production");
 demo.zoom.to(".statusbar", { scale: 1.5 });
-await demo.wait(2200);
+// The extension deploys on VS Code's own, real-time clock. Show the spinner for
+// a moment, then wait for the result itself rather than for a fixed time, so
+// every render reaches the same point however fast the machine is.
+await demo.wait(800);
+await demo.waitFor("text=Deployed acme@1.4.0", { window: "editor" });
+await demo.wait(1400);
 await demo.waitForNarration();
 demo.zoom.out();
 await demo.wait(1200);

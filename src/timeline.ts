@@ -20,7 +20,7 @@ export type Action =
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
-  | { kind: "press"; key: string }
+  | { kind: "press"; key: string; window?: string }
   | { kind: "wait"; ms: number }
   | {
       kind: "scroll";
@@ -61,7 +61,7 @@ export type Action =
       command: string;
       /** Declared output. Omit to replay a recording made by `reelscript record`. */
       output?: string;
-      /** Output as timed chunks, [ms, text], e.g. a recording made elsewhere. Played with `speed` and `maxGapMs`. */
+      /** Output as timed chunks, [ms, text], e.g. a recording made elsewhere. Played with `speed` and `maxGap`. */
       events?: [number, string][];
       /** Spread declared output over this many ms. */
       duration?: number;
@@ -78,7 +78,7 @@ export type Action =
       /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
       cwd?: string;
     }
-  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
+  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number; duration?: number; prompt?: boolean }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };
 
 export type ActionKind = Action["kind"];

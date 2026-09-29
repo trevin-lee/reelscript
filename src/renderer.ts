@@ -9,7 +9,7 @@ import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, checkOutputFormat, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
-import { DEFAULT_VOICE, applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
+import { DEFAULT_VOICE, applyPronunciations, cachedClip, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
 import { onInterrupt } from "./cleanup.js";
 import {
   TERMINAL_URL,
@@ -536,8 +536,21 @@ class Engine {
     const w = windowId ? this.window(windowId) : this.focused();
     if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
     const loc = await this.visible(w, target);
-    const box = await loc.boundingBox();
-    if (!box) throw new Error(`reelscript: target "${target}" has no bounding box`);
+    const box = await this.inView(w, loc, target);
+    return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
+  }
+
+  /** A target's box, which must be within the visible part of its window. */
+  private async inView(w: Win, loc: Awaited<ReturnType<Engine["visible"]>>, target: string) {
+    // A page that re-renders (VS Code on its real clock, a React update) can
+    // replace the element between one read and the next, so a missing box is
+    // retried within the same window as finding the element.
+    let box = await loc.boundingBox();
+    for (const deadline = Date.now() + 3000; !box && Date.now() < deadline; ) {
+      await new Promise((r) => setTimeout(r, 25));
+      box = await loc.boundingBox();
+    }
+    if (!box) throw new Error(`reelscript: target "${target}" was found but never had a position on the page`);
     const cx = box.x + box.width / 2;
     const cy = box.y + box.height / 2;
     if (cx < 0 || cy < 0 || cx > w.width || cy > w.height) {
@@ -548,7 +561,7 @@ class Engine {
             : `bring it into view first (keys, or an editor command)`),
       );
     }
-    return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
+    return box;
   }
 
   private async resolvePoint(target: Target, windowId?: string): Promise<Point> {
@@ -637,7 +650,11 @@ class Engine {
       case "type": {
         const w = action.window ? this.window(action.window) : this.focused();
         if (action.window) this.focus(w);
-        if (action.target) await (await this.visible(w, action.target)).focus();
+        if (action.target) {
+          const field = await this.visible(w, action.target);
+          await this.inView(w, field, action.target); // like moveTo: no silent jump to an off-screen field
+          await field.focus();
+        }
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
         const firstAt = start + 80;
@@ -656,7 +673,9 @@ class Engine {
         };
       }
       case "press": {
-        await this.focused().page.keyboard.press(action.key);
+        const w = action.window ? this.window(action.window) : this.focused();
+        if (action.window) this.focus(w);
+        await w.page.keyboard.press(action.key);
         return { end: start + 100 };
       }
       case "wait":
@@ -1023,8 +1042,16 @@ class Engine {
     const w = this.windowAt(this.cursor);
     if (!w) return;
     const local = this.toLocal(w, this.cursor);
-    if (this.inContent(w, local)) await w.page.mouse.move(local.x, local.y);
+    if (!this.inContent(w, local)) return;
+    // Only when the cursor (or the window under it) changed: a page's hover
+    // state holds between moves, and each move is a round trip to the browser.
+    const at = `${w.id}:${w.page.url()}:${Math.round(local.x)},${Math.round(local.y)}`;
+    if (at === this.mouseAt) return;
+    this.mouseAt = at;
+    await w.page.mouse.move(local.x, local.y);
   }
+
+  private mouseAt = "";
 
   // ------------------------------------------------------------ frames
 
@@ -1244,11 +1271,17 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     }
   }
   if (sayIndexes.length && check) {
-    // Estimate speech length (~155 wpm) instead of loading the TTS model.
+    // The real length when this line has been synthesized before (any render
+    // or preview of it), so check paces the timeline as render will; otherwise
+    // an estimate (~155 wpm), without loading the voice model.
+    const tts = options.tts ?? kokoro();
     const clips = new Map<number, Clip>();
     for (const i of sayIndexes) {
-      const words = (actions[i] as Extract<Action, { kind: "say" }>).text.split(/\s+/).filter(Boolean).length;
-      clips.set(i, { file: "", seconds: Math.max(0.6, words / 2.6) });
+      const a = actions[i] as Extract<Action, { kind: "say" }>;
+      const text = applyPronunciations(a.text, options.pronunciations);
+      const cached = cachedClip(tts, text, { voice: a.voice ?? options.voice, speed: a.speed });
+      const words = text.split(/\s+/).filter(Boolean).length;
+      clips.set(i, cached ?? { file: "", seconds: Math.max(0.6, words / 2.6) });
     }
     engine.setClips(clips);
   } else if (sayIndexes.length) {
@@ -1367,7 +1400,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       if (endAt !== null && t >= endAt) break;
 
       engine.sample(t);
-      if (!check) await engine.syncMouse();
+      await engine.syncMouse(); // in check too: hover menus must open as they do in a render
       if (step?.onFrame) {
         try {
           await step.onFrame(t);

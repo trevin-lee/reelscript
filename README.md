@@ -87,7 +87,7 @@ const demo = createDemo({ session: "session.json" });
 await demo.browser.goto("https://app.example.com/dashboard");
 ```
 
-The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > demos/session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
+It keeps cookies, local storage and IndexedDB, where apps such as Firebase keep their sign-in. The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > demos/session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
 
 ## Several windows
 
@@ -122,7 +122,7 @@ await demo.editor.command("Format Document");
 
 `openFile()` and `command()` type into Quick Open and the Command Palette the way a person would. If VS Code can't find the file or command, the render and `check` fail at that line instead of pressing Enter on whatever VS Code offered, so a renamed command breaks the build rather than the demo.
 
-The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded on first use, about 200 MB, and built into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, so your files are never edited, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time rather than reelscript's frame-stepped clock; its animations are off by default so this doesn't show. See [examples/editor.ts](examples/editor.ts).
+The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded on first use, about 200 MB, and built into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, so your files are never edited, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time, not reelscript's frame-stepped clock. Its own animations are off by default, but anything VS Code or an extension does on a timer (a build, a deploy, a toast) happens in real time, so how far along it is at a given second can differ between `preview`, `check` and `render`, and between machines. Follow it with `waitFor()` on what it shows rather than a fixed `wait()`, as [examples/extension.ts](examples/extension.ts) does. See [examples/editor.ts](examples/editor.ts).
 
 ### Demo the extension you're building
 
@@ -152,7 +152,14 @@ reelscript record demos/terminal.ts
 
 once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. A command that appears twice (`ls`, `touch new.txt`, `ls`) or runs in two folders gets a recording for each run, so each replays what it showed at that point. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
-Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning; when a command exits, anything it left running in the background is stopped too. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
+Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning; when a command exits, anything it left running in the background is stopped too. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it with [asciinema](https://asciinema.org) and play the recording:
+
+```ts
+import { createDemo, readAsciicast } from "@reelscript/cli";
+const cast = readAsciicast("claude.cast"); // asciinema rec claude.cast, v2 or v3; relative to the script
+await demo.terminal.open({ cols: cast.cols, rows: cast.rows, lineHeight: 1 });
+await demo.terminal.run("claude", { events: cast.events });
+``` See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 
@@ -160,11 +167,11 @@ Rendering replays a recording with long silences capped (`maxGap`) and an option
 
 GIF output has no audio track; narration still paces the timeline. Render to `.mp4` for sound.
 
-To use another voice engine, pass `tts`: any object with a stable `id` (part of the cache key) and `synthesize(text, { voice, speed })` returning `{ audio, sampleRate }`, where `audio` is mono `Float32Array` samples in [-1, 1]. `kokoro(model?)` builds the default engine. Don't install with `--omit=optional` to skip Kokoro: npm also ships sharp's platform binaries as optional dependencies, and image processing breaks without them.
+To use another voice engine, pass `tts`: any object with a stable `id` (part of the cache key) and `synthesize(text, { voice, speed })` returning `{ audio, sampleRate }`, where `audio` is mono `Float32Array` samples in [-1, 1]. Give it a `voices` list so `check` rejects a misspelt voice, and a `dispose()` if it holds a model to release once narration is synthesized. `kokoro(model?)` builds the default engine. Don't install with `--omit=optional` to skip Kokoro: npm also ships sharp's platform binaries as optional dependencies, and image processing breaks without them.
 
 ## Run in CI
 
-`check` is the guard. It drives the real app through the whole timeline with nothing captured or encoded, in a few seconds, and fails when the UI changes under a script, pointing at the line:
+`check` is the guard. It drives the real app through the whole timeline, cursor and all, with nothing captured or encoded, in a few seconds, and fails when the UI changes under a script, pointing at the line. Narration is timed with the real length of lines already spoken in an earlier render or preview, and estimated for new ones:
 
 ```text
 reelscript: target "#new-project" was not found or never became visible in the browser window
@@ -173,7 +180,7 @@ reelscript: target "#new-project" was not found or never became visible in the b
 
 Run it on every pull request next to your tests, and render on `main`.
 
-The container is the canonical render environment, for amd64 and arm64. Chromium, ffmpeg, fonts, VS Code, and the narration model are built in, so a script renders the same pixels on every machine:
+The container is the canonical render environment, for amd64 and arm64. Chromium, ffmpeg, fonts, VS Code, and the narration model are built in, so a script renders the same pixels on every machine (in browser and terminal windows; see Editor demos for VS Code's real-time clock):
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -v reelscript-cache:/cache \
@@ -264,10 +271,11 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent); any other extension is an error. `path` is relative to the script. |
 | `demo.check()` | What `reelscript check` runs: the timeline against the real app, no rendering. |
 | `demo.getTimeline()` | The actions queued so far, for tests. |
+| `readAsciicast(path)` | An asciinema recording as `{ events, cols, rows }` for `terminal.run(cmd, { events })`. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a target. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
 | `demo.cursor.click({ button, duration })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. `duration: 0` takes no video time, so a following `waitFor` cuts straight to the page the click led to. |
-| `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. |
-| `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`. |
+| `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. Like `moveTo`, the field must be on screen. |
+| `demo.press(key, { window })` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`, in the focused window or the one named by `window`. |
 | `demo.wait(ms)` | Hold, on camera. |
 | `demo.scroll(selector \| { by, to }, { duration, ease, window })` | Scroll, on camera, stepped with the frame clock: to center an element (scrolling its nearest scrollable container), or by / to a position on the page. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold, off camera, until the selector is visible, then run the page's clock `settle` ms more. The page keeps running, so its loading isn't filmed. |

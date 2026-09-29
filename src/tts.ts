@@ -175,17 +175,26 @@ export function toWav({ audio, sampleRate }: TtsAudio): Buffer {
 }
 
 /** Synthesize (or fetch from cache) one narration clip. */
-export async function synthesizeClip(engine: TtsEngine, text: string, opts: TtsOptions): Promise<Clip> {
+function clipPaths(engine: TtsEngine, text: string, opts: TtsOptions) {
   const voice = opts.voice ?? DEFAULT_VOICE;
   const speed = opts.speed ?? 1;
   const key = createHash("sha1").update([engine.id, voice, String(speed), text].join("\0")).digest("hex");
-  const dir = join(cacheDir(), "tts");
-  mkdirSync(dir, { recursive: true });
-  const file = join(dir, `${key}.wav`);
-  const meta = `${file}.json`;
-  if (existsSync(file) && existsSync(meta)) {
-    return { file, seconds: (JSON.parse(readFileSync(meta, "utf8")) as { seconds: number }).seconds };
-  }
+  const file = join(cacheDir(), "tts", `${key}.wav`);
+  return { voice, speed, file, meta: `${file}.json` };
+}
+
+/** A line already synthesized with this engine, voice and speed, without synthesizing it. */
+export function cachedClip(engine: TtsEngine, text: string, opts: TtsOptions): Clip | null {
+  const { file, meta } = clipPaths(engine, text, opts);
+  if (!existsSync(file) || !existsSync(meta)) return null;
+  return { file, seconds: (JSON.parse(readFileSync(meta, "utf8")) as { seconds: number }).seconds };
+}
+
+export async function synthesizeClip(engine: TtsEngine, text: string, opts: TtsOptions): Promise<Clip> {
+  const { voice, speed, file, meta } = clipPaths(engine, text, opts);
+  mkdirSync(join(cacheDir(), "tts"), { recursive: true });
+  const cached = cachedClip(engine, text, opts);
+  if (cached) return cached;
   const audio = await engine.synthesize(text, { voice, speed });
   const seconds = audio.audio.length / audio.sampleRate;
   writeFileSync(file, toWav(audio));

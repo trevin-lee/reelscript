@@ -21,7 +21,7 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 **Fixes and additions**
 
 - Renders no longer idle for about 10 seconds after finishing.
-- `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to every window and no longer opens one.
+- `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to the browser window without opening it.
 - `clock` and `timezone` options; the menu bar shows the demo's clock.
 - `reelscript cache` lists what's cached and `reelscript cache clear <part|all>` removes it; `reelscript warmup` also downloads VS Code. The parts share names with `warmup` (`narration`, `editor`).
 - `reelscript record` takes several scripts, warns when a command fails, and `--prune` removes recordings no script uses.
@@ -50,6 +50,11 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - In the container, `docker stop` and Ctrl-C work from the moment reelscript starts, not only once a browser is open.
 - `render` takes several scripts; options a command doesn't take are errors; `--help` works after any command; `preview` checks `--at` and writes only `.png`.
 - `demo.scroll()` fails clearly on the editor or terminal, which it can't scroll.
+- `check` moves the page's mouse like a render, so hover menus open, and times narration with the real length of lines already synthesized.
+- `login` saves IndexedDB too (Firebase and other apps keep their sign-in there), and explains that it needs your own machine when run where there's no visible browser.
+- `readAsciicast(path)` plays asciinema recordings (v2 and v3) in a terminal window.
+- `demo.type()` requires the field to be on screen, like `moveTo`; `demo.press()` takes a `window`.
+- The README is honest about VS Code's real-time clock, and the extension example waits for its result instead of a fixed time.
 - `cache clear narration` removes only the Kokoro model, not other files in a `REELSCRIPT_MODELS` folder.
 - Option names drop their units: `camera: { hold }` and `maxGap`. `holdMs` and `maxGapMs` still work until 1.0.
 - "Built in" in `reelscript cache` now means only the container's own copies; a models folder you set with `REELSCRIPT_MODELS` can be cleared, and a code-server you point at is never deleted.

@@ -15,7 +15,8 @@ import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
-import { RECORD_TIMEOUT_MS, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
+import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
+import { readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,6 +76,15 @@ export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
 export type { TermEvent, TermRecording } from "./terminal.js";
+
+/**
+ * Read an asciinema recording (.cast, v2 or v3), relative to the script:
+ * its timed output for terminal.run(cmd, { events }) and the size it was
+ * recorded at for terminal.open({ cols, rows }).
+ */
+export function readAsciicast(path: string): { events: [number, string][]; cols: number; rows: number } {
+  return parseAsciicast(readFileSync(fromScript(path), "utf8"));
+}
 
 
 export interface DemoOptions {
@@ -387,7 +397,7 @@ class TerminalWindow extends Win {
    */
   async print(
     text: string,
-    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGap?: number; maxGapMs?: number } = {},
+    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number } = {},
   ): Promise<void> {
     this.demo._push({ kind: "terminal.print", text, ...opts });
   }
@@ -453,9 +463,9 @@ export class Demo {
     this._push({ kind: "type", target, text, ...opts });
   }
 
-  /** Press a key or chord in the focused window, e.g. "Enter" or "Control+K". */
-  async press(key: string): Promise<void> {
-    this._push({ kind: "press", key });
+  /** Press a key or chord, e.g. "Enter" or "Control+K", in the focused window or the one named by `window` (it comes to the front). */
+  async press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): Promise<void> {
+    this._push({ kind: "press", key, ...opts });
   }
 
   async wait(ms: number): Promise<void> {
@@ -566,6 +576,7 @@ export class Demo {
       check: true,
       tts: this.options.tts,
       voice: this.options.voice,
+      pronunciations: this.options.pronunciations,
       camera: this.options.camera,
       clock: this.options.clock,
       timezone: this.options.timezone,

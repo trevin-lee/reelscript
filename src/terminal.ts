@@ -118,6 +118,30 @@ export function playbackEvents(events: TermEvent[], opts: { speed?: number; maxG
   });
 }
 
+/**
+ * Timed output from an asciinema recording (a .cast file, format v2 or v3),
+ * for terminal.run(cmd, { events }) or terminal.print("", { events }), with the
+ * terminal size it was recorded at, for terminal.open({ cols, rows }).
+ */
+export function parseAsciicast(text: string): { events: TermEvent[]; cols: number; rows: number } {
+  const [head, ...lines] = text.trim().split("\n");
+  const header = JSON.parse(head) as { version: number; width?: number; height?: number; term?: { cols: number; rows: number } };
+  if (header.version !== 2 && header.version !== 3) throw new Error(`reelscript: unsupported asciicast version ${header.version} (2 and 3 are supported)`);
+  const events: TermEvent[] = [];
+  let t = 0;
+  for (const line of lines) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const [time, code, data] = JSON.parse(line) as [number, string, string];
+    t = header.version === 3 ? t + time : time; // v3 stores the interval since the previous event
+    if (code === "o") events.push([Math.round(t * 1000), data]);
+  }
+  return {
+    events,
+    cols: header.term?.cols ?? header.width ?? 80,
+    rows: header.term?.rows ?? header.height ?? 24,
+  };
+}
+
 /** How long `reelscript record` lets a command run before stopping it. */
 export const RECORD_TIMEOUT_MS = 120_000;
 

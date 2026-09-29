@@ -38,7 +38,11 @@ export async function login(url: string, out: string, log: (m: string) => void =
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/Executable doesn't exist|install/i.test(msg)) {
-      throw new Error("reelscript: login needs the full Chromium build. Run:  npx playwright install chromium");
+      throw new Error(
+        "reelscript: login opens a visible browser, which this environment doesn't have.\n" +
+          "  On your own machine, run:  npx playwright install chromium\n" +
+          "  In the container or CI, sign in on your own machine instead and pass the session file in.",
+      );
     }
     throw err;
   }
@@ -48,9 +52,9 @@ export async function login(url: string, out: string, log: (m: string) => void =
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
     // Keep a recent snapshot so closing the window still saves the session.
-    let latest: StorageState = await context.storageState();
+    let latest: StorageState = await context.storageState({ indexedDB: true });
     const poll = setInterval(() => {
-      context.storageState().then((s) => (latest = s), () => {});
+      context.storageState({ indexedDB: true }).then((s) => (latest = s), () => {});
     }, 1000);
 
     log(`reelscript: sign in in the browser window, then press Enter here (or close the window) to save the session.`);
@@ -64,7 +68,7 @@ export async function login(url: string, out: string, log: (m: string) => void =
     rl.close();
     clearInterval(poll);
     try {
-      latest = await context.storageState();
+      latest = await context.storageState({ indexedDB: true });
     } catch {
       /* window already closed; use the last snapshot */
     }

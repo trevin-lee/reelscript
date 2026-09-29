@@ -33,7 +33,8 @@ function usage(exitCode = 1): never {
   console.log(`reelscript ${version} - product demos as code
 
 usage:
-  reelscript render  <script> [--out demo.mp4]     render a script to .mp4 or .gif
+  reelscript render  <script> [more...] [--out demo.mp4]
+                                                   render scripts to .mp4 or .gif
   reelscript preview <script> --at <seconds> [--out frame.png]
                                                    render one frame as a PNG
   reelscript check   <script> [more scripts...]    run the timeline without rendering; fail on
