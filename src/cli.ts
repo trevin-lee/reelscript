@@ -8,7 +8,7 @@
  */
 
 import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire, register } from "node:module";
 
@@ -59,6 +59,16 @@ env:
 
 const BOOLEAN_FLAGS = new Set(["prune", "help"]);
 
+/** Whether a file is a terminal recording `reelscript record` wrote, and so safe to prune. */
+function isRecording(file: string): boolean {
+  try {
+    const r = JSON.parse(readFileSync(file, "utf8"));
+    return r?.version === 1 && typeof r.command === "string" && Array.isArray(r.events);
+  } catch {
+    return false;
+  }
+}
+
 function parse(argv: string[]) {
   const [command, ...rest] = argv;
   const flags: Record<string, string> = {};
@@ -94,7 +104,7 @@ async function importScript(path: string): Promise<void> {
     // A .ts/.js script in a project without "type": "module" is compiled as
     // CommonJS, which forbids top-level await. Re-run it as an ES module via
     // a temporary .mts copy beside the original so relative paths still work.
-    if (!(err instanceof Error) || !/Top-level await/.test(err.message)) throw err;
+    if (!(err instanceof Error) || !/Top-level await|Cannot use import statement outside a module/.test(err.message)) throw err;
     const { copyFileSync, unlinkSync } = await import("node:fs");
     const { dirname, basename, join } = await import("node:path");
     const tmp = join(dirname(script), `.${basename(script).replace(/\.[cm]?[jt]sx?$/, "")}.reelscript.mts`);
@@ -146,7 +156,7 @@ async function main(): Promise<void> {
         for (const [dir, files] of used) {
           for (const name of readdirSync(dir)) {
             const file = join(dir, name);
-            if (!name.endsWith(".json") || files.has(file)) continue;
+            if (!name.endsWith(".json") || files.has(file) || !isRecording(file)) continue;
             rmSync(file);
             removed++;
             console.error(`reelscript: pruned ${relative(process.cwd(), file)}`);

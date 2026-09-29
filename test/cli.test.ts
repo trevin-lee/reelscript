@@ -148,3 +148,49 @@ await demo.render("out.mp4");`);
   assert.deepEqual(left, [], "no code-server processes left running");
   assert.deepEqual(readdirSync(tmp).filter((f) => f.startsWith("reelscript-editor-")), [], "no temp folders left behind");
 });
+
+test("the page clock keeps Date() without new and Date subclasses working", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  for (const deterministic of [true, false]) {
+    script(dir, "s.ts", `const demo = createDemo({ deterministic: ${deterministic} });
+await demo.browser.goto("data:text/html,hi");
+await demo.call(async ({ page }) => {
+  // A string, so the TypeScript compiler adds no helpers the page doesn't have.
+  const r = await page!.evaluate(\`(() => {
+    class Stamp extends Date { label() { return "stamp"; } }
+    const s = new Stamp();
+    return { str: typeof Date(), year: new Date().getFullYear(), sub: s instanceof Stamp && s.label() === "stamp", isDate: new Date() instanceof Date };
+  })()\`) as { str: string; year: number; sub: boolean; isDate: boolean };
+  if (r.str !== "string" || r.year !== 2025 || !r.sub || !r.isDate) throw new Error("Date broken: " + JSON.stringify(r));
+});
+await demo.render("out.mp4");`);
+    const r = await cli(["check", "s.ts"], dir);
+    assert.equal(r.code, 0, `deterministic ${deterministic}: ${r.output}`);
+  }
+});
+
+test("a failed render leaves the previous output in place", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  const body = (extra: string) => `const demo = createDemo({ viewport: [300, 200], fps: 10 });\nawait demo.browser.goto("data:text/html,<button id=b>b</button>");\nawait demo.cursor.moveTo("#b");\n${extra}\nawait demo.render("out/s.mp4");`;
+  script(dir, "s.ts", body(""));
+  const good = await cli(["render", "s.ts"], dir);
+  assert.equal(good.code, 0, good.output);
+  const before = readFileSync(join(dir, "out/s.mp4"));
+  script(dir, "s.ts", body(`await demo.wait(500);\nawait demo.cursor.moveTo("#missing");`));
+  const bad = await cli(["render", "s.ts"], dir);
+  assert.equal(bad.code, 1);
+  assert.ok(readFileSync(join(dir, "out/s.mp4")).equals(before), "the last good render is untouched");
+  assert.deepEqual(readdirSync(join(dir, "out")), ["s.mp4"], "no partial files left behind");
+});
+
+test("record --prune only removes recordings", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  writeFileSync(join(dir, "tsconfig.json"), "{}\n");
+  writeFileSync(join(dir, "old-recording-123abc.json"), JSON.stringify({ version: 1, command: "echo old", events: [] }));
+  script(dir, "s.ts", `const demo = createDemo({ recordingsDir: "." });\nawait demo.terminal.open();\nawait demo.terminal.run("echo new");\nawait demo.render("out.mp4");`);
+  const r = await cli(["record", "s.ts", "--prune"], dir);
+  assert.equal(r.code, 0, r.output);
+  const left = readdirSync(dir);
+  assert.ok(left.includes("tsconfig.json"), "other JSON is kept");
+  assert.ok(!left.includes("old-recording-123abc.json"), "the unused recording is pruned");
+});

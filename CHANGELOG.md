@@ -34,6 +34,10 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - `reelscript record` runs commands in the script's folder, or a run's `cwd`, so recordings don't depend on where you ran it from.
 - Calling `demo.check()` from a script counts as the script's run, and honours `verbose`.
 - Error messages about a window that isn't open name the call that opens it.
+- A failed render leaves the previous output in place; the new file replaces it only once rendering succeeds.
+- The page clock handles `Date()` called without `new`, and pages that subclass `Date`.
+- `record --prune` only deletes terminal recordings, never other JSON files in the folder.
+- Node 20.11 or later is required (20.6 to 20.10 couldn't run scripts in projects without `"type": "module"`).
 - The README covers every command, option, and method, and the rules that hold across them.
 
 ## 0.3.1

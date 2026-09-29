@@ -42,7 +42,7 @@
     "example:editor": "npm run build && tsx examples/editor.ts"
   },
   "engines": {
-    "node": ">=20.6"
+    "node": ">=20.11"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",

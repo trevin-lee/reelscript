@@ -426,7 +426,7 @@ export class Demo {
     this._push({ kind: "type", target, text, ...opts });
   }
 
-  /** Press a key or chord, e.g. "Enter" or "Meta+K". */
+  /** Press a key or chord in the focused window, e.g. "Enter" or "Control+K". */
   async press(key: string): Promise<void> {
     this._push({ kind: "press", key });
   }

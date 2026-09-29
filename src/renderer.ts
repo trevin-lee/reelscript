@@ -1,7 +1,7 @@
 import { chromium, type Page, type Browser, type BrowserContext, type CDPSession } from "playwright";
 import sharp, { type OverlayOptions } from "sharp";
-import { mkdirSync, unlinkSync } from "node:fs";
-import { dirname, extname } from "node:path";
+import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
@@ -1158,7 +1158,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     engine.setTerminalEvents(events);
   }
 
-  const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
+  // Encode beside the output under a hidden name, and replace the output only
+  // once everything succeeded, so a failed render never destroys the last good one.
+  const outExt = extname(options.out);
+  const outBase = basename(options.out, outExt);
+  const partial = join(dirname(options.out), `.${outBase}.partial${outExt}`);
+  const videoPath = hasAudio ? join(dirname(options.out), `.${outBase}.video.partial.mp4`) : partial;
+  let finished = false;
   if (snapshot === undefined && !check) checkOutputFormat(options.out);
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
@@ -1233,13 +1239,20 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       t += frameMs;
     }
     await encoder?.finish();
-    if (hasAudio && engine.narration.length) {
-      options.onStatus?.("mixing narration");
-      await muxNarration(videoPath, engine.narration, options.out);
-      unlinkSync(videoPath);
+    if (encoder) {
+      if (hasAudio && engine.narration.length) {
+        options.onStatus?.("mixing narration");
+        await muxNarration(videoPath, engine.narration, partial);
+        unlinkSync(videoPath);
+      } else if (videoPath !== partial) {
+        renameSync(videoPath, partial);
+      }
+      renameSync(partial, options.out);
     }
+    finished = true;
   } finally {
     await engine.close();
+    if (!finished) for (const p of [partial, videoPath]) rmSync(p, { force: true });
   }
 
   return { out: options.out, frames, durationMs: Math.round(t), width, height };

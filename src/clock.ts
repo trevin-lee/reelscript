@@ -22,10 +22,15 @@ export function dateShim(epoch: number): string {
 (() => {
   const RealDate = Date;
   const offset = ${epoch} - RealDate.now();
-  class VDate extends RealDate {
-    constructor(...a) { a.length === 0 ? super(RealDate.now() + offset) : super(...a); }
-    static now() { return RealDate.now() + offset; }
+  // A function, not a class, so Date() without new still works (it returns a string).
+  function VDate(...a) {
+    const nowMs = RealDate.now() + offset;
+    if (!new.target) return new RealDate(nowMs).toString();
+    return Reflect.construct(RealDate, a.length === 0 ? [nowMs] : a, new.target);
   }
+  VDate.prototype = RealDate.prototype;
+  Object.setPrototypeOf(VDate, RealDate);
+  VDate.now = () => RealDate.now() + offset;
   window.Date = VDate;
 })();
 `;
@@ -64,10 +69,15 @@ const CLOCK_SHIM_SOURCE = String.raw`
   g.requestIdleCallback = (fn) => g.setTimeout(() => fn({ didTimeout: false, timeRemaining: () => 8 }), 1);
   g.cancelIdleCallback = g.clearTimeout;
   Performance.prototype.now = () => now;
-  class VDate extends RealDate {
-    constructor(...a) { a.length === 0 ? super(epoch + now) : super(...a); }
-    static now() { return epoch + now; }
+  // A function, not a class, so Date() without new still works (it returns a
+  // string), and a page's own subclass of Date still gets its prototype.
+  function VDate(...a) {
+    if (!new.target) return new RealDate(epoch + now).toString();
+    return Reflect.construct(RealDate, a.length === 0 ? [epoch + now] : a, new.target);
   }
+  VDate.prototype = RealDate.prototype;
+  Object.setPrototypeOf(VDate, RealDate);
+  VDate.now = () => epoch + now;
   g.Date = VDate;
 
   const call = (fn, args) => { try { typeof fn === "function" ? fn(...args) : new Function(String(fn))(); } catch (e) { console.error(e); } };

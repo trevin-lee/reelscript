@@ -47,7 +47,7 @@ npx playwright install chromium
 
 The package installs a `reelscript` command. Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
-Requires Node 20.6 or later, on macOS or Linux. ffmpeg is bundled.
+Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
 
 ## Try it
 
