@@ -42,9 +42,15 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - **Clicks land where you aimed.** Moving to or zooming on an element outside the visible part of its window fails with a hint to scroll first, and a click on an element covered by another window or an overlay fails at its line instead of clicking what's on top.
 - **`demo.scroll(selector | { by, to })`** scrolls on the frame clock, so scrolling renders the same every time. Chromium's smooth scrolling is off, so keys like PageDown jump instead of animating on their own clock.
 - The page clock also advances inside iframes.
-- A misspelt voice fails `check` at its `say()` line; narration errors name their line; the voice model is released before exit, which fixes a crash on macOS after a failed narrated render.
+- A misspelt voice fails `check` at its `say()` line, checked against the demo's own `voice` and `tts` engine, and narration errors name their line. `check` also rejects an output format `render` would.
+- On macOS, a render that failed or was interrupted after synthesizing narration no longer aborts with a C++ "mutex lock failed" and exit code 134; it exits with 1, or 130 after Ctrl-C.
 - Ctrl-C and termination stop VS Code and remove partial videos and temporary script copies.
-- `record` warns clearly when it stops a command at its two-minute limit.
+- `record` warns clearly when it stops a command at its two-minute limit, and stops everything the command started (`a && b`, `npm run dev`), not just the shell. A command that runs twice, or in two folders, gets a recording for each run.
+- Open VSX and `.vsix` extensions install into a mounted `/cache` (they failed with "cross-device link not permitted").
+- In the container, `docker stop` and Ctrl-C work from the moment reelscript starts, not only once a browser is open.
+- `render` takes several scripts; options a command doesn't take are errors; `--help` works after any command; `preview` checks `--at` and writes only `.png`.
+- `demo.scroll()` fails clearly on the editor or terminal, which it can't scroll.
+- `cache clear narration` removes only the Kokoro model, not other files in a `REELSCRIPT_MODELS` folder.
 - Option names drop their units: `camera: { hold }` and `maxGap`. `holdMs` and `maxGapMs` still work until 1.0.
 - "Built in" in `reelscript cache` now means only the container's own copies; a models folder you set with `REELSCRIPT_MODELS` can be cleared, and a code-server you point at is never deleted.
 - The README covers every command, option, and method, and the rules that hold across them.

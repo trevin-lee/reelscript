@@ -120,7 +120,7 @@ export async function serve(): Promise<void> {
     async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
       const { chromium } = await import("playwright");
       const { resolveSession } = await import("./session.js");
-      const storageState = session ? resolveSession(session, process.cwd()) : undefined;
+      const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
       const browser = await chromium.launch();
       try {
         const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, storageState })).newPage();

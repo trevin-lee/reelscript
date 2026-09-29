@@ -120,13 +120,15 @@ test("Ctrl-C during an editor check stops VS Code and leaves nothing behind", { 
 test("cache: a models folder you chose can be cleared; a code-server you pointed at can't", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-p4-"));
   const models = join(dir, "models");
-  mkdirSync(models);
-  writeFileSync(join(models, "m.onnx"), "x");
+  const kokoro = join(models, "onnx-community", "Kokoro-82M-v1.0-ONNX");
+  mkdirSync(kokoro, { recursive: true });
+  writeFileSync(join(kokoro, "m.onnx"), "x");
   const env = { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_MODELS: models, REELSCRIPT_CODE_SERVER: "/usr/bin/true" };
   const list = await run(["cache"], dir, env);
   assert.doesNotMatch(list.output, /narration .*built in/);
   assert.equal((await run(["cache", "clear", "narration"], dir, env)).code, 0);
-  assert.ok(!existsSync(models));
+  assert.ok(!existsSync(kokoro), "the voice model is removed");
+  assert.ok(existsSync(models), "the folder you chose stays");
   const editor = await run(["cache", "clear", "editor"], dir, env);
   assert.equal(editor.code, 1);
   assert.match(editor.output, /isn't reelscript's to clear here \(REELSCRIPT_CODE_SERVER/);

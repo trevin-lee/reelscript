@@ -15,7 +15,7 @@ import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
-import { RECORD_TIMEOUT_MS, recordCommand, saveRecording } from "./terminal.js";
+import { RECORD_TIMEOUT_MS, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -526,8 +526,9 @@ export class Demo {
   async recordTerminals(): Promise<string[]> {
     const dir = this.recordingsDir();
     const files: string[] = [];
-    for (const a of this.actions) {
-      if (a.kind !== "terminal.run" || a.output !== undefined || a.events) continue;
+    const keys = recordingKeys(this.actions as never);
+    for (const [i, key] of keys) {
+      const a = this.actions[i] as Extract<Action, { kind: "terminal.run" }>;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const rec = await recordCommand(a.command, { cwd: fromScript(a.cwd ?? ".") });
       if (rec.timedOut) {
@@ -539,7 +540,7 @@ export class Demo {
           `reelscript: warning: "${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is\n`,
         );
       }
-      files.push(saveRecording(dir, rec));
+      files.push(saveRecording(dir, rec, key));
     }
     // Let `reelscript record --prune` know which recordings are still in use.
     const g = globalThis as { __reelscript_recorded?: Map<string, Set<string>> };
@@ -556,13 +557,15 @@ export class Demo {
    * the editor must be found, and every terminal recording must exist. Narration isn't synthesized; its length is
    * estimated. Throws on the first failure with the script location.
    */
-  async check(): Promise<RenderResult> {
+  async check(outPath?: string): Promise<RenderResult> {
     noteRun();
     const started = Date.now();
     const verbose = this.options.verbose ?? true;
     const result = await unlessInterrupted(renderTimeline(this.actions, {
-      out: "",
+      out: outPath ? fromScript(outPath) : "",
       check: true,
+      tts: this.options.tts,
+      voice: this.options.voice,
       camera: this.options.camera,
       clock: this.options.clock,
       timezone: this.options.timezone,
@@ -606,7 +609,7 @@ export class Demo {
     if (process.env.REELSCRIPT_CHECK) {
       const g = globalThis as { __reelscript_runs?: number };
       g.__reelscript_runs = (g.__reelscript_runs ?? 1) - 1; // check() counts itself
-      return this.check();
+      return this.check(outPath);
     }
     const out = process.env.REELSCRIPT_OUT || fromScript(outPath);
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;

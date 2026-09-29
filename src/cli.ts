@@ -120,21 +120,52 @@ async function importScript(path: string): Promise<void> {
   }
 }
 
+/** The options each command takes; anything else is an error rather than silently ignored. */
+const OPTIONS: Record<string, string[]> = {
+  render: ["out"],
+  preview: ["at", "out"],
+  check: [],
+  record: ["prune"],
+  login: ["out"],
+  warmup: [],
+  cache: [],
+  mcp: [],
+};
+
+function fail(message: string): never {
+  throw new Error(`reelscript: ${message}`);
+}
+
 async function main(): Promise<void> {
   const { command, flags, positional } = parse(process.argv.slice(2));
+  if ("help" in flags) usage(0);
+  const allowed = OPTIONS[command];
+  if (allowed) {
+    for (const k of Object.keys(flags)) {
+      if (!allowed.includes(k)) {
+        fail(`${command} has no --${k} option${allowed.length ? ` (it takes ${allowed.map((a) => `--${a}`).join(", ")})` : ""}`);
+      }
+    }
+  }
+  const { installInterruptHandlers } = await import("./cleanup.js");
+  installInterruptHandlers();
   switch (command) {
     case "render": {
-      const script = positional[0] ?? usage();
+      if (!positional.length) usage();
+      if (flags.out !== undefined && positional.length > 1) fail("--out names one video; render several scripts without it");
       if (flags.out) process.env.REELSCRIPT_OUT = resolve(flags.out);
-      await runScript(script);
+      for (const script of positional) await runScript(script);
       break;
     }
     case "preview": {
-      const script = positional[0] ?? usage();
+      if (positional.length !== 1) fail("preview takes one script");
       const at = Number(flags.at ?? "0");
+      if (!Number.isFinite(at) || at < 0) fail(`--at takes a time in seconds, not "${flags.at}"`);
+      const out = flags.out ?? `preview-${at}s.png`;
+      if (!out.toLowerCase().endsWith(".png")) fail(`preview writes a PNG; use a path ending in .png, not "${out}"`);
       process.env.REELSCRIPT_SNAPSHOT_AT = String(Math.round(at * 1000));
-      process.env.REELSCRIPT_OUT = resolve(flags.out ?? `preview-${at}s.png`);
-      await runScript(script);
+      process.env.REELSCRIPT_OUT = resolve(out);
+      await runScript(positional[0]);
       break;
     }
     case "check": {
@@ -175,7 +206,8 @@ async function main(): Promise<void> {
       break;
     }
     case "login": {
-      const url = positional[0] ?? usage();
+      if (positional.length !== 1) fail("login takes one URL");
+      const url = positional[0];
       const out = flags.out || "session.json";
       const { login } = await import("./session.js");
       const r = await login(url, out);
@@ -238,5 +270,10 @@ main().catch(async (err) => {
   const { interrupted } = await import("./cleanup.js");
   if (interrupted()) return;
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  // Set the code and let the process wind down rather than process.exit(): the
+  // voice model's native threads abort the process if it's torn down under them
+  // (a C++ "mutex lock failed" and exit 134 on macOS). A timer that doesn't keep
+  // the process alive forces the exit if anything else would.
+  process.exitCode = 1;
+  setTimeout(() => process.exit(1), 5000).unref();
 });

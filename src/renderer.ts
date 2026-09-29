@@ -14,6 +14,7 @@ import { onInterrupt } from "./cleanup.js";
 import {
   TERMINAL_URL,
   loadRecording,
+  recordingKeys,
   playbackEvents,
   scriptedEvents,
   withCarriageReturns,
@@ -542,7 +543,9 @@ class Engine {
     if (cx < 0 || cy < 0 || cx > w.width || cy > w.height) {
       throw new Error(
         `reelscript: target "${target}" is outside the visible part of the ${w.id} window; ` +
-          `scroll to it first with demo.scroll(${JSON.stringify(target)})`,
+          (w.kind === "browser"
+            ? `scroll to it first with demo.scroll(${JSON.stringify(target)})`
+            : `bring it into view first (keys, or an editor command)`),
       );
     }
     return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
@@ -660,6 +663,13 @@ class Engine {
         return { end: start + action.ms };
       case "scroll": {
         const w = action.window ? this.window(action.window) : this.focused();
+        if (w.kind !== "browser") {
+          throw new Error(
+            w.kind === "editor"
+              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys (demo.press("Control+End")) or demo.editor.command("Go to Line")`
+              : `reelscript: demo.scroll() scrolls web pages; a terminal scrolls as its output grows`,
+          );
+        }
         this.aimed = null;
         const range = action.target
           ? await (await this.visible(w, action.target)).evaluate((el) => {
@@ -1267,6 +1277,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
 
   // Terminal output: declared in the script, or replayed from a recording.
   const termRuns = actions.flatMap((a, i) => (a.kind === "terminal.run" ? [i] : []));
+  const recKeys = recordingKeys(actions as never);
   const termPrints = actions.flatMap((a, i) => (a.kind === "terminal.print" ? [i] : []));
   if (termRuns.length || termPrints.length) {
     const events = new Map<number, TermEvent[]>();
@@ -1284,7 +1295,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
         events.set(i, scriptedEvents(a.output, a.duration));
         continue;
       }
-      const rec = options.recordingsDir ? loadRecording(options.recordingsDir, a.command) : null;
+      const rec = options.recordingsDir ? loadRecording(options.recordingsDir, a.command, recKeys.get(i)) : null;
       if (!rec) {
         throw where(
           i,
@@ -1312,7 +1323,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     for (const p of [partial, videoPath]) rmSync(p, { force: true });
   };
   const unregisterPartial = onInterrupt(removePartials);
-  if (snapshot === undefined && !check) checkOutputFormat(options.out);
+  if (snapshot === undefined && options.out) checkOutputFormat(options.out);
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
   let stepIndex = -1;

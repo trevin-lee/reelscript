@@ -18,12 +18,12 @@ export interface LoginResult {
 }
 
 /** Resolve and validate a session path before a render starts. */
-export function resolveSession(path: string, baseDir: string): string {
+export function resolveSession(path: string, baseDir: string, relativeTo: "script" | "working directory" = "script"): string {
   const full = resolve(baseDir, path);
   if (!existsSync(full)) {
     throw new Error(
       `reelscript: session file not found: ${full}\n` +
-        `  Paths in a script are relative to the script's folder.\n` +
+        (relativeTo === "script" ? `  Paths in a script are relative to the script's folder.\n` : `  This path is relative to the working directory.\n`) +
         `  Create it by signing in once:  reelscript login <url of your app> --out ${full}`,
     );
   }

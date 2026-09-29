@@ -6,7 +6,7 @@
  */
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { cacheDir } from "./tts.js";
+import { KOKORO_MODEL, cacheDir } from "./tts.js";
 
 export interface CachePart {
   name: string;
@@ -39,7 +39,8 @@ export function cacheParts(): CachePart[] {
   return [
     part("editor", "VS Code (code-server) for editor windows", editorPath, editorNote),
     part("extensions", "editor extensions installed from Open VSX or .vsix", join(root, "extensions")),
-    part("narration", "the Kokoro voice model", modelsDir()),
+    // Only the Kokoro model's own folder: a folder set with REELSCRIPT_MODELS may hold other things.
+    part("narration", "the Kokoro voice model", join(modelsDir(), KOKORO_MODEL)),
     part("narration-clips", "spoken lines, reused while their text and voice are unchanged", join(root, "tts")),
   ];
 }

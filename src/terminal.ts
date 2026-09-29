@@ -4,6 +4,7 @@
  * script or replayed from a recording made by `reelscript record`.
  */
 import { spawn } from "node:child_process";
+import { onInterrupt } from "./cleanup.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -28,22 +29,55 @@ export interface TermRecording {
 export const TERMINAL_URL = "https://reelscript.local/terminal";
 
 /** Stable file name for a command's recording. */
-export function slugForCommand(command: string): string {
+/**
+ * Which recording a run uses. The same command run twice (`ls`, `touch x`,
+ * `ls`), or in two folders, is a different recording each time. The first
+ * run of a command in the script's own folder keeps the plain name, so
+ * existing recordings still match.
+ */
+export interface RecordingKey {
+  cwd?: string;
+  /** 1 for the first run of this command (in this cwd) in the script, 2 for the second, ... */
+  occurrence?: number;
+}
+
+function keyString(command: string, key: RecordingKey = {}): string {
+  let s = command;
+  if (key.cwd && key.cwd !== ".") s += `\0cwd=${key.cwd}`;
+  if ((key.occurrence ?? 1) > 1) s += `\0#${key.occurrence}`;
+  return s;
+}
+
+export function slugForCommand(command: string, key: RecordingKey = {}): string {
   const base = command
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  const hash = createHash("sha1").update(command).digest("hex").slice(0, 6);
+  const hash = createHash("sha1").update(keyString(command, key)).digest("hex").slice(0, 6);
   return `${base || "cmd"}-${hash}`;
 }
 
-export function recordingPath(dir: string, command: string): string {
-  return join(dir, `${slugForCommand(command)}.json`);
+/** The key for each recorded run in a timeline, by action index. */
+export function recordingKeys(actions: ReadonlyArray<{ kind: string; command?: string; output?: string; events?: unknown; cwd?: string }>): Map<number, RecordingKey> {
+  const seen = new Map<string, number>();
+  const keys = new Map<number, RecordingKey>();
+  actions.forEach((a, i) => {
+    if (a.kind !== "terminal.run" || a.output !== undefined || a.events || a.command === undefined) return;
+    const id = `${a.command}\0${a.cwd ?? "."}`;
+    const occurrence = (seen.get(id) ?? 0) + 1;
+    seen.set(id, occurrence);
+    keys.set(i, { cwd: a.cwd, occurrence });
+  });
+  return keys;
 }
 
-export function loadRecording(dir: string, command: string): TermRecording | null {
-  const file = recordingPath(dir, command);
+export function recordingPath(dir: string, command: string, key: RecordingKey = {}): string {
+  return join(dir, `${slugForCommand(command, key)}.json`);
+}
+
+export function loadRecording(dir: string, command: string, key: RecordingKey = {}): TermRecording | null {
+  const file = recordingPath(dir, command, key);
   if (!existsSync(file)) return null;
   return JSON.parse(readFileSync(file, "utf8")) as TermRecording;
 }
@@ -106,18 +140,33 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
       cwd: opts.cwd,
       env: { ...process.env, FORCE_COLOR: "1", TERM: "xterm-256color", COLUMNS: String(cols), LINES: String(rows) },
       stdio: ["ignore", "pipe", "pipe"],
+      // Its own process group: `a && b`, `npm run x` and the like start children
+      // that outlive the shell and keep its output open.
+      detached: true,
     });
+    const killGroup = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    };
+    const unregister = onInterrupt(killGroup);
     const onData = (chunk: Buffer) => events.push([Date.now() - start, chunk.toString("utf8")]);
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      killGroup();
     }, opts.timeoutMs ?? RECORD_TIMEOUT_MS);
     child.on("error", reject);
+    // When the command itself ends, so does anything it left running in the
+    // background; otherwise their open output would keep the recording going.
+    child.on("exit", () => setTimeout(killGroup, 100).unref());
     child.on("close", (code) => {
       clearTimeout(timer);
+      unregister();
       resolve({
         version: 1,
         command,
@@ -133,9 +182,9 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
   });
 }
 
-export function saveRecording(dir: string, rec: TermRecording): string {
+export function saveRecording(dir: string, rec: TermRecording, key: RecordingKey = {}): string {
   mkdirSync(dir, { recursive: true });
-  const file = recordingPath(dir, rec.command);
+  const file = recordingPath(dir, rec.command, key);
   writeFileSync(file, JSON.stringify(rec, null, 2) + "\n");
   return file;
 }

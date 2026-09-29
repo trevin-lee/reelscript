@@ -69,7 +69,7 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
 - **Windows.** There is at most one browser, one terminal, and one editor window. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
-- **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page, stepped with the frame clock like everything else. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
+- **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page, stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
 - **The clock.** Every demo happens at the same moment, Tuesday, September 23, 2025, 9:41 AM UTC, unless you set `clock` and `timezone`. The page's `Date` starts there and the menu bar shows it.
 
 ## Logged-in apps
@@ -150,9 +150,9 @@ Declared output never executes anything, so it renders identically everywhere. F
 reelscript record demos/terminal.ts
 ```
 
-once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
+once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. A command that appears twice (`ls`, `touch new.txt`, `ls`) or runs in two folders gets a recording for each run, so each replays what it showed at that point. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
-Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command after two minutes and keeps the output up to then, with a warning. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
+Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning; when a command exits, anything it left running in the background is stopped too. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 
@@ -221,7 +221,8 @@ claude mcp add reelscript -- npx -y @reelscript/cli mcp
 ## CLI
 
 ```text
-reelscript render  <script> [--out demo.mp4]     render a script to .mp4 or .gif
+reelscript render  <script> [more...] [--out demo.mp4]
+                                                 render scripts to .mp4 or .gif
 reelscript preview <script> --at <seconds> [--out frame.png]
                                                  render one frame as a PNG
 reelscript check   <script> [more scripts...]    run the timeline without rendering
@@ -233,7 +234,7 @@ reelscript mcp                                   MCP server (stdio) for coding a
 reelscript --version
 ```
 
-A script must call `demo.render()`; if it finishes without doing so, every command fails rather than passing silently.
+A script must call `demo.render()`; if it finishes without doing so, every command fails rather than passing silently. Options a command doesn't take are errors, and `--help` works after any command.
 
 | Environment variable | Effect |
 | --- | --- |
@@ -253,7 +254,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `narration` | The Kokoro voice model, about 90 MB |
 | `narration-clips` | Spoken lines, reused while their text and voice are unchanged |
 
-`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared.
+`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
 
 ## API
 

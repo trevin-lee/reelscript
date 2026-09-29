@@ -188,7 +188,10 @@ async function cachedInstall(bin: string, spec: string, vsixPath: string | null,
   const entry = join(cacheDir(), "extensions", key);
   if (existsSync(join(entry, "extensions.json"))) return entry;
   onStatus?.(`installing extension ${spec} (cached after this)`);
-  const scratch = mkdtempSync(join(tmpdir(), "reelscript-ext-"));
+  // Staged inside the cache folder, so moving it into place is a rename on the
+  // same filesystem (a mounted /cache or a tmpfs /tmp would make it cross devices).
+  mkdirSync(join(cacheDir(), "extensions"), { recursive: true });
+  const scratch = mkdtempSync(join(cacheDir(), "extensions", ".staging-"));
   try {
     mkdirSync(join(scratch, "ext"));
     mkdirSync(join(scratch, "user"));

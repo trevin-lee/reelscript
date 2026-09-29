@@ -34,6 +34,20 @@ export function interrupted(): boolean {
   return registry.stopping;
 }
 
+/**
+ * Handle Ctrl-C and termination from now on, even with nothing to clean up
+ * yet. The CLI calls this at start-up: as PID 1 in a container, a process has
+ * no default signal handling, so without it `docker stop` and Ctrl-C would be
+ * ignored until the first clean-up registered.
+ */
+export function installInterruptHandlers(): void {
+  if (registry.installed) return;
+  registry.installed = true;
+  for (const signal of Object.keys(EXIT_CODES) as NodeJS.Signals[]) {
+    process.on(signal, () => void stop(signal));
+  }
+}
+
 /** Run `task` if the process is interrupted. Returns a function that unregisters it. */
 export function onInterrupt(task: Task): () => void {
   if (registry.stopping) {
@@ -42,12 +56,7 @@ export function onInterrupt(task: Task): () => void {
     return () => {};
   }
   registry.tasks.add(task);
-  if (!registry.installed) {
-    registry.installed = true;
-    for (const signal of Object.keys(EXIT_CODES) as NodeJS.Signals[]) {
-      process.on(signal, () => void stop(signal));
-    }
-  }
+  installInterruptHandlers();
   return () => registry.tasks.delete(task);
 }
 
@@ -70,5 +79,10 @@ async function stop(signal: NodeJS.Signals): Promise<void> {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  process.exit(EXIT_CODES[signal] ?? 1);
+  // Wind down rather than process.exit(): the voice model's native threads abort
+  // the process if it's torn down under them. A timer that doesn't keep the
+  // process alive forces the exit if something else would (an MCP client's stdin).
+  const code = EXIT_CODES[signal] ?? 1;
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 3000).unref();
 }
