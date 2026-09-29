@@ -393,7 +393,10 @@ __PIN_NOW__
     rafs.clear();
     for (const cb of cbs) call(cb, [now]);
     const roots = scopes();
-    const animations = () => roots.flatMap((r) => r.getAnimations());
+    // A scroll-driven animation follows the scroll position, not time, and can't
+    // be given a time: it's the page's, like the scrolling that drives it.
+    const onTime = (a) => !a.timeline || typeof DocumentTimeline === "undefined" || a.timeline instanceof DocumentTimeline;
+    const animations = () => roots.flatMap((r) => r.getAnimations()).filter(onTime);
     // An animation that hasn't started yet (one a click or class change set off
     // since the last frame) can't be held yet: Chromium may already be running
     // its copy on the compositor, and pausing it now can leave that copy a real

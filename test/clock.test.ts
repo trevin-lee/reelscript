@@ -110,3 +110,45 @@ test("a fade a click starts is filmed from its first frame", { timeout: 180_000 
     await browser.close();
   }
 });
+
+test("a scroll-driven animation is left to the scroll position", async () => {
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 800, height: 600 } });
+    await ctx.addInitScript(CLOCK_SHIM);
+    const page = await ctx.newPage();
+    // As on github.com: a bar that grows as the page scrolls, and a timed
+    // fade beside it.
+    await page.setContent(`<style>
+      @keyframes grow { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+      @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+      #bar { position: fixed; top: 0; width: 100%; height: 4px; animation: grow linear; animation-timeline: scroll(); }
+      #fade { animation: fade 100ms linear both; }
+      body { height: 3000px; }
+    </style><div id="bar"></div><p id="fade">Hello</p>`);
+    const advance = (ms: number) =>
+      page.evaluate((ms) => (window as unknown as { __reelscript_advance: (n: number) => void }).__reelscript_advance(ms), ms);
+    for (let i = 0; i < 10; i++) await advance(1000 / 60);
+    assert.equal(Number(await page.evaluate(() => getComputedStyle(document.querySelector("#fade")!).opacity)), 1);
+    await page.evaluate(() => window.scrollTo(0, 1200));
+    await page.waitForTimeout(100); // a real frame, for the scroll to reach the animation
+    await advance(1000 / 60);
+    const scale = await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector("#bar")!).transform).a);
+    assert.ok(scale > 0.4 && scale < 0.6, `the bar follows the scroll, half way down: ${scale}`);
+
+    // Finished and played again by the page, it still isn't the clock's.
+    await page.evaluate(() => {
+      const bar = document.getAnimations().find((a) => a.timeline && !(a.timeline instanceof DocumentTimeline))!;
+      bar.finish();
+      bar.play();
+    });
+    await advance(1000 / 60);
+    await page.evaluate(() => window.scrollTo(0, 600));
+    await page.waitForTimeout(100);
+    await advance(1000 / 60);
+    const replayed = await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector("#bar")!).transform).a);
+    assert.ok(replayed > 0.15 && replayed < 0.35, `the replayed bar follows the scroll, a quarter down: ${replayed}`);
+  } finally {
+    await browser.close();
+  }
+});

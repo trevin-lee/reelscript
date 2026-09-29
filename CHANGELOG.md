@@ -33,6 +33,7 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 
 **Fixes and additions**
 
+- A page with scroll-driven animations (github.com has them) no longer stops the render with "Invalid currentTime": the page clock steps time-based animations only, and leaves one that follows the scroll position to the page.
 - Renders no longer idle for about 10 seconds after finishing.
 - `reelscript warmup browser` installs the Chromium build reelscript drives, and the README uses it: in a project with its own Playwright, `npx playwright install` fetched that version's build, and the error it led to sent you round in a loop. `warmup` with no parts includes it, and it checks the browser starts: on Linux, `--with-deps` installs Chromium's system libraries, and a launch that fails for lack of them names them and that command. A missing browser names the command wherever it's found, in a form that also works without a local install (for MCP); `login` says it can't show a browser only where that's so; `reelscript cache` lists the browser, and `cache clear browser` removes it (`clear all` leaves it, since other projects share it).
 - A target is its first visible match, so a hidden copy (a collapsed mobile menu) no longer fails the step, and several visible matches are a warning at the line.
