@@ -64,7 +64,7 @@ The example drives a small dashboard app that ships with the repo, so it's fully
 
 A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. A few rules hold everywhere:
 
-- **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, and an editor's `workspace` and `extensions`. Paths you pass on the command line are relative to your working directory.
+- **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, an editor's `workspace` and `extensions`, and a local page in `browser.goto("./app.html")` (anything with a scheme, like `https://` or `file://`, is a URL as is). Paths you pass on the command line are relative to your working directory.
 - **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target can also be a point, `{ x, y }`, in the window's own coordinates.
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
 - **Windows.** There is at most one browser, one terminal, and one editor window. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
@@ -159,7 +159,9 @@ import { createDemo, readAsciicast } from "@reelscript/cli";
 const cast = readAsciicast("claude.cast"); // asciinema rec claude.cast, v2 or v3; relative to the script
 await demo.terminal.open({ cols: cast.cols, rows: cast.rows, lineHeight: 1 });
 await demo.terminal.run("claude", { events: cast.events });
-``` See [examples/terminal.ts](examples/terminal.ts).
+```
+
+See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 
@@ -285,7 +287,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.say(text, { voice, speed })` | Queue narration. Starts now or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.browser.open({ x, y, width, height })` | Open the browser window without navigating. Optional; `goto()` opens it too. |
-| `demo.browser.goto(url, { hold })` | Navigate, then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
+| `demo.browser.goto(url, { hold })` | Navigate to a URL, or to a local page by its path relative to the script, then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
 | `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from the browser window with canned JSON. Opens no window. (The editor is VS Code's own page and isn't mocked.) |
 | `demo.terminal.open({ title, prompt, fontSize, lineHeight, cols, rows, x, y, width, height })` | Open a terminal window. `cols` and `rows` fix its size in characters; `lineHeight: 1` (default 1.3) joins block characters, as full-screen programs expect. |
 | `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGap, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |

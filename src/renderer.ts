@@ -24,6 +24,7 @@ import {
 import { EditorServer, LINUX_UA, editorStyles, editorTitle } from "./editor.js";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export interface RenderOptions {
   out: string;
@@ -275,6 +276,9 @@ class Engine {
       handleSIGHUP: false,
     });
     this.unregisterBrowser = onInterrupt(() => this.browser.close().catch(() => {}));
+    // Draw the desktop (wallpaper, menu bar) now, before any page loads: drawn
+    // lazily at the first captured frame, it raced a heavy page for the GPU.
+    await this.theme.background(this.desktop);
     this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
@@ -298,15 +302,17 @@ class Engine {
 
   /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
   private async rasterizeHtml(html: string, width: number, height: number, transparent: boolean): Promise<Buffer> {
-    const ctx = await this.browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
-    try {
-      const page = await ctx.newPage();
-      await page.setContent(html, { waitUntil: "load" });
-      await page.evaluate(() => document.fonts.ready);
-      return await page.screenshot({ type: "png", omitBackground: transparent });
-    } finally {
-      await ctx.close();
-    }
+    return retryCapture("the desktop's window frames", async () => {
+      const ctx = await this.browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+      try {
+        const page = await ctx.newPage();
+        await page.setContent(html, { waitUntil: "load" });
+        await page.evaluate(() => document.fonts.ready);
+        return await page.screenshot({ type: "png", omitBackground: transparent });
+      } finally {
+        await ctx.close();
+      }
+    });
   }
 
   // ------------------------------------------------------------ windows
@@ -600,8 +606,10 @@ class Engine {
       case "browser.goto": {
         const w = await this.ensureWindow("browser", "browser");
         this.focus(w);
-        await w.page.goto(action.url, { waitUntil: "load" });
-        w.url = action.url;
+        // A URL as is; a path to a local page (no scheme) is relative to the script, like every path in it.
+        const url = /^[a-z][a-z0-9+.-]*:/i.test(action.url) ? action.url : pathToFileURL(resolvePath(this.baseDir, action.url)).href;
+        await w.page.goto(url, { waitUntil: "load" });
+        w.url = url;
         return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };
       }
       case "browser.mockAPI": {
@@ -1061,16 +1069,18 @@ class Engine {
    * our control and slower; CDP grabs the current compositor frame directly.
    */
   private async capture(w: Win): Promise<Buffer> {
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("reelscript: screenshot timed out (page compositor stalled)")), 10_000);
+    return retryCapture(`the ${w.id} window`, async () => {
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("the page's compositor stalled for 10s")), 10_000);
+      });
+      try {
+        const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
+        return Buffer.from(data, "base64");
+      } finally {
+        clearTimeout(timer);
+      }
     });
-    try {
-      const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
-      return Buffer.from(data, "base64");
-    } finally {
-      clearTimeout(timer);
-    }
   }
 
   /** Window content as RGBA raw, masked to the theme's rounded corners. */
@@ -1184,6 +1194,25 @@ export function zoomAt(anim: Tween<ZoomState> | null, rest: ZoomState, t: number
 export function centreWithin(c: number, size: number, lo: number, hi: number): number {
   if (hi - lo <= size) return (lo + hi) / 2;
   return clamp(c, lo + size / 2, hi - size / 2);
+}
+
+/**
+ * Chromium sometimes refuses a screenshot while a heavy page is busy
+ * ("Unable to capture screenshot"); a moment later it succeeds. Retry a few
+ * times, then fail with a message that says what couldn't be captured.
+ */
+async function retryCapture<T>(what: string, attempt: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < 4; i++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    }
+  }
+  const why = last instanceof Error ? last.message.split("\n")[0] : String(last);
+  throw new Error(`reelscript: couldn't capture ${what}: ${why}`);
 }
 
 /** Clip a raw RGBA image to the desktop bounds and return it as an overlay (sharp rejects out-of-bounds overlays). */

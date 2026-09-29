@@ -118,3 +118,12 @@ test("asciinema recordings, v2 and v3, become timed events", () => {
   assert.deepEqual(parseAsciicast(v3), { events: [[500, "hello "], [1500, "world"]], cols: 120, rows: 40 });
   assert.throws(() => parseAsciicast(`{"version": 1}`), /unsupported asciicast version 1/);
 });
+
+test("goto opens a local page by its path relative to the script", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-p6-"));
+  mkdirSync(join(dir, "demos", "pages"), { recursive: true });
+  writeFileSync(join(dir, "demos", "pages", "app.html"), "<button id=local>local page</button>");
+  demo(join(dir, "demos"), `const demo = createDemo();\nawait demo.browser.goto("./pages/app.html");\nawait demo.cursor.moveTo("#local");\nawait demo.render("out.mp4");`);
+  const r = await run(["check", "demos/s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+});

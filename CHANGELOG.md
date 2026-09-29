@@ -55,6 +55,8 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - `readAsciicast(path)` plays asciinema recordings (v2 and v3) in a terminal window.
 - `demo.type()` requires the field to be on screen, like `moveTo`; `demo.press()` takes a `window`.
 - The README is honest about VS Code's real-time clock, and the extension example waits for its result instead of a fixed time.
+- `browser.goto("./app.html")` opens a local page relative to the script, like every other path in a script.
+- The desktop's wallpaper and menu bar are drawn before any page loads, and a screenshot Chromium refuses under load is retried, fixing intermittent `preview` failures on heavy sites.
 - `cache clear narration` removes only the Kokoro model, not other files in a `REELSCRIPT_MODELS` folder.
 - Option names drop their units: `camera: { hold }` and `maxGap`. `holdMs` and `maxGapMs` still work until 1.0.
 - "Built in" in `reelscript cache` now means only the container's own copies; a models folder you set with `REELSCRIPT_MODELS` can be cleared, and a code-server you point at is never deleted.
