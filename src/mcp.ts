@@ -26,7 +26,7 @@ Workflow for making a demo:
 6. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
 7. Call render_script for the final video.
 
-If the app needs a login, ask the user to run \`reelscript login <url> --out session.json\` once and pass createDemo({ session: "session.json" }).
+If the app needs a login, ask the user to run \`reelscript login <url> --out <path>\` once, then pass createDemo({ session }) with that file's path relative to the script (paths in a script are relative to the script's folder; CLI paths to the working directory). inspect_page takes the same file as its session argument, relative to the working directory.
 
 Targets are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
 
@@ -209,13 +209,16 @@ export async function serve(): Promise<void> {
       description:
         "Run, for real, every terminal.run command in the script that has no declared output, and save the recordings beside the script so renders can replay them. Runs shell commands on this machine.",
       inputSchema: {
-        script: z.string().describe("Path to the demo script"),
-        prune: z.boolean().optional().describe("Also delete recordings in that folder the script no longer uses. Default false"),
+        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts. With prune, list every script that shares the recordings folder"),
+        prune: z
+          .boolean()
+          .optional()
+          .describe("Also delete recordings in those scripts' folders that none of the listed scripts uses. Default false"),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async ({ script, prune = false }) => {
-      const args = ["record", resolve(script)];
+    async ({ scripts, prune = false }) => {
+      const args = ["record", ...scripts.map((s) => resolve(s))];
       if (prune) args.push("--prune");
       const { code, output } = await runCli(args);
       return { content: [text(output || (code === 0 ? "recorded" : "record failed"))], isError: code !== 0 };

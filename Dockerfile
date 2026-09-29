@@ -39,6 +39,8 @@ RUN npm ci --omit=dev \
  && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY --from=build /src/dist ./dist
 COPY assets ./assets
+# The MCP server's reelscript_docs tool serves the README.
+COPY README.md CHANGELOG.md ./
 RUN chmod +x dist/cli.js && ln -s /opt/reelscript/dist/cli.js /usr/local/bin/reelscript
 # Build the narration model in, and leave /cache empty and writable by any user.
 RUN reelscript warmup narration \

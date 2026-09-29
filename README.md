@@ -99,7 +99,7 @@ await demo.cursor.moveTo("#new-project", { window: "browser" });
 await demo.cursor.click();
 ```
 
-Each window is its own Chromium page; the desktop composites them in z-order with the theme's frames and shadows. Clicking a window raises it. See [examples/desktop.ts](examples/desktop.ts).
+Each window is its own Chromium page; the desktop composites them in z-order with the theme's frames and shadows. Clicking a window raises it, and typing into a named window (`demo.type(selector, text, { window })`, `editor.type()`, `terminal.run()`) brings it forward first. See [examples/desktop.ts](examples/desktop.ts).
 
 ## Editor demos
 
@@ -144,7 +144,7 @@ Declared output never executes anything, so it renders identically everywhere. F
 reelscript record demos/terminal.ts
 ```
 
-once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
+once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
 Rendering replays a recording with long silences capped (`maxGapMs`) and an optional `speed`, and never needs the tool installed. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it elsewhere at a fixed size (`script -r`, asciinema) and play it with `terminal.run(cmd, { events })` or `terminal.print("", { events })` in a terminal opened with the same `cols` and `rows`. See [examples/terminal.ts](examples/terminal.ts).
 
@@ -170,10 +170,11 @@ Run it on every pull request next to your tests, and render on `main`.
 The container is the canonical render environment, for amd64 and arm64. Chromium, ffmpeg, fonts, VS Code, and the narration model are built in, so a script renders the same pixels on every machine:
 
 ```sh
-docker run --rm -v "$PWD:/work" -v reelscript-cache:/cache ghcr.io/trevin-lee/reelscript:0.4.0 render demos/signup.ts
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -v reelscript-cache:/cache \
+  ghcr.io/trevin-lee/reelscript:0.4.0 render demos/signup.ts
 ```
 
-Use the tag that matches your npm version (`latest` is the newest release). What a render adds, editor extensions and spoken lines, goes in `/cache`; mount a volume there, as above, to keep it between runs. In GitHub Actions:
+Use the tag that matches your npm version (`latest` is the newest release). `--user` makes the files it writes yours; without it, on Linux they belong to root. What a render adds, editor extensions and spoken lines, goes in `/cache`; mount a volume there, as above, to keep it between runs. In GitHub Actions:
 
 ```yaml
 jobs:
@@ -184,6 +185,10 @@ jobs:
       - uses: actions/checkout@v5
       - run: reelscript check demos/*.ts
       - run: reelscript render demos/signup.ts
+      - uses: actions/upload-artifact@v5
+        with:
+          name: demo
+          path: demos/out/
 ```
 
 Scripts may `import { createDemo } from "@reelscript/cli"` without installing the package; the CLI resolves it to its own copy.
@@ -200,7 +205,7 @@ claude mcp add reelscript -- npx -y @reelscript/cli mcp
 | --- | --- |
 | `reelscript_docs` | This README. |
 | `inspect_page` | Visible buttons, links, and inputs on a URL, each with a suggested selector and position, plus a screenshot. Takes a `session` for pages behind a sign-in. |
-| `record_script` | Runs the script's real terminal commands and saves recordings. |
+| `record_script` | Runs scripts' real terminal commands and saves recordings; with `prune`, also removes recordings none of the listed scripts uses. |
 | `check_script` | Runs the timeline without rendering; passes, or names the script line that failed. |
 | `preview_frame` | The frame at a given second, as an image the agent can look at. |
 | `render_script` | The final `.mp4` or `.gif`. |
@@ -239,7 +244,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | --- | --- |
 | `editor` | VS Code (code-server), about 200 MB compressed |
 | `extensions` | Editor extensions installed from Open VSX or `.vsix` |
-| `narration-model` | The Kokoro voice model, about 90 MB |
+| `narration` | The Kokoro voice model, about 90 MB |
 | `narration-clips` | Spoken lines, reused while their text and voice are unchanged |
 
 `reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared.
@@ -249,12 +254,12 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | Call | What it does |
 | --- | --- |
 | `createDemo(options)` | Start a demo. Options below. |
-| `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent). `path` is relative to the script. |
+| `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent); any other extension is an error. `path` is relative to the script. |
 | `demo.check()` | What `reelscript check` runs: the timeline against the real app, no rendering. |
 | `demo.getTimeline()` | The actions queued so far, for tests. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a target. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
 | `demo.cursor.click({ button, duration })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. `duration: 0` takes no video time, so a following `waitFor` cuts straight to the page the click led to. |
-| `demo.type(selector, text, { wpm })` | Focus a field in the focused window and type at `wpm` (default 300). |
+| `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. |
 | `demo.press(key)` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`. |
 | `demo.wait(ms)` | Hold, on camera. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold, off camera, until the selector is visible, then run the page's clock `settle` ms more. The page keeps running, so its loading isn't filmed. |
@@ -267,11 +272,11 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.browser.goto(url, { hold })` | Navigate, then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
 | `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from every window with canned JSON. Opens no window. |
 | `demo.terminal.open({ title, prompt, fontSize, lineHeight, cols, rows, x, y, width, height })` | Open a terminal window. `cols` and `rows` fix its size in characters; `lineHeight: 1` (default 1.3) joins block characters, as full-screen programs expect. |
-| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGapMs, prompt })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. |
+| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGapMs, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |
 | `demo.terminal.print(text, { duration, events, speed, maxGapMs, prompt })` | More output with no command typed, after a `run` with `prompt: false`. |
-| `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open VS Code on a copy of a folder. `settings` merge over demo-friendly defaults; `notifications: true` shows VS Code's toasts. |
+| `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open VS Code on a copy of a folder. `extensions` are Open VSX ids, `.vsix` files, or extension folders. `settings` merge over demo-friendly defaults; `notifications: true` shows VS Code's toasts. Reopening with a different workspace, extensions, or settings starts a fresh VS Code. |
 | `demo.editor.openFile(path, { wpm })`, `demo.editor.command(name, { wpm })` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. Fails if VS Code finds no match. |
-| `demo.editor.type(text, { wpm })` | Type at the caret. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
+| `demo.editor.type(text, { wpm })` | Bring the editor forward and type at its caret. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
 | `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab. |
 | `.focus()`, `.place({ x, y, width, height })`, `.close()` on `browser`, `terminal`, `editor` | Bring forward, move or resize (`x, y` is the frame's corner on the desktop; `width, height` the content size), or take off the desktop; a closed window can be opened again. |
 
@@ -305,7 +310,7 @@ Pre-1.0: the API can still change between minor versions, and the changelog says
 - `reelscript generate`: point it at a URL with a sentence and get a script
 - `watch` mode with live preview while editing a script
 - Window open and close animations, and drag-to-move
-- Editor: open files by clicking, seed the integrated terminal, per-file caret placement
+- Editor: seed the integrated terminal, and place the caret per file
 - Pseudo-terminal recording for TTY-only tools
 - Retina (2x) output
 - Transitions between scenes, and callouts

@@ -6,7 +6,7 @@ import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
-import { Encoder, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
+import { Encoder, checkOutputFormat, muxNarration, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
 import { applyPronunciations, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
@@ -366,12 +366,17 @@ class Engine {
 
   private window(id: string): Win {
     const w = this.windows.get(id);
-    if (!w) throw new Error(`reelscript: window "${id}" is not open (call browser.goto or terminal.open first)`);
+    if (!w) {
+      const how: Record<string, string> = { browser: "demo.browser.goto() or demo.browser.open()", terminal: "demo.terminal.open()", editor: "demo.editor.open()" };
+      throw new Error(`reelscript: window "${id}" is not open (open it with ${how[id] ?? "its open() method"} first)`);
+    }
     return w;
   }
 
   private focused(): Win {
-    if (!this.focusedId) throw new Error("reelscript: no window is open yet (call browser.goto or terminal.open first)");
+    if (!this.focusedId) {
+      throw new Error("reelscript: no window is open (open one with browser.goto(), browser.open(), terminal.open() or editor.open())");
+    }
     return this.window(this.focusedId);
   }
 
@@ -445,15 +450,21 @@ class Engine {
   // ------------------------------------------------------------ targets
 
   /** Resolve a target to desktop coordinates, searching the given or focused window. */
-  private async resolveRect(target: Target, windowId?: string): Promise<Rect> {
-    const w = windowId ? this.window(windowId) : this.focused();
-    if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+  /** A selector's first match once it's visible, or a reelscript error after 3s. */
+  private async visible(w: Win, target: string) {
     const loc = w.page.locator(target).first();
     const deadline = Date.now() + 3000;
     while (!(await loc.isVisible())) {
       if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible in the ${w.id} window`);
       await new Promise((r) => setTimeout(r, 25));
     }
+    return loc;
+  }
+
+  private async resolveRect(target: Target, windowId?: string): Promise<Rect> {
+    const w = windowId ? this.window(windowId) : this.focused();
+    if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+    const loc = await this.visible(w, target);
     const box = await loc.boundingBox();
     if (!box) throw new Error(`reelscript: target "${target}" has no bounding box`);
     return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
@@ -540,8 +551,9 @@ class Engine {
         return { end: start + (action.duration ?? DEFAULTS.clickDuration) };
       }
       case "type": {
-        const w = this.focused();
-        if (action.target) await w.page.locator(action.target).first().focus();
+        const w = action.window ? this.window(action.window) : this.focused();
+        if (action.window) this.focus(w);
+        if (action.target) await (await this.visible(w, action.target)).focus();
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
         const firstAt = start + 80;
@@ -624,19 +636,23 @@ class Engine {
       case "editor.open": {
         const w = await this.ensureWindow("editor", "editor", action);
         this.focus(w);
+        const workspace = action.workspace ? resolvePath(this.baseDir, action.workspace) : undefined;
+        const config = { workspace, extensions: action.extensions, settings: action.settings, baseDir: this.baseDir };
+        if (this.editorServer && !this.editorServer.matches(config)) {
+          // Reopened on a different workspace, extensions or settings: start fresh.
+          await this.editorServer.stop();
+          this.editorServer = null;
+        }
         if (!this.editorServer) {
           this.editorServer = new EditorServer();
-          const workspace = action.workspace ? resolvePath(this.baseDir, action.workspace) : undefined;
           this.onStatus("starting code-server");
-          await this.editorServer.start(
-            { workspace, extensions: action.extensions, settings: action.settings, baseDir: this.baseDir },
-            this.onStatus,
-          );
-          await w.page.route("**/__reelscript/fonts/*", (route) => {
-            const name = route.request().url().split("/").pop() ?? "";
-            route.fulfill({ status: 200, contentType: "font/ttf", body: readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url)) });
-          });
+          await this.editorServer.start(config, this.onStatus);
         }
+        // Each editor window is a new page, so it needs its own font route.
+        await w.page.route("**/__reelscript/fonts/*", (route) => {
+          const name = route.request().url().split("/").pop() ?? "";
+          route.fulfill({ status: 200, contentType: "font/ttf", body: readFileSync(new URL(`../assets/fonts/${name}`, import.meta.url)) });
+        });
         const url = this.editorServer.url();
         await w.page.goto(url, { waitUntil: "load" });
         await w.page.waitForSelector(".monaco-workbench .editor-group-container", { timeout: 60_000 });
@@ -1143,6 +1159,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   }
 
   const videoPath = hasAudio ? `${options.out}.video.tmp.mp4` : options.out;
+  if (snapshot === undefined && !check) checkOutputFormat(options.out);
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
   let stepIndex = -1;

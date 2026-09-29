@@ -25,10 +25,14 @@ export function cacheParts(): CachePart[] {
     builtIn: override !== undefined,
   });
   const codeServer = process.env.REELSCRIPT_CODE_SERVER;
+  // A standalone code-server install is <root>/bin/code-server with <root>/lib/vscode;
+  // anything else (a system package, a wrapper) is shown as just the binary.
+  const install = codeServer ? join(codeServer, "..", "..") : "";
+  const editorPath = codeServer ? (existsSync(join(install, "lib", "vscode")) ? install : codeServer) : join(root, "code-server");
   return [
-    part("editor", "VS Code (code-server) for editor windows", codeServer ? join(codeServer, "..", "..") : join(root, "code-server"), codeServer),
+    part("editor", "VS Code (code-server) for editor windows", editorPath, codeServer),
     part("extensions", "editor extensions installed from Open VSX or .vsix", join(root, "extensions")),
-    part("narration-model", "the Kokoro voice model", modelsDir(), process.env.REELSCRIPT_MODELS),
+    part("narration", "the Kokoro voice model", modelsDir(), process.env.REELSCRIPT_MODELS),
     part("narration-clips", "spoken lines, reused while their text and voice are unchanged", join(root, "tts")),
   ];
 }
@@ -39,12 +43,15 @@ export function modelsDir(): string {
 }
 
 export function sizeOf(path: string): number {
-  if (!existsSync(path)) return 0;
-  const st = statSync(path);
-  if (!st.isDirectory()) return st.size;
-  let total = 0;
-  for (const entry of readdirSync(path)) total += sizeOf(join(path, entry));
-  return total;
+  try {
+    const st = statSync(path);
+    if (!st.isDirectory()) return st.size;
+    let total = 0;
+    for (const entry of readdirSync(path)) total += sizeOf(join(path, entry));
+    return total;
+  } catch {
+    return 0; // missing or unreadable
+  }
 }
 
 export function formatBytes(n: number): string {

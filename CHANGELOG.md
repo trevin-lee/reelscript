@@ -22,12 +22,18 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Renders no longer idle for about 10 seconds after finishing.
 - `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to every window and no longer opens one.
 - `clock` and `timezone` options; the menu bar shows the demo's clock.
-- `reelscript cache` lists what's cached and `reelscript cache clear <part|all>` removes it; `reelscript warmup` also downloads VS Code.
+- `reelscript cache` lists what's cached and `reelscript cache clear <part|all>` removes it; `reelscript warmup` also downloads VS Code. The parts share names with `warmup` (`narration`, `editor`).
 - `reelscript record` takes several scripts, warns when a command fails, and `--prune` removes recordings no script uses.
 - `reelscript login` and the session-not-found error print the exact paths to use, so following the error can't loop.
-- The container image is built for amd64 and arm64, each tested on its own architecture. VS Code and the voice model are built in, and `/cache` holds what a render adds, so a volume there keeps extensions and spoken lines between runs.
-- MCP: `inspect_page` takes a `session`; a new `record_script` tool; tools that drive the real app are no longer marked read-only.
+- The container image is built for amd64 and arm64, each tested on its own architecture. VS Code and the voice model are built in, and `/cache` holds what a render adds, so a volume there keeps extensions and spoken lines between runs. It runs as any user; the README shows `--user` so files it writes on Linux are yours.
+- MCP: `inspect_page` takes a `session`; a new `record_script` tool that takes every script sharing a recordings folder; tools that drive the real app are no longer marked read-only; the container includes the README that `reelscript_docs` serves.
 - `reelscript --help` exits cleanly, and progress lines are plain in CI logs.
+- A closed editor opens again, and reopening it on a different workspace, extensions, or settings starts a fresh VS Code. Stopping VS Code now stops every process it started.
+- Rendering to anything but `.mp4` or `.gif` is an error up front, and a render stops with ffmpeg's error instead of hanging if ffmpeg quits.
+- `editor.type()` brings the editor forward before typing, and `demo.type()` takes a `window` and fails like other targets when its selector is missing.
+- `reelscript record` runs commands in the script's folder, or a run's `cwd`, so recordings don't depend on where you ran it from.
+- Calling `demo.check()` from a script counts as the script's run, and honours `verbose`.
+- Error messages about a window that isn't open name the call that opens it.
 - The README covers every command, option, and method, and the rules that hold across them.
 
 ## 0.3.1

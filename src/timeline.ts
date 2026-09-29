@@ -19,7 +19,7 @@ export type Action =
   | { kind: "cursor.click"; button?: "left" | "right"; duration?: number }
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
-  | { kind: "type"; target?: string; text: string; wpm?: number }
+  | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
   | { kind: "press"; key: string }
   | { kind: "wait"; ms: number }
   | { kind: "waitFor"; target: string; window?: string; timeout?: number; settle?: number }
@@ -30,7 +30,7 @@ export type Action =
       kind: "editor.open";
       /** Folder to open, relative to the script. */
       workspace?: string;
-      /** Extension ids (Open VSX) or .vsix paths. */
+      /** Open VSX ids, .vsix paths, or extension folders, relative to the script. */
       extensions?: string[];
       settings?: Record<string, unknown>;
       /** Show VS Code notification toasts. Default: false */
@@ -63,6 +63,8 @@ export type Action =
       maxGapMs?: number;
       /** Show a new prompt after the output. Default: true */
       prompt?: boolean;
+      /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
+      cwd?: string;
     }
   | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGapMs?: number; duration?: number; prompt?: boolean }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };

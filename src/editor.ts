@@ -243,7 +243,10 @@ export class EditorServer {
   /** Absolute path of the (copied) workspace folder. */
   workspace = "";
 
+  private configKey = "";
+
   async start(config: EditorServerConfig, onStatus?: (m: string) => void): Promise<void> {
+    this.configKey = JSON.stringify([config.workspace, config.extensions ?? [], config.settings ?? {}]);
     const bin = await ensureCodeServer(onStatus);
     this.root = mkdtempSync(join(tmpdir(), "reelscript-editor-"));
     const userData = join(this.root, "user-data");
@@ -287,7 +290,9 @@ export class EditorServer {
         "--disable-getting-started-override",
         this.workspace,
       ],
-      { stdio: ["ignore", "pipe", "pipe"] },
+      // Its own process group, so stop() can end the extension host and
+      // other children too, not just the parent.
+      { stdio: ["ignore", "pipe", "pipe"], detached: true },
     );
     this.proc = proc;
     let log = "";
@@ -311,9 +316,31 @@ export class EditorServer {
     return `http://127.0.0.1:${this.port}/?folder=${encodeURIComponent(this.workspace)}`;
   }
 
+  /** Stop code-server and every process it started, then remove its temporary folder. */
   async stop(): Promise<void> {
-    this.proc?.kill();
+    const proc = this.proc;
     this.proc = null;
+    if (proc?.pid && proc.exitCode === null) {
+      const exited = new Promise<void>((r) => proc.once("exit", () => r()));
+      const signal = (sig: NodeJS.Signals) => {
+        try {
+          process.kill(-proc.pid!, sig); // the whole group
+        } catch {
+          /* already gone */
+        }
+      };
+      signal("SIGTERM");
+      const timedOut = await Promise.race([exited.then(() => false), new Promise<boolean>((r) => setTimeout(() => r(true), 3000).unref())]);
+      if (timedOut) signal("SIGKILL");
+      // Children may outlive the parent by a moment; make sure the group is gone.
+      signal("SIGKILL");
+    }
     if (this.root) rmSync(this.root, { recursive: true, force: true });
+    this.root = "";
+  }
+
+  /** Whether this server was started for the same workspace, extensions and settings. */
+  matches(config: EditorServerConfig): boolean {
+    return this.configKey === JSON.stringify([config.workspace, config.extensions ?? [], config.settings ?? {}]);
   }
 }

@@ -63,6 +63,16 @@ export function resolveFfmpeg(explicit?: string): string {
 }
 
 /** Streams raw RGB frames into ffmpeg and produces an H.264 mp4. */
+/** Output formats reelscript can write, by file extension. */
+export const OUTPUT_FORMATS = [".mp4", ".gif"];
+
+export function checkOutputFormat(out: string): void {
+  const ext = extname(out).toLowerCase();
+  if (!OUTPUT_FORMATS.includes(ext)) {
+    throw new Error(`reelscript: can't render to "${out}": use a path ending in ${OUTPUT_FORMATS.join(" or ")}`);
+  }
+}
+
 export class Encoder {
   private proc: ChildProcess | null = null;
   private stderr = "";
@@ -90,7 +100,14 @@ export class Encoder {
     ];
     const proc = spawn(resolveFfmpeg(this.opts.ffmpegPath), args, { stdio: ["pipe", "ignore", "pipe"] });
     proc.stderr!.on("data", (d) => (this.stderr += d.toString()));
-    this.exit = new Promise((resolve) => proc.on("close", resolve));
+    this.exit = new Promise((resolve) =>
+      proc.on("close", (code) => {
+        this.exitCode = code;
+        resolve(code);
+      }),
+    );
+    // A write after ffmpeg exits raises EPIPE on stdin; writeFrame reports it instead.
+    proc.stdin!.on("error", () => {});
     proc.on("error", (err) => {
       this.stderr += `\nfailed to start ffmpeg: ${err.message}`;
     });
@@ -102,9 +119,18 @@ export class Encoder {
     if (rgb.length !== this.frameBytes) {
       throw new Error(`frame is ${rgb.length} bytes, expected ${this.frameBytes}`);
     }
+    if (this.exitCode !== undefined) throw this.failure();
     if (!this.proc.stdin.write(rgb)) {
-      await once(this.proc.stdin, "drain");
+      // Wait for room in the pipe, unless ffmpeg has gone (then nothing drains it).
+      await Promise.race([once(this.proc.stdin, "drain"), this.exit!.then(() => undefined)]);
+      if (this.exitCode !== undefined) throw this.failure();
     }
+  }
+
+  private exitCode: number | null | undefined;
+
+  private failure(): Error {
+    return new Error(`reelscript: ffmpeg stopped while encoding (exit code ${this.exitCode})\n${this.stderr.trim()}`);
   }
 
   async finish(): Promise<void> {

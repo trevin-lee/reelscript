@@ -171,6 +171,11 @@ export interface TypeOptions {
   wpm?: number;
 }
 
+export interface DemoTypeOptions extends TypeOptions {
+  /** Window to type in; it comes to the front. Default: the focused window. */
+  window?: "browser" | "terminal" | "editor";
+}
+
 export interface SayOptions {
   voice?: string;
   /** Speed multiplier. Default: 1 */
@@ -227,7 +232,12 @@ export interface RunOptions {
 export interface EditorOptions {
   /** Folder to open, relative to the script. It's copied, so the demo never edits your files. */
   workspace?: string;
-  /** Extensions to install first: Open VSX ids like "esbenp.prettier-vscode" or paths to .vsix files. */
+  /**
+   * Extensions to load: Open VSX ids like "esbenp.prettier-vscode@12.4.0",
+   * paths to .vsix files, or extension folders (a directory with a
+   * package.json, such as the extension you're building). Paths are relative
+   * to the script.
+   */
   extensions?: string[];
   /** VS Code settings merged over reelscript's demo defaults. */
   settings?: Record<string, unknown>;
@@ -378,7 +388,7 @@ class EditorWindow extends Win {
 
   /** Type into the editor at the caret. */
   async type(text: string, opts: TypeOptions = {}): Promise<void> {
-    this.demo._push({ kind: "type", text, ...opts });
+    this.demo._push({ kind: "type", text, ...opts, window: "editor" });
   }
 
   /** Selector for a file or folder row in the Explorer, for cursor.moveTo(). */
@@ -412,7 +422,7 @@ export class Demo {
   }
 
   /** Type into a field with accelerated, evenly paced keystrokes. */
-  async type(target: string, text: string, opts: TypeOptions = {}): Promise<void> {
+  async type(target: string, text: string, opts: DemoTypeOptions = {}): Promise<void> {
     this._push({ kind: "type", target, text, ...opts });
   }
 
@@ -482,7 +492,7 @@ export class Demo {
     for (const a of this.actions) {
       if (a.kind !== "terminal.run" || a.output !== undefined || a.events) continue;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
-      const rec = await recordCommand(a.command);
+      const rec = await recordCommand(a.command, { cwd: fromScript(a.cwd ?? ".") });
       if (rec.exitCode !== 0) {
         process.stderr.write(
           `reelscript: warning: "${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is\n`,
@@ -506,7 +516,9 @@ export class Demo {
    * estimated. Throws on the first failure with the script location.
    */
   async check(): Promise<RenderResult> {
+    noteRun();
     const started = Date.now();
+    const verbose = this.options.verbose ?? true;
     const result = await renderTimeline(this.actions, {
       out: "",
       check: true,
@@ -523,10 +535,10 @@ export class Demo {
       sources: this.sources,
       baseDir: dirname(scriptFile()),
       session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
-      onStatus: (m) => process.stderr.write(`reelscript: ${m}\n`),
+      onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
     });
     const script = basename(scriptFile());
-    process.stderr.write(
+    if (verbose) process.stderr.write(
       `reelscript: check passed for ${script}: ${this.actions.length} actions, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
     );
     return result;
@@ -550,7 +562,11 @@ export class Demo {
       );
       return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
     }
-    if (process.env.REELSCRIPT_CHECK) return this.check();
+    if (process.env.REELSCRIPT_CHECK) {
+      const g = globalThis as { __reelscript_runs?: number };
+      g.__reelscript_runs = (g.__reelscript_runs ?? 1) - 1; // check() counts itself
+      return this.check();
+    }
     const out = process.env.REELSCRIPT_OUT || fromScript(outPath);
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;

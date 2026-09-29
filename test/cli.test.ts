@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,10 +12,10 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const tsx = import.meta.resolve("tsx");
 const acme = join(root, "examples/acme");
 
-function cli(args: string[], cwd: string) {
+function cli(args: string[], cwd: string, env: Record<string, string> = {}) {
   return new Promise<{ code: number | null; output: string; ms: number }>((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, ["--import", tsx, join(root, "src/cli.ts"), ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--import", tsx, join(root, "src/cli.ts"), ...args], { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout!.on("data", (d) => (output += d));
     child.stderr!.on("data", (d) => (output += d));
@@ -70,4 +71,80 @@ test("check fails when Quick Open or the Command Palette can't find what the scr
   const badCommand = await run(`command("Acme: A Command That Was Renamed")`);
   assert.equal(badCommand.code, 1);
   assert.match(badCommand.output, /Command Palette has no command matching/);
+});
+
+test("an unsupported output format fails up front instead of hanging", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  script(dir, "s.ts", `const demo = createDemo({ viewport: [300, 200], fps: 10 });\nawait demo.browser.goto("data:text/html,hi");\nawait demo.render("out/s.webm");`);
+  const r = await cli(["render", "s.ts"], dir);
+  assert.equal(r.code, 1);
+  assert.match(r.output, /can't render to .*s\.webm.*\.mp4 or \.gif/);
+});
+
+test("demo.type fails like other targets when its selector is missing", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  script(dir, "s.ts", `const demo = createDemo();\nawait demo.browser.goto("data:text/html,<input id=a>");\nawait demo.type("#missing", "x");\nawait demo.render("out.mp4");`);
+  const r = await cli(["check", "s.ts"], dir);
+  assert.equal(r.code, 1);
+  assert.match(r.output, /reelscript: target "#missing" was not found[\s\S]*s\.ts:4/);
+  assert.ok(r.ms < 20_000, `took ${r.ms}ms`);
+});
+
+test("demo.check() called from a script counts as its run", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  script(dir, "s.ts", `const demo = createDemo({ verbose: false });\nawait demo.browser.goto("data:text/html,hi");\nawait demo.check();`);
+  const r = await cli(["check", "s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+  assert.doesNotMatch(r.output, /check passed/, "verbose: false is quiet");
+});
+
+test("record runs commands in the script's folder, or a run's cwd", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  mkdirSync(join(dir, "demos", "app"), { recursive: true });
+  script(join(dir, "demos"), "s.ts", `const demo = createDemo();\nawait demo.terminal.open();\nawait demo.terminal.run("pwd");\nawait demo.terminal.run("pwd -P", { cwd: "app" });\nawait demo.render("out.mp4");`);
+  const r = await cli(["record", "demos/s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+  const recs = readdirSync(join(dir, "demos", "recordings")).map((f) => JSON.parse(readFileSync(join(dir, "demos", "recordings", f), "utf8")));
+  const out = (cmd: string) => recs.find((x) => x.command === cmd).events.map((e: [number, string]) => e[1]).join("").trim();
+  assert.match(out("pwd"), /\/demos$/);
+  assert.match(out("pwd -P"), /\/demos\/app$/);
+});
+
+test("cache: names match warmup, and a custom code-server binary doesn't break the listing", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  const env = { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_CODE_SERVER: "/usr/bin/true" };
+  const list = await cli(["cache"], dir, env);
+  assert.equal(list.code, 0, list.output);
+  assert.match(list.output, /editor .*built in at \/usr\/bin\/true/);
+  assert.match(list.output, /^\s+narration\s/m);
+  const clear = await cli(["cache", "clear", "narration"], dir, env);
+  assert.equal(clear.code, 0, clear.output);
+});
+
+test("editor: type lands in the editor, it reopens on a new workspace, and stopping leaves no processes", { timeout: 240_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
+  mkdirSync(join(dir, "other"));
+  writeFileSync(join(dir, "other", "notes.txt"), "second workspace\n");
+  const tmp = mkdtempSync(join(tmpdir(), "rs-proc-")); // code-server's temp folders go here, so we can look for leftovers
+  script(dir, "s.ts", `const demo = createDemo({ viewport: [1000, 640], fps: 30 });
+await demo.browser.goto("data:text/html,<input id=a>");
+await demo.editor.open({ workspace: ${JSON.stringify(acme)} });
+await demo.editor.openFile("app.ts");
+await demo.browser.focus();
+await demo.editor.type("ZZZ");
+await demo.call(async ({ page }) => {
+  // VS Code paints on real time, so give the last keystroke a moment to show.
+  await page!
+    .waitForFunction(() => (document.querySelector(".monaco-editor .view-lines")?.textContent ?? "").includes("ZZZ"), undefined, { timeout: 2000 })
+    .catch(() => { throw new Error("editor.type didn't reach the editor"); });
+});
+await demo.editor.close();
+await demo.editor.open({ workspace: "other" });
+await demo.editor.openFile("notes.txt");
+await demo.render("out.mp4");`);
+  const r = await cli(["check", "s.ts"], dir, { TMPDIR: tmp });
+  assert.equal(r.code, 0, r.output);
+  const left = execSync("ps -A -o command").toString().split("\n").filter((l) => l.includes(tmp));
+  assert.deepEqual(left, [], "no code-server processes left running");
+  assert.deepEqual(readdirSync(tmp).filter((f) => f.startsWith("reelscript-editor-")), [], "no temp folders left behind");
 });
