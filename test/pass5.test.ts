@@ -106,7 +106,7 @@ test("the CLI is strict about arguments and renders every script it's given", { 
   assert.ok(existsSync(join(dir, "out/a.mp4")) && existsSync(join(dir, "out/b.mp4")));
   const unknown = await run(["render", "a.ts", "--output", "x.mp4"], dir);
   assert.equal(unknown.code, 1);
-  assert.match(unknown.output, /render has no --output option \(it takes --out\)/);
+  assert.match(unknown.output, /render has no --output option \(it takes --out, --strict\)/);
   const outTwo = await run(["render", "a.ts", "b.ts", "--out", "x.mp4"], dir);
   assert.equal(outTwo.code, 1);
   const help = await run(["render", "a.ts", "--help"], dir);

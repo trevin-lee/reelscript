@@ -33,13 +33,15 @@ function usage(exitCode = 1): never {
   console.log(`reelscript ${version} - product demos as code
 
 usage:
-  reelscript render  <script> [more...] [--out demo.mp4]
+  reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                    render scripts to .mp4 or .gif
   reelscript preview <script> --at <seconds> [--out frame.png]
                                                    render one frame as a PNG
-  reelscript check   <script> [more scripts...]    run the timeline without rendering; fail on
-                                                   anything missing, with the script line
-  reelscript record  <script> [more...] [--prune]  run terminal commands for real and save
+  reelscript check   <script> [more...] [--strict]  run the timeline without rendering; fail on
+                                                   anything missing, with the script line;
+                                                   --strict fails on warnings too (for CI)
+  reelscript record  <script> [more...] [--prune] [--strict]
+                                                   run terminal commands for real and save
                                                    recordings; --prune deletes unused ones
   reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
   reelscript warmup  [browser] [narration] [editor] [--with-deps]
@@ -60,7 +62,7 @@ env:
   process.exit(exitCode);
 }
 
-const BOOLEAN_FLAGS = new Set(["prune", "help", "with-deps"]);
+const BOOLEAN_FLAGS = new Set(["prune", "help", "with-deps", "strict"]);
 
 /** Whether a file is a terminal recording `reelscript record` wrote, and so safe to prune. */
 function isRecording(file: string): boolean {
@@ -179,10 +181,10 @@ export async function load(url, context, nextLoad) {
 
 /** The options each command takes; anything else is an error rather than silently ignored. */
 const OPTIONS: Record<string, string[]> = {
-  render: ["out"],
+  render: ["out", "strict"],
   preview: ["at", "out"],
-  check: [],
-  record: ["prune"],
+  check: ["strict"],
+  record: ["prune", "strict"],
   login: ["out"],
   warmup: ["with-deps"],
   cache: [],
@@ -284,6 +286,9 @@ async function main(): Promise<void> {
     }
     case "warmup": {
       const parts = positional.length ? positional : ["browser", "narration", "editor"];
+      // A misspelt part fails before anything downloads (the browser alone is about 500 MB).
+      const unknownPart = parts.find((p) => !["browser", "narration", "editor"].includes(p));
+      if (unknownPart !== undefined) fail(`unknown warmup part "${unknownPart}" (browser, narration, editor)`);
       for (const part of parts) {
         const t = Date.now();
         if (part === "browser") {
@@ -342,6 +347,12 @@ async function main(): Promise<void> {
     default:
       if (command !== undefined) console.error(`reelscript: unknown command "${command}"\n`);
       usage();
+  }
+  // Warnings don't stop a run; in CI, --strict makes a run that had any fail.
+  if ("strict" in flags) {
+    const { warningCount } = await import("./warnings.js");
+    const n = warningCount();
+    if (n) fail(`${n} warning${n === 1 ? "" : "s"} above, and --strict makes a run with warnings fail`);
   }
 }
 

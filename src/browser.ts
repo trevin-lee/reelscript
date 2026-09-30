@@ -71,3 +71,37 @@ export async function verifyBrowser(): Promise<void> {
   const browser = await launchChromium({ headless: true });
   await browser.close();
 }
+
+/**
+ * Chrome on macOS, as pages see it: the user agent, the client hint headers
+ * (which otherwise name HeadlessChrome and the host's platform), and what
+ * their scripts ask. Shared by the browser window, the editor, and MCP's
+ * inspect_page, so what an agent inspects is what gets filmed.
+ */
+export function macChrome(browser: Browser): { userAgent: string; headers: Record<string, string>; script: string } {
+  const chrome = browser.version().split(".")[0];
+  return {
+    userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
+    headers: { "sec-ch-ua": `"Google Chrome";v="${chrome}", "Chromium";v="${chrome}", "Not_A Brand";v="8"`, "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"macOS"' },
+    script: macPlatform(chrome),
+  };
+}
+
+/** What a page's scripts ask about their platform, answered as Chrome on macOS. */
+function macPlatform(chrome: string): string {
+  return `
+(() => {
+  Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
+  Object.defineProperty(Navigator.prototype, "webdriver", { configurable: true, get: () => false });
+  if (typeof NavigatorUAData === "undefined") return;
+  const brands = () => [{ brand: "Google Chrome", version: "${chrome}" }, { brand: "Chromium", version: "${chrome}" }, { brand: "Not_A Brand", version: "8" }];
+  const ua = NavigatorUAData.prototype;
+  Object.defineProperty(ua, "platform", { configurable: true, get: () => "macOS" });
+  Object.defineProperty(ua, "brands", { configurable: true, get: brands });
+  const high = ua.getHighEntropyValues;
+  ua.getHighEntropyValues = function (hints) {
+    return high.call(this, hints).then((v) => ({ ...v, platform: "macOS", brands: brands(), ...(v.fullVersionList ? { fullVersionList: brands() } : {}) }));
+  };
+})();
+`;
+}

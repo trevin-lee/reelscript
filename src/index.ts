@@ -10,6 +10,7 @@ import { render as renderTimeline, type RenderResult } from "./renderer.js";
 import type { Action, CallContext, Target } from "./timeline.js";
 import { resolveSession } from "./session.js";
 import { interrupted } from "./cleanup.js";
+import { warn } from "./warnings.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
@@ -773,14 +774,16 @@ export class Demo {
       if (!existsSync(cwd)) {
         throw new Error(`reelscript: the folder "${a.cwd}" for "${a.command}" doesn't exist (${cwd})\n  at ${this.sources[i]} (terminal.run)`);
       }
-      const rec = await recordCommand(a.command, { cwd });
+      // At the size of the terminal it runs in, when the script fixes one, so its lines wrap as they will on screen.
+      const open = this.actions.slice(0, i).reverse().find((x): x is Extract<Action, { kind: "terminal.open" }> => x.kind === "terminal.open");
+      const rec = await recordCommand(a.command, { cwd, cols: open?.cols, rows: open?.rows });
       if (rec.timedOut) {
-        process.stderr.write(
-          `reelscript: warning: "${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then\n`,
+        warn(
+          `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then`,
         );
       } else if (rec.exitCode !== 0) {
-        process.stderr.write(
-          `reelscript: warning: "${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is\n`,
+        warn(
+          `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is`,
         );
       }
       files.push(saveRecording(dir, rec, key));

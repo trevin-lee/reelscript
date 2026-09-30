@@ -8,6 +8,7 @@ import { EDITOR_DEFAULT_SETTINGS, editorStyles, editorTitle, registerExtensionFo
 test("editorTitle strips the product name and joins with an em dash", () => {
   assert.equal(editorTitle("app.ts - acme - code-server", "x"), "app.ts — acme");
   assert.equal(editorTitle("acme - code-server", "x"), "acme");
+  assert.equal(editorTitle("app.ts — acme — code-server", "x"), "app.ts — acme", "code-server 4.138 joins with em dashes");
   assert.equal(editorTitle("", "fallback"), "fallback");
 });
 

@@ -26,7 +26,7 @@ Workflow for making a demo:
 6. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
 7. Call render_script for the final video.
 
-If the app needs a login, ask the user to run \`reelscript login <url> --out <path>\` once, then pass createDemo({ session }) with that file's path relative to the script (paths in a script are relative to the script's folder; CLI paths to the working directory). inspect_page takes the same file as its session argument, relative to the working directory.
+If the app needs a login, ask the user to run \`npx @reelscript/cli login <url> --out <path>\` once, then pass createDemo({ session }) with that file's path relative to the script (paths in a script are relative to the script's folder; CLI paths to the working directory). inspect_page takes the same file as its session argument, relative to the working directory.
 
 Targets are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
 
@@ -138,7 +138,7 @@ export async function serve(): Promise<void> {
     async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
       const { launchChromium } = await import("./browser.js");
       const { resolveSession } = await import("./session.js");
-      const { macChrome } = await import("./renderer.js");
+      const { macChrome } = await import("./browser.js");
       const { dateShim } = await import("./clock.js");
       const { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch } = await import("./time.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;

@@ -5,7 +5,7 @@
  * signed in with it.
  */
 import { chromium, type BrowserContext } from "playwright";
-import { INSTALL_BROWSER, browserMissing } from "./browser.js";
+import { INSTALL_BROWSER, browserMissing, macChrome } from "./browser.js";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -25,7 +25,7 @@ export function resolveSession(path: string, baseDir: string, relativeTo: "scrip
     throw new Error(
       `reelscript: session file not found: ${full}\n` +
         (relativeTo === "script" ? `  Paths in a script are relative to the script's folder.\n` : `  This path is relative to the working directory.\n`) +
-        `  Create it by signing in once:  reelscript login <url of your app> --out ${full}`,
+        `  Create it by signing in once:  npx @reelscript/cli login <url of your app> --out ${full}`,
     );
   }
   return full;
@@ -35,7 +35,8 @@ export async function login(url: string, out: string, log: (m: string) => void =
   const headless = process.env.REELSCRIPT_LOGIN_HEADLESS === "1"; // tests only
   let browser;
   try {
-    browser = await chromium.launch({ headless });
+    // Without the automation flag, which some sign-in pages refuse (and which sets navigator.webdriver).
+    browser = await chromium.launch({ headless, ignoreDefaultArgs: ["--enable-automation"] });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // The container has only the headless browser, and a server has no screen to show one on.
@@ -49,7 +50,10 @@ export async function login(url: string, out: string, log: (m: string) => void =
     throw err;
   }
   try {
-    const context = await browser.newContext({ viewport: null });
+    // The same browser a demo uses (Chrome on a Mac), so a session tied to it carries over.
+    const mac = macChrome(browser);
+    const context = await browser.newContext({ viewport: null, userAgent: mac.userAgent, extraHTTPHeaders: mac.headers });
+    await context.addInitScript(mac.script);
     const page = await context.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded" });
 

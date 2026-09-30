@@ -1,5 +1,6 @@
 import type { Page, Browser, BrowserContext, CDPSession } from "playwright";
-import { launchChromium } from "./browser.js";
+import { launchChromium, macChrome } from "./browser.js";
+import { macShortcut, pressMacShortcut } from "./macKeys.js";
 import sharp, { type OverlayOptions } from "sharp";
 import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
@@ -12,6 +13,7 @@ import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
 import { applyPronunciations, cachedClip, kokoro, synthesizeClip, voiceFor, type Clip, type TtsEngine } from "./tts.js";
 import { onInterrupt } from "./cleanup.js";
+import { warn } from "./warnings.js";
 import {
   TERMINAL_URL,
   loadRecording,
@@ -309,8 +311,8 @@ class Engine {
         const key = `${type} ${dialog.message()}`;
         if (!this.dialogs.has(key)) {
           this.dialogs.add(key);
-          process.stderr.write(
-            `reelscript: warning: the page opened a ${type}("${dialog.message()}") dialog, which isn't drawn in the video; reelscript answered OK\n  at ${this.at}\n`,
+          warn(
+            `the page opened a ${type}("${dialog.message()}") dialog, which isn't drawn in the video; reelscript answered OK\n  at ${this.at}`,
           );
         }
       }
@@ -502,7 +504,7 @@ class Engine {
     if (/Execution context was destroyed|detached|has been closed|Target closed|Cannot find context|navigat/i.test(message)) return undefined;
     if (!this.clockFailures.has(message)) {
       this.clockFailures.add(message);
-      process.stderr.write(`reelscript: warning: the page clock failed in ${url}, so its animations may differ between renders: ${message}\n`);
+      warn(`the page clock failed in ${url}, so its animations may differ between renders: ${message}`);
     }
     return undefined;
   }
@@ -526,9 +528,9 @@ class Engine {
     for (const src of results.flat()) {
       if (!src || this.stuckMedia.has(src)) continue;
       this.stuckMedia.add(src);
-      process.stderr.write(
-        `reelscript: warning: ${src} can't be moved to the page clock's time, so it stands still in the video. ` +
-          `Its server may not support HTTP Range requests (python -m http.server doesn't); open the page from a file, or serve it with one that does\n`,
+      warn(
+        `${src} can't be moved to the page clock's time, so it stands still in the video. ` +
+          `Its server may not support HTTP Range requests (python -m http.server doesn't); open the page from a file, or serve it with one that does`,
       );
     }
   }
@@ -611,12 +613,12 @@ class Engine {
     const key = `${this.at} ${target}`;
     if (count > 1 && !this.ambiguous.has(key)) {
       this.ambiguous.add(key);
-      process.stderr.write(
-        `reelscript: warning: "${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
+      warn(
+        `"${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
           (w.kind === "editor"
             ? `For a file, name its folder too, like editor.file("src/app.ts")`
             : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
-          `\n  at ${this.at}\n`,
+          `\n  at ${this.at}`,
       );
     }
     return loc;
@@ -718,7 +720,7 @@ class Engine {
         const response = await w.page.goto(url, { waitUntil: "load" });
         // A page that's gone still loads (the site's error page), and a demo ending there would be filmed.
         if (response && response.status() >= 400) {
-          process.stderr.write(`reelscript: warning: goto("${action.url}") got HTTP ${response.status()} from ${url}; the page shown may be an error page\n  at ${this.at}\n`);
+          warn(`goto("${action.url}") got HTTP ${response.status()} from ${url}; the page shown may be an error page\n  at ${this.at}`);
         }
         w.url = url;
         return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };
@@ -809,7 +811,10 @@ class Engine {
           throw new Error(`reelscript: keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`);
         }
         if (action.window) this.focus(w);
-        await w.page.keyboard.press(action.key);
+        // A shortcut that edits text does what it does on a Mac, as the page believes it's on one (see macKeys).
+        const mac = w.kind === "browser" && process.platform !== "darwin" ? macShortcut(action.key) : null;
+        if (mac) await pressMacShortcut(w.page, w.cdp, mac);
+        else await w.page.keyboard.press(action.key);
         return { end: start + 100 };
       }
       case "wait":
@@ -824,23 +829,36 @@ class Engine {
           );
         }
         this.aimed = null;
-        const range = action.target
+        const range: { from: number; to: number; fromX?: number; toX?: number } | null = action.target
           ? await (await this.visible(w, action.target)).evaluate((el) => {
-              // The nearest scrollable ancestor, or the page. (No named helper
-              // functions in here; see expectClickLands.)
-              let c: Element | null = el.parentElement;
-              while (c) {
-                const oy = getComputedStyle(c).overflowY;
-                if ((oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight) break;
-                c = c.parentElement;
+              // The nearest ancestor that scrolls down, and the nearest that
+              // scrolls across (a carousel, a wide table, a board), or the page.
+              // (No named helper functions in here; see expectClickLands.)
+              let down: Element | null = null;
+              let across: Element | null = null;
+              for (let c = el.parentElement; c && (!down || !across); c = c.parentElement) {
+                const cs = getComputedStyle(c);
+                if (!down && (cs.overflowY === "auto" || cs.overflowY === "scroll") && c.scrollHeight > c.clientHeight) down = c;
+                if (!across && (cs.overflowX === "auto" || cs.overflowX === "scroll") && c.scrollWidth > c.clientWidth) across = c;
               }
-              const box = c ?? document.scrollingElement!;
-              (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller = box;
+              const page = document.scrollingElement!;
+              const g = window as unknown as { __reelscript_scroller: Element; __reelscript_scroller_x: Element };
+              g.__reelscript_scroller = down ?? page;
+              g.__reelscript_scroller_x = across ?? page;
               const r = el.getBoundingClientRect();
-              const top = c ? c.getBoundingClientRect().top : 0;
-              const view = c ? c.clientHeight : window.innerHeight;
-              const want = box.scrollTop + (r.top - top) - (view - r.height) / 2;
-              return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
+              const dr = down ? down.getBoundingClientRect() : { top: 0, height: window.innerHeight };
+              const ar = across ? across.getBoundingClientRect() : { left: 0, width: window.innerWidth };
+              const y = g.__reelscript_scroller;
+              const x = g.__reelscript_scroller_x;
+              // Centred in each, as far as each can scroll.
+              const wantY = y.scrollTop + (r.top - dr.top) - ((down ? down.clientHeight : dr.height) - r.height) / 2;
+              const wantX = x.scrollLeft + (r.left - ar.left) - ((across ? across.clientWidth : ar.width) - r.width) / 2;
+              return {
+                from: y.scrollTop,
+                to: Math.max(0, Math.min(wantY, y.scrollHeight - y.clientHeight)),
+                fromX: x.scrollLeft,
+                toX: Math.max(0, Math.min(wantX, x.scrollWidth - x.clientWidth)),
+              };
             })
           : await w.page.evaluate(([by, to]) => {
               // The page's scroller: the document, or, in an app whose document
@@ -865,17 +883,23 @@ class Engine {
               return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
             }, [action.by ?? null, action.to ?? null] as [number | null, number | null]);
         if (!range) throw new Error("reelscript: demo.scroll() found nothing on the page that scrolls");
-        const dist = Math.abs(range.to - range.from);
+        const across = range.toX !== undefined ? { from: range.fromX ?? 0, to: range.toX } : null;
+        const dist = Math.max(Math.abs(range.to - range.from), across ? Math.abs(across.to - across.from) : 0);
         const dur = action.duration ?? clamp(Math.round(300 + dist * 0.6), 300, 1600);
         const ease = action.ease ?? "smooth";
-        const setTo = (y: number) =>
-          w.page.evaluate((y) => {
-            (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller.scrollTo({ top: y, behavior: "instant" });
-          }, y);
+        const setTo = (p: number) =>
+          w.page.evaluate(
+            ([y, x]) => {
+              const g = window as unknown as { __reelscript_scroller: Element; __reelscript_scroller_x?: Element };
+              g.__reelscript_scroller.scrollTo({ top: y, behavior: "instant" });
+              if (x !== null && g.__reelscript_scroller_x) g.__reelscript_scroller_x.scrollTo({ left: x, behavior: "instant" });
+            },
+            [lerp(range.from, range.to, p), across ? lerp(across.from, across.to, p) : null] as [number, number | null],
+          );
         return {
           end: start + dur,
-          onFrame: (t: number) => setTo(lerp(range.from, range.to, progress(t, start, dur, ease))),
-          onEnd: () => setTo(range.to),
+          onFrame: (t: number) => setTo(progress(t, start, dur, ease)),
+          onEnd: () => setTo(1),
         };
       }
       case "waitFor": {
@@ -1436,40 +1460,6 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
 }
 
 /**
- * Chrome on macOS, as pages see it: the user agent, the client hint headers
- * (which otherwise name HeadlessChrome and the host's platform), and what
- * their scripts ask. Shared by the browser window, the editor, and MCP's
- * inspect_page, so what an agent inspects is what gets filmed.
- */
-export function macChrome(browser: Browser): { userAgent: string; headers: Record<string, string>; script: string } {
-  const chrome = browser.version().split(".")[0];
-  return {
-    userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
-    headers: { "sec-ch-ua": `"Google Chrome";v="${chrome}", "Chromium";v="${chrome}", "Not_A Brand";v="8"`, "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"macOS"' },
-    script: macPlatform(chrome),
-  };
-}
-
-/** What a page's scripts ask about their platform, answered as Chrome on macOS. */
-function macPlatform(chrome: string): string {
-  return `
-(() => {
-  Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
-  Object.defineProperty(Navigator.prototype, "webdriver", { configurable: true, get: () => false });
-  if (typeof NavigatorUAData === "undefined") return;
-  const brands = () => [{ brand: "Google Chrome", version: "${chrome}" }, { brand: "Chromium", version: "${chrome}" }, { brand: "Not_A Brand", version: "8" }];
-  const ua = NavigatorUAData.prototype;
-  Object.defineProperty(ua, "platform", { configurable: true, get: () => "macOS" });
-  Object.defineProperty(ua, "brands", { configurable: true, get: brands });
-  const high = ua.getHighEntropyValues;
-  ua.getHighEntropyValues = function (hints) {
-    return high.call(this, hints).then((v) => ({ ...v, platform: "macOS", brands: brands(), ...(v.fullVersionList ? { fullVersionList: brands() } : {}) }));
-  };
-})();
-`;
-}
-
-/**
  * The browser window has no tabs, and a page Chromium opened in a new one
  * would never be seen: a link or window.open() that would open a new tab
  * or window opens in this one instead, as if the demo had switched to it.
@@ -1710,7 +1700,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           new Error(
             `reelscript: no recording for terminal command "${a.command}" in ${options.recordingsDir}.\n` +
               `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
-              `  reelscript record <script>`,
+              `  npx @reelscript/cli record <script>`,
           ),
         );
       }
@@ -1812,9 +1802,9 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     // A mock nothing asked for is usually a pattern that doesn't match what the page requests.
     for (const m of snapshot === undefined ? engine.mocks : []) {
       if (m.hits) continue;
-      process.stderr.write(
-        `reelscript: warning: mockAPI("${m.pattern}") never matched a request. ` +
-          `A pattern is a path ("/api/projects"), a URL glob ("**/api/projects*"), or a whole URL\n  at ${m.at}\n`,
+      warn(
+        `mockAPI("${m.pattern}") never matched a request. ` +
+          `A pattern is a path ("/api/projects"), a URL glob ("**/api/projects*"), or a whole URL\n  at ${m.at}`,
       );
     }
     await encoder?.finish();

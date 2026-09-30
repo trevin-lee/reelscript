@@ -10,9 +10,13 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - **The page's date is pinned** to Tuesday, September 23, 2025, 9:41 AM UTC by default, matching the menu bar, instead of the real time at render. Pass `clock: new Date()` for the real time, or set `clock` and `timezone`.
 - **VS Code has the macOS keybindings**, like the browser and the desktop around it: press `Meta+…` in the editor where scripts pressed `Control+…` (`Meta+ArrowDown` for the end of a file). Its menus show ⌘.
 - **`menubar: { clock }` is now `menubar: { clockText }`**, since `clock` elsewhere is a moment, not text. `clock` still works there until 1.0.
+- **The browser window is Chrome on a Mac on every host**, like the desktop: pages show the same shortcut hints in a local preview as in the container, and a site that checks the user agent or client hints for a headless browser sees an ordinary one. Press `Meta+…` for a page's own shortcuts (a script that pressed `Control+K` in the container needs `Meta+K`); editing shortcuts in its fields (`Meta+A`, `Alt+ArrowLeft`) do what they do on a Mac on every host.
+- **The browser window has no tabs**: a link or `window.open()` that would open a new tab opens in the window, instead of in a tab nobody sees.
+- **A page's `alert()`, `confirm()` or `prompt()`**, which isn't drawn in the video, is answered OK with a warning at the line, rather than cancelled silently (a confirmed delete stayed undeleted). The README lists what else Chromium draws outside the page: a `<select>`'s list, pickers, context menus, tooltips.
+- **`pronunciations` respell whole words**: `{ SQL: "sequel" }` leaves PostgreSQL alone.
 - **`goto({ settle })` is now `goto({ hold })`**, because `settle` elsewhere means time off camera. `settle` still works on `goto` until 1.0.
 - **Clicks and `moveTo` are checked.** A script that moved to an element off screen, or clicked one covered by a window or an overlay, used to pass and film the wrong thing; now it fails at that line. Add `demo.scroll()` or `focus()` where needed.
-- `render`, `recordCommand`, `scriptedEvents`, and `playbackEvents` are no longer exported; they were internal.
+- `render`, `RenderOptions`, `recordCommand`, `scriptedEvents`, and `playbackEvents` are no longer exported; they were internal.
 
 **`check` can be trusted**
 
@@ -31,23 +35,24 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 
 - Renders no longer idle for about 10 seconds after finishing.
 - `reelscript warmup browser` installs the Chromium build reelscript drives, and the README uses it: in a project with its own Playwright, `npx playwright install` fetched that version's build, and the error it led to sent you round in a loop. `warmup` with no parts includes it, and it checks the browser starts: on Linux, `--with-deps` installs Chromium's system libraries, and a launch that fails for lack of them names them and that command. A missing browser names the command wherever it's found, in a form that also works without a local install (for MCP); `login` says it can't show a browser only where that's so; `reelscript cache` lists the browser, and `cache clear browser` removes it (`clear all` leaves it, since other projects share it).
-- The browser window has no tabs: a link or `window.open()` that would open a new tab opens in the window, instead of in a tab nobody sees.
 - A target is its first visible match, so a hidden copy (a collapsed mobile menu) no longer fails the step, and several visible matches are a warning at the line.
 - MCP: `inspect_page` lists elements inside web components, suggests selectors that find text fields (by placeholder or label; `has-text` never matched them), and never shows what's typed in a field, such as a password.
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- `demo.scroll(selector)` scrolls across as well as down, so a card in a carousel, a column of a wide table or a board comes into view; it only scrolled down, and the next step's hint to scroll sent you round in a loop.
+- `record` runs a command at the size of the terminal it runs in when the script fixes one (`cols`, `rows`), so its lines wrap as they will on screen.
+- `check --strict` (and `render`, `record`) fails on warnings too, for CI: a page that answered 404, a mock no request used, an ambiguous target.
+- `warmup` refuses a misspelt part before downloading anything. `login` opens the same browser a demo uses (Chrome on a Mac), without the automation flag some sign-in pages refuse. Command hints in errors all read `npx @reelscript/cli …`, which works with or without a local install.
+- The README says a page's fonts come from the machine (`system-ui` is San Francisco on a Mac, a Linux font in the container).
 - `scroll({ by })` and `scroll({ to })` move an app's own scrolling area when the page itself doesn't scroll (the usual app layout, where they did nothing), and fail when nothing on the page scrolls.
 - A script that renders twice (an MP4 and a GIF) runs each command once under `record`, and `--out` or `preview`, which name one output, refuse it instead of overwriting one render with the other.
 - A format `render` can't write is refused before narration is synthesized (and before the voice model downloads).
 - VS Code's logs stay in each run's temporary folder instead of piling up in `~/.local/share/code-server`.
 - `cache clear` takes several parts, like `warmup`, and refuses a misspelt one before removing anything; `login` names a missing web address.
-- `pronunciations` respell whole words: `{ SQL: "sequel" }` leaves PostgreSQL alone.
 - The README says network responses arrive in real time, and how to keep them out of the timing.
 - `editor.type()` after clicking a file in the Explorer types into the file; the keys went to the Explorer (and selected files) while `check` passed. With no file open, it fails at its line.
-- The browser window is Chrome on a Mac on every host, like the desktop: pages show the same shortcut hints in a local preview as in the container, and a site that checks the user agent or client hints for a headless browser sees an ordinary one. The README says which keys follow the host.
 - Opening a terminal that's open applies a new `fontSize` or `lineHeight` too, as the README's rule for `open()` now says.
-- A page's `alert()`, `confirm()` or `prompt()`, which isn't drawn in the video, is answered OK with a warning at the line, rather than cancelled silently (a confirmed delete stayed undeleted). The README lists what else Chromium draws outside the page: a `<select>`'s list, pickers, context menus, tooltips.
 - A `goto()` that gets an HTTP error is a warning at its line: a renamed page would otherwise be filmed as the site's error page.
 - In a project without `"type": "module"`, the script's temporary copy is gone before the script runs, so it no longer shows in a demo's terminal (`ls`, `git status`) or the editor's Explorer.
 - The browser's request headers match what its scripts see (Chrome on macOS, not HeadlessChrome), and `navigator.webdriver` is false. MCP `inspect_page` shows the page as a demo's browser does: Chrome on a Mac, on the demo's default date and timezone.

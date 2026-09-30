@@ -81,7 +81,7 @@ await demo.render("out.mp4");
     writeFileSync(join(dir, "missing.ts"), script(true).replace("./session.json", "./nope.json"));
     const missing = await cli(["check", join(dir, "missing.ts")]);
     assert.notEqual(missing.code, 0);
-    assert.match(missing.output, /session file not found[\s\S]*reelscript login/);
+    assert.match(missing.output, /session file not found[\s\S]*npx @reelscript\/cli login/);
   } finally {
     server.close();
   }

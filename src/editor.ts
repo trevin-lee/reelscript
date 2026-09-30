@@ -59,7 +59,7 @@ ${notifications ? "" : ".notifications-toasts { display: none !important; }"}`;
 /** "app.ts - acme - code-server" → "app.ts — acme". */
 export function editorTitle(pageTitle: string, fallback: string): string {
   const parts = pageTitle
-    .split(" - ")
+    .split(/ [-—] /) // "app.ts - acme - code-server", or with em dashes in newer releases
     .map((p) => p.trim())
     .filter((p) => p && p.toLowerCase() !== "code-server");
   return parts.length ? parts.join(" — ") : fallback;

@@ -68,7 +68,7 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 - **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates.
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
 - **Windows.** There is at most one browser, one terminal, and one editor window. The browser has no tabs: a link or `window.open()` that would open a new tab opens in the browser window, as if the demo had switched to it. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Calling `open()` on a window that's open applies what you pass: the browser moves, the terminal starts over with the new settings, and the editor reopens (a new VS Code if its workspace, extensions or settings changed). Selectors resolve in the focused window unless you name one with `window`.
-- **The desktop is a Mac, on every host.** The browser is Chrome on macOS and VS Code has the macOS keybindings, like the desktop they sit on, so a local preview and a render in CI show the same ⌘ shortcut hints: press `Meta+K`, `Meta+P` and the like in both. Chromium's own text editing in a web page's fields follows the machine it runs on, so for select-all and the like there use Playwright's `ControlOrMeta+A`.
+- **The desktop is a Mac, on every host.** The browser is Chrome on macOS and VS Code has the macOS keybindings, like the desktop they sit on, so a local preview and a render in CI show the same ⌘ shortcut hints and take the same keys: press `Meta+K`, `Meta+P`, and in a web page's fields `Meta+A` or `Alt+ArrowLeft`, which do what they do on a Mac on every host. Fonts come from the machine, though: a page that asks for `system-ui` gets San Francisco on a Mac and a Linux font in the container, so text can look different between a local preview and a CI render. Give the page a web font, or judge the final look from CI.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
 - **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page (the document, or in an app whose document doesn't scroll, its main scrolling area), stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
 - **What the clock can't reach.** Animated GIF, APNG and WebP images play on their own and differ between renders; use a `<video>` or CSS animation for motion that must match. Network responses arrive in real time, so data a page fetches after it opens can appear at a different moment in `preview`, `check` and `render`: wait for it off camera with `waitFor()`, or answer the request with `mockAPI()`. `crypto.randomUUID()` and `crypto.getRandomValues()` stay random, timers in a Web Worker run on real time, and so does a closed shadow root written into the HTML (`<template shadowrootmode="closed">`); other shadow roots are covered. A `<video>` served over HTTP follows the clock only if the server answers Range requests (`python -m http.server` doesn't; reelscript warns when a video stands still), or open the page from a file. VS Code runs on real time (see Editor demos).
@@ -157,7 +157,7 @@ reelscript record demos/terminal.ts
 
 once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. A command that appears twice (`ls`, `touch new.txt`, `ls`) or runs in two folders gets a recording for each run, so each replays what it showed at that point. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
-Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning; when a command exits, anything it left running in the background is stopped too. Commands run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it with [asciinema](https://asciinema.org) and play the recording:
+Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning; when a command exits, anything it left running in the background is stopped too. Commands run at the size of the terminal they run in when it has `cols` and `rows` (`terminal.open({ cols: 100 })`), so their lines wrap as they will on screen, and at 120×36 otherwise, since a terminal that fits its window has no size until it opens. They run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it with [asciinema](https://asciinema.org) and play the recording:
 
 ```ts
 import { createDemo, readAsciicast } from "@reelscript/cli";
@@ -178,7 +178,7 @@ To use another voice engine, pass `tts`: any object with a stable `id` (part of 
 
 ## Run in CI
 
-`check` is the guard. It drives the real app through the whole timeline, cursor and all, with nothing captured or encoded, in a few seconds, and fails when the UI changes under a script, pointing at the line. Narration is timed with the real length of lines already spoken in an earlier render or preview, and estimated for new ones:
+`check` is the guard. It drives the real app through the whole timeline, cursor and all, with nothing captured or encoded, in a few seconds, and fails when the UI changes under a script, pointing at the line. Things that may or may not be what the script means (a page that answered 404, a mock no request used, several elements matching a selector) are warnings at their line; `check --strict` makes them fail too, as CI should. Narration is timed with the real length of lines already spoken in an earlier render or preview, and estimated for new ones:
 
 ```text
 reelscript: target "#new-project" was not found or never became visible in the browser window
@@ -203,7 +203,7 @@ jobs:
     container: ghcr.io/trevin-lee/reelscript:0.4.0
     steps:
       - uses: actions/checkout@v5
-      - run: reelscript check demos/*.ts
+      - run: reelscript check --strict demos/*.ts   # --strict: warnings fail too
       - run: reelscript render demos/signup.ts
       - uses: actions/upload-artifact@v5
         with:
@@ -236,12 +236,14 @@ npx @reelscript/cli warmup browser   # once: the browser it drives
 ## CLI
 
 ```text
-reelscript render  <script> [more...] [--out demo.mp4]
+reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                  render scripts to .mp4 or .gif
 reelscript preview <script> --at <seconds> [--out frame.png]
                                                  render one frame as a PNG
-reelscript check   <script> [more scripts...]    run the timeline without rendering
-reelscript record  <script> [more...] [--prune]  run terminal commands for real and save recordings
+reelscript check   <script> [more...] [--strict]  run the timeline without rendering; --strict
+                                                 fails on warnings too (a 404, an unused mock)
+reelscript record  <script> [more...] [--prune] [--strict]
+                                                 run terminal commands for real and save recordings
 reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
 reelscript warmup  [browser] [narration] [editor] [--with-deps]
                                                    download the browser, voice model and VS Code;
