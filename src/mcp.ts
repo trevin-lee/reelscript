@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import sharp from "sharp";
 
 const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop.
@@ -124,7 +124,7 @@ export async function serve(): Promise<void> {
       description:
         "Open a URL in headless Chromium and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
       inputSchema: {
-        url: z.string().describe("Page URL, e.g. http://localhost:3000 or file:///path/app.html"),
+        url: z.string().describe("Page URL, e.g. http://localhost:3000, or a path to a local page relative to the working directory, e.g. demos/app.html"),
         width: z.number().int().optional().describe("Viewport width. Default 1280"),
         height: z.number().int().optional().describe("Viewport height. Default 800"),
         screenshot: z.boolean().optional().describe("Include a screenshot. Default true"),
@@ -142,7 +142,8 @@ export async function serve(): Promise<void> {
       const browser = await launchChromium();
       try {
         const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, storageState })).newPage();
-        await page.goto(url, { waitUntil: "load" });
+        // A path is a local page, relative to the working directory like every path given to a tool.
+        await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : pathToFileURL(resolve(url)).href, { waitUntil: "load" });
         const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
         const lines = elements.map((e) => `${e.tag.padEnd(9)} ${e.selector.padEnd(36)} ${JSON.stringify(e.label).padEnd(30)} at ${e.box}`);
         const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [

@@ -5,7 +5,7 @@
  * point elsewhere, as they do in the container, where those are built in;
  * the browser lives in Playwright's own folder.
  */
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { KOKORO_MODEL, cacheDir } from "./tts.js";
@@ -86,7 +86,7 @@ export function modelsDir(): string {
 
 export function sizeOf(path: string): number {
   try {
-    const st = statSync(path);
+    const st = lstatSync(path); // a link counts as itself, not what it points to (Chromium's app bundle links within itself)
     if (!st.isDirectory()) return st.size;
     let total = 0;
     for (const entry of readdirSync(path)) total += sizeOf(join(path, entry));

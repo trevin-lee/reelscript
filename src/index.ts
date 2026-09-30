@@ -91,6 +91,8 @@ function invalidNumber(options: object): string | null {
 
 /** What's wrong with createDemo()'s options, if anything: what a render would fail on, found before it starts. */
 function invalidOption(o: DemoOptions): string | null {
+  const unknown = unknownField(o, DEMO_FIELDS);
+  if (unknown) return unknown;
   const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
   const camera = o.camera;
   if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
@@ -127,6 +129,87 @@ function invalidOption(o: DemoOptions): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Every option each action takes, so a misspelt name fails where the script
+ * queues it, as a misspelt value does: scripts run without type-checking.
+ * The type makes this list every field of every action, and nothing else.
+ */
+type Fields<A> = { readonly [P in Exclude<keyof A, "kind">]-?: true };
+const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }>> } = {
+  "browser.goto": { url: true, hold: true, settle: true },
+  "browser.mockAPI": { pattern: true, response: true, status: true },
+  "cursor.moveTo": { target: true, ease: true, duration: true, window: true },
+  "cursor.click": { button: true, duration: true },
+  "zoom.to": { target: true, scale: true, duration: true, ease: true, window: true, within: true },
+  "zoom.out": { duration: true, ease: true },
+  type: { target: true, text: true, wpm: true, window: true },
+  press: { key: true, window: true },
+  wait: { ms: true },
+  scroll: { target: true, by: true, to: true, duration: true, ease: true, window: true },
+  waitFor: { target: true, window: true, timeout: true, settle: true },
+  say: { text: true, voice: true, speed: true },
+  waitForNarration: {},
+  "terminal.open": { title: true, prompt: true, fontSize: true, lineHeight: true, cols: true, rows: true, x: true, y: true, width: true, height: true },
+  "editor.open": { workspace: true, extensions: true, settings: true, notifications: true, x: true, y: true, width: true, height: true },
+  "editor.openFile": { path: true, wpm: true },
+  "editor.command": { command: true, wpm: true },
+  "window.focus": { window: true },
+  "window.close": { window: true },
+  "browser.open": { x: true, y: true, width: true, height: true },
+  "window.place": { window: true, x: true, y: true, width: true, height: true },
+  "terminal.run": { command: true, output: true, events: true, duration: true, wpm: true, speed: true, maxGap: true, maxGapMs: true, prompt: true, cwd: true },
+  "terminal.print": { text: true, events: true, speed: true, maxGap: true, maxGapMs: true, duration: true, prompt: true },
+  call: { fn: true },
+};
+
+// Each method's options are fields of the action it queues, so none is refused as unknown.
+type Fits<O, K extends Action["kind"]> = [Exclude<keyof O, keyof Extract<Action, { kind: K }>>] extends [never] ? true : false;
+type Assert<T extends true> = T;
+type OptionsFitTheirActions = [
+  Assert<Fits<MoveOptions, "cursor.moveTo">>,
+  Assert<Fits<ZoomOptions, "zoom.to">>,
+  Assert<Fits<WaitForOptions, "waitFor">>,
+  Assert<Fits<ScrollOptions, "scroll">>,
+  Assert<Fits<DemoTypeOptions, "type">>,
+  Assert<Fits<TypeOptions, "editor.openFile">>,
+  Assert<Fits<TypeOptions, "editor.command">>,
+  Assert<Fits<SayOptions, "say">>,
+  Assert<Fits<TerminalOptions, "terminal.open">>,
+  Assert<Fits<RunOptions, "terminal.run">>,
+  Assert<Fits<EditorOptions & WindowGeometry, "editor.open">>,
+  Assert<Fits<GotoOptions, "browser.goto">>,
+  Assert<Fits<MockOptions, "browser.mockAPI">>,
+  Assert<Fits<WindowGeometry, "browser.open">>,
+  Assert<Fits<WindowGeometry, "window.place">>,
+];
+
+/** Every createDemo() option, for the same reason. */
+const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
+  session: true, clock: true, timezone: true, theme: true, viewport: true, desktop: true, fps: true, camera: true, deterministic: true,
+  gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
+};
+
+/** An option name the object doesn't take, with the one it's probably a misspelling of. */
+function unknownField(options: object, fields: object): string | null {
+  const known = Object.keys(fields);
+  for (const key of Object.keys(options)) {
+    if (key === "kind" || known.includes(key)) continue;
+    const near = known.find((k) => k.toLowerCase() === key.toLowerCase() || editDistance(k, key) <= 2);
+    return `unknown option "${key}"${near ? ` (did you mean "${near}"?)` : ` (it takes ${known.join(", ")})`}`;
+  }
+  return null;
+}
+
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[b.length];
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
@@ -204,7 +287,7 @@ export interface DemoOptions {
   deterministic?: boolean;
   /** Applied when rendering to a .gif path. Default: 960px wide (or the video's width, if narrower) at 20fps. */
   gif?: GifOptions;
-  /** Default narration voice for say(). Default: "af_heart" (Kokoro). */
+  /** Default narration voice for say(). Default: the engine's own: "af_heart" for Kokoro; for another engine, its `defaultVoice` or first of `voices`. */
   voice?: string;
   /** Text-to-speech engine. Default: Kokoro via the optional kokoro-js dependency. */
   tts?: TtsEngine;
@@ -582,7 +665,7 @@ export class Demo {
   _push(action: Action): void {
     const source = callerLocation();
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
-    const problem = invalidChoice(action) ?? invalidNumber(action);
+    const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? invalidChoice(action) ?? invalidNumber(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
     this.actions.push(action);
     this.sources.push(source);

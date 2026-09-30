@@ -10,7 +10,7 @@ import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, checkOutputFormat, gifSize, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
-import { DEFAULT_VOICE, applyPronunciations, cachedClip, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
+import { applyPronunciations, cachedClip, kokoro, synthesizeClip, voiceFor, type Clip, type TtsEngine } from "./tts.js";
 import { onInterrupt } from "./cleanup.js";
 import {
   TERMINAL_URL,
@@ -164,7 +164,8 @@ interface Win {
   title: string;
   url: string;
   termPrompt: string;
-  termRouted: boolean;
+  /** The terminal page being served, as its font settings: opening it again with others serves a new one. */
+  termRouted: string | null;
   frameOverlay: { key: string; overlay: OverlayOptions | null } | null;
 }
 
@@ -281,13 +282,19 @@ class Engine {
     // Draw the desktop (wallpaper, menu bar) now, before any page loads: drawn
     // lazily at the first captured frame, it raced a heavy page for the GPU.
     await this.theme.background(this.desktop);
+    // The browser is Chrome on a Mac on every host, like the desktop it sits
+    // on: pages show the same ⌘ shortcut hints in a local preview as in CI,
+    // and a site that turns away headless browsers sees an ordinary one.
+    const chrome = this.browser.version().split(".")[0];
     this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
       colorScheme: "light",
       storageState: this.session,
       timezoneId: this.timezone,
+      userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
     });
+    await this.context.addInitScript(macPlatform(chrome));
     // Headless Chromium denies clipboard writes by default, so a "Copy"
     // button in the page under demo would fail where a real browser succeeds.
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -381,7 +388,7 @@ class Engine {
       title: "",
       url: "",
       termPrompt: DEFAULTS.terminalPrompt,
-      termRouted: false,
+      termRouted: null,
       frameOverlay: null,
     };
     this.clampGeometry(win);
@@ -673,10 +680,21 @@ class Engine {
       case "browser.goto": {
         const w = await this.ensureWindow("browser", "browser");
         this.focus(w);
-        // A URL as is; a path to a local page (no scheme) is relative to the script, like every path in it.
-        const url = /^[a-z][a-z0-9+.-]*:/i.test(action.url)
-          ? action.url
-          : new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
+        // A URL as is. A path from the root ("/pricing") is a page on the site
+        // the browser is showing, as in a link and in mockAPI. Any other path
+        // is a local page relative to the script, like every path in it.
+        let url: string;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(action.url)) url = action.url;
+        else if (action.url.startsWith("/")) {
+          const site = /^https?:/.test(w.page.url()) ? w.page.url() : null;
+          if (!site) {
+            throw new Error(
+              `reelscript: goto("${action.url}"): a path from the root is a page on the website the browser is showing, and it isn't showing one. ` +
+                `For a page beside the script use "./${action.url.replace(/^\/+/, "")}"; for a site, the whole URL`,
+            );
+          }
+          url = new URL(action.url, site).href;
+        } else url = new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
         await w.page.goto(url, { waitUntil: "load" });
         w.url = url;
         return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };
@@ -741,6 +759,8 @@ class Engine {
           const field = await this.visible(w, action.target);
           await this.inView(w, field, action.target); // like moveTo: no silent jump to an off-screen field
           await field.focus();
+        } else if (w.kind === "editor") {
+          await this.editorFocus(w);
         }
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
@@ -947,10 +967,13 @@ class Engine {
       case "terminal.open": {
         const w = await this.ensureWindow("terminal", "terminal", action);
         this.focus(w);
-        if (!w.termRouted) {
+        // Opening an open terminal starts it over with what's given, font included.
+        const font = JSON.stringify([action.fontSize, action.lineHeight]);
+        if (w.termRouted !== font) {
+          if (w.termRouted !== null) await w.page.unroute(`${TERMINAL_URL}**`);
           const html = terminalPageHtml(action.fontSize, action.lineHeight);
           await w.page.route(`${TERMINAL_URL}**`, (route) => route.fulfill({ status: 200, contentType: "text/html", body: html }));
-          w.termRouted = true;
+          w.termRouted = font;
         }
         await w.page.goto(TERMINAL_URL, { waitUntil: "load" });
         const deadline = Date.now() + 5000;
@@ -1088,6 +1111,35 @@ class Engine {
       offered = ` (VS Code offered "${isFile && space > 0 ? `${row.slice(space + 1)}/${row.slice(0, space)}` : row}" instead)`;
     }
     throw new Error(`reelscript: ${what}${offered}`);
+  }
+
+  /**
+   * editor.type() types at the caret. If keyboard focus is somewhere that
+   * isn't text (the Explorer after clicking a file, say), the keys would
+   * select files instead of typing; move it to the open file (Ctrl+1, "focus
+   * the first editor group"), or fail if there's none. VS Code may still be
+   * opening the file it was just asked for and take focus back, so it must
+   * stay in the editor a moment before typing starts. Quick Open and a
+   * command's own prompt count as text.
+   */
+  private async editorFocus(w: Win): Promise<void> {
+    const typable = () =>
+      w.page.evaluate(() => {
+        const el = document.activeElement as HTMLElement | null;
+        return !!el && (!!el.closest(".monaco-editor") || el.matches("input, textarea") || el.isContentEditable);
+      });
+    if (await typable()) return;
+    let steadySince = 0;
+    for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
+      if (!(await typable())) {
+        steadySince = 0;
+        await w.page.keyboard.press("Control+1");
+      } else if (!steadySince) steadySince = Date.now();
+      else if (Date.now() - steadySince >= 300) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (steadySince) return;
+    throw new Error("reelscript: editor.type() has nowhere to type: no file is open in the editor (open one with editor.openFile())");
   }
 
   /**
@@ -1342,6 +1394,24 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
   return clamp(c, lo + size / 2, hi - size / 2);
 }
 
+/** What a page asks about its platform, answered as Chrome on macOS (see Engine.open). */
+function macPlatform(chrome: string): string {
+  return `
+(() => {
+  Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
+  if (typeof NavigatorUAData === "undefined") return;
+  const brands = () => [{ brand: "Google Chrome", version: "${chrome}" }, { brand: "Chromium", version: "${chrome}" }, { brand: "Not_A Brand", version: "8" }];
+  const ua = NavigatorUAData.prototype;
+  Object.defineProperty(ua, "platform", { configurable: true, get: () => "macOS" });
+  Object.defineProperty(ua, "brands", { configurable: true, get: brands });
+  const high = ua.getHighEntropyValues;
+  ua.getHighEntropyValues = function (hints) {
+    return high.call(this, hints).then((v) => ({ ...v, platform: "macOS", brands: brands(), ...(v.fullVersionList ? { fullVersionList: brands() } : {}) }));
+  };
+})();
+`;
+}
+
 /**
  * The browser window has no tabs, and a page Chromium opened in a new one
  * would never be seen: a link or window.open() that would open a new tab
@@ -1498,8 +1568,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     // A misspelt voice fails here, in check as in render, at its say() line.
     const tts = options.tts ?? kokoro();
     for (const i of sayIndexes) {
-      const voice = (actions[i] as Extract<Action, { kind: "say" }>).voice ?? options.voice ?? DEFAULT_VOICE;
-      if (tts.voices && !tts.voices.includes(voice)) {
+      const voice = voiceFor(tts, (actions[i] as Extract<Action, { kind: "say" }>).voice ?? options.voice);
+      if (voice !== undefined && tts.voices && !tts.voices.includes(voice)) {
         throw where(i, new Error(`reelscript: unknown voice "${voice}". Voices: ${tts.voices.join(", ")}`));
       }
     }

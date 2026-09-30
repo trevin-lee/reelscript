@@ -29,6 +29,8 @@ export interface TtsEngine {
   synthesize(text: string, opts: TtsOptions): Promise<TtsAudio>;
   /** The voices it has, if it knows; `check` rejects any other. */
   readonly voices?: readonly string[];
+  /** The voice for a line that names none. Default: the first of `voices`, or none (the engine picks). */
+  readonly defaultVoice?: string;
   /** Release the model once narration is synthesized. */
   dispose?(): Promise<void>;
   /** Fail as synthesize() would if the engine can't run here (a missing dependency), without loading a model. `check` calls it. */
@@ -129,6 +131,7 @@ export function kokoro(model = KOKORO_MODEL): TtsEngine {
         throw kokoroMissing();
       }
     },
+    defaultVoice: DEFAULT_VOICE,
     id: `kokoro:${model}:q8`,
     voices: model === KOKORO_MODEL ? KOKORO_VOICES : undefined,
     async dispose() {
@@ -182,11 +185,16 @@ export function toWav({ audio, sampleRate }: TtsAudio): Buffer {
   return buf;
 }
 
+/** The voice a line is spoken in: its own, or the engine's default. Kokoro's is af_heart; another engine's is its own. */
+export function voiceFor(engine: TtsEngine, voice: string | undefined): string | undefined {
+  return voice ?? engine.defaultVoice ?? engine.voices?.[0];
+}
+
 /** Synthesize (or fetch from cache) one narration clip. */
 function clipPaths(engine: TtsEngine, text: string, opts: TtsOptions) {
-  const voice = opts.voice ?? DEFAULT_VOICE;
+  const voice = voiceFor(engine, opts.voice);
   const speed = opts.speed ?? 1;
-  const key = createHash("sha1").update([engine.id, voice, String(speed), text].join("\0")).digest("hex");
+  const key = createHash("sha1").update([engine.id, voice ?? "", String(speed), text].join("\0")).digest("hex");
   const file = join(cacheDir(), "tts", `${key}.wav`);
   return { voice, speed, file, meta: `${file}.json` };
 }

@@ -10,7 +10,37 @@
  */
 /** The page clock shim, starting the page's Date at `epoch` (ms), or at the real time when null. */
 export function clockShim(epoch: number | null): string {
-  return CLOCK_SHIM_SOURCE.replace("__EPOCH__", epoch === null ? "Date.now()" : String(epoch));
+  return CLOCK_SHIM_SOURCE.replace("__EPOCH__", epoch === null ? "Date.now()" : String(epoch)).replace("__PIN_NOW__", pinNow("epoch + now"));
+}
+
+/**
+ * What else tells the time without a Date: Intl formatting "now" (format()
+ * with no date) and Temporal.Now. Both read the real clock unless pointed at
+ * the page's: `nowMs` is a JS expression for the page's current time in ms.
+ */
+function pinNow(nowMs: string): string {
+  return String.raw`
+  {
+    const current = () => ${nowMs};
+    const DTF = Intl.DateTimeFormat.prototype;
+    const formatGetter = Object.getOwnPropertyDescriptor(DTF, "format").get;
+    Object.defineProperty(DTF, "format", {
+      configurable: true,
+      get() { const f = formatGetter.call(this); return (d) => f(d === undefined ? current() : d); },
+    });
+    const realParts = DTF.formatToParts;
+    DTF.formatToParts = function (d) { return realParts.call(this, d === undefined ? current() : d); };
+    if (typeof Temporal !== "undefined" && Temporal.Now) {
+      const T = Temporal;
+      const zone = T.Now.timeZoneId;
+      const zoned = (z) => T.Instant.fromEpochMilliseconds(current()).toZonedDateTimeISO(z === undefined ? zone() : z);
+      T.Now.instant = () => T.Instant.fromEpochMilliseconds(current());
+      T.Now.zonedDateTimeISO = zoned;
+      T.Now.plainDateTimeISO = (z) => zoned(z).toPlainDateTime();
+      T.Now.plainDateISO = (z) => zoned(z).toPlainDate();
+      T.Now.plainTimeISO = (z) => zoned(z).toPlainTime();
+    }
+  }`;
 }
 
 /**
@@ -32,6 +62,7 @@ export function dateShim(epoch: number): string {
   Object.setPrototypeOf(VDate, RealDate);
   VDate.now = () => RealDate.now() + offset;
   window.Date = VDate;
+${pinNow("RealDate.now() + offset")}
 })();
 `;
 }
@@ -80,6 +111,11 @@ const CLOCK_SHIM_SOURCE = String.raw`
   Object.setPrototypeOf(VDate, RealDate);
   VDate.now = () => epoch + now;
   g.Date = VDate;
+__PIN_NOW__
+  // Math.random, seeded, so a page that draws random numbers (chart data,
+  // avatars, jitter) draws the same ones on every render.
+  let seed = 0x9e3779b9;
+  Math.random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
 
   const call = (fn, args) => { try { typeof fn === "function" ? fn(...args) : new Function(String(fn))(); } catch (e) { console.error(e); } };
 

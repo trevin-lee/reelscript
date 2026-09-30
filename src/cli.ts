@@ -306,6 +306,14 @@ async function main(): Promise<void> {
   }
 }
 
+// Output piped into something that stops reading (`reelscript cache | head`) is done, not an error.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(0);
+    throw err;
+  });
+}
+
 main().catch(async (err) => {
   // After Ctrl-C, failures come from the clean-up itself; let it finish and exit.
   const { interrupted } = await import("./cleanup.js");
