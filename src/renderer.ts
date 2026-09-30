@@ -1,6 +1,7 @@
 import type { Page, Browser, BrowserContext, CDPSession, Locator } from "playwright";
 import { launchChromium, macChrome } from "./browser.js";
 import { macShortcut, pressMacShortcut } from "./macKeys.js";
+import { LocalPages } from "./localPages.js";
 import sharp, { type OverlayOptions } from "sharp";
 import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
@@ -27,7 +28,7 @@ import {
 import { EditorServer, editorStyles, editorTitle } from "./editor.js";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export interface RenderOptions {
   out: string;
@@ -307,6 +308,11 @@ class Engine {
     // at the line; leaving a page (beforeunload) is the script's own doing.
     this.context.on("dialog", (dialog) => {
       const type = dialog.type();
+      // The click that opened it said how to answer: meant, so no warning.
+      if (this.dialogAnswer && type !== "beforeunload") {
+        (this.dialogAnswer === "accept" ? dialog.accept(type === "prompt" ? dialog.defaultValue() : undefined) : dialog.dismiss()).catch(() => {});
+        return;
+      }
       if (type !== "beforeunload") {
         const key = `${type} ${dialog.message()}`;
         if (!this.dialogs.has(key)) {
@@ -321,6 +327,8 @@ class Engine {
   }
   /** Dialogs already warned about. */
   private dialogs = new Set<string>();
+  /** How the latest click said to answer a dialog it opens, until the next step. */
+  private dialogAnswer: "accept" | "dismiss" | null = null;
 
   private unregisterBrowser: (() => void) | null = null;
 
@@ -328,7 +336,11 @@ class Engine {
     this.unregisterBrowser?.();
     await this.browser?.close();
     await this.editorServer?.stop();
+    this.local.close();
   }
+
+  /** Serves the demo's local pages over http (see LocalPages). */
+  private local = new LocalPages();
 
   /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
   private async rasterizeHtml(html: string, width: number, height: number, transparent: boolean): Promise<Buffer> {
@@ -437,8 +449,12 @@ class Engine {
   }
 
   /** Take a window off the desktop; focus passes to the topmost one left. */
+  /** Each open terminal's and editor's options, from its last open(). */
+  private lastOpen = new Map<string, Action>();
+
   private async closeWindow(w: Win): Promise<void> {
     this.windows.delete(w.id);
+    this.lastOpen.delete(w.id); // opened again after close(), it starts from its defaults
     if (this.typing?.win === w) this.typing = null;
     await w.page.close();
     await w.ctx?.close();
@@ -521,16 +537,18 @@ class Engine {
               const g = window as unknown as { __reelscript_advance?: (ms: number) => Promise<(string | undefined)[]> | undefined };
               return g.__reelscript_advance?.(ms); // resolves once any media seek has landed, with media that wouldn't move
             }, ms)
-            .catch((err: unknown) => this.clockFailed(f.url(), err)),
+            .catch((err: unknown) => this.clockFailed(this.local.file(f.url()), err)),
         ),
       ),
     );
-    for (const src of results.flat()) {
-      if (!src || this.stuckMedia.has(src)) continue;
+    for (const served of results.flat()) {
+      if (!served) continue;
+      const src = this.local.file(served);
+      if (this.stuckMedia.has(src)) continue;
       this.stuckMedia.add(src);
       warn(
         `${src} can't be moved to the page clock's time, so it stands still in the video. ` +
-          `Its server may not support HTTP Range requests (python -m http.server doesn't); open the page from a file, or serve it with one that does`,
+          `Its server may not support HTTP Range requests (python -m http.server doesn't); open it as a local page (goto("./page.html")), or serve it with one that does`,
       );
     }
   }
@@ -605,7 +623,14 @@ class Engine {
     const deadline = Date.now() + 3000;
     let seen = await shownMatches(all);
     while (!seen.length) {
-      if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible in the ${w.id} window`);
+      if (Date.now() > deadline) {
+        // On the page but not seen: say so, since content that appears as it scrolls into view is common.
+        throw new Error(
+          (await all.count())
+            ? `reelscript: target "${target}" is on the page but not visible in the ${w.id} window (hidden, or faded out until something shows it); if it appears as it scrolls into view, demo.scroll("${target}") first`
+            : `reelscript: target "${target}" was not found in the ${w.id} window`,
+        );
+      }
       await new Promise((r) => setTimeout(r, 25));
       seen = await shownMatches(all);
     }
@@ -621,6 +646,20 @@ class Engine {
             : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
           `\n  at ${this.at}`,
       );
+    }
+    return loc;
+  }
+
+  /**
+   * A selector's first match that's on the page with a box, seen or not: what
+   * demo.scroll() goes to, since content that fades in as it scrolls into view
+   * isn't visible until scroll has brought it there.
+   */
+  private async present(w: Win, target: string) {
+    const loc = w.page.locator(target).first();
+    for (const deadline = Date.now() + 3000; !(await loc.boundingBox().catch(() => null)); ) {
+      if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found in the ${w.id} window`);
+      await new Promise((r) => setTimeout(r, 25));
     }
     return loc;
   }
@@ -699,6 +738,14 @@ class Engine {
 
   async begin(action: Action, index: number, start: number): Promise<Step | null> {
     this.at = this.sources[index] ? `${this.sources[index]} (${action.kind})` : action.kind;
+    this.dialogAnswer = action.kind === "cursor.click" ? (action.dialog ?? null) : null;
+    // open() on an open terminal or editor applies what's passed and keeps the rest from the last open().
+    if (action.kind === "terminal.open" || action.kind === "editor.open") {
+      const id = action.kind === "terminal.open" ? "terminal" : "editor";
+      const given = Object.fromEntries(Object.entries(action).filter(([, v]) => v !== undefined));
+      if (this.windows.has(id)) action = { ...this.lastOpen.get(id), ...given } as typeof action;
+      this.lastOpen.set(id, action);
+    }
     switch (action.kind) {
       case "browser.goto": {
         const w = await this.ensureWindow("browser", "browser");
@@ -709,7 +756,7 @@ class Engine {
         let url: string;
         if (/^[a-z][a-z0-9+.-]*:/i.test(action.url)) url = action.url;
         else if (action.url.startsWith("/")) {
-          const site = /^https?:/.test(w.page.url()) ? w.page.url() : null;
+          const site = /^https?:/.test(w.page.url()) && !this.local.isLocal(w.page.url()) ? w.page.url() : null;
           if (!site) {
             throw new Error(
               `reelscript: goto("${action.url}"): a path from the root is a page on the website the browser is showing, and it isn't showing one. ` +
@@ -717,12 +764,16 @@ class Engine {
             );
           }
           url = new URL(action.url, site).href;
-        } else url = new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
+        } else url = await this.local.url(new URL(action.url, pathToFileURL(this.baseDir + "/")).href); // keeps ?query and #hash; see LocalPages
         const response = await w.page.goto(url, { waitUntil: "load" });
         // The page's first render, and what it sets off (observers revealing what's on screen), before its clock moves.
         await w.page.evaluate(() => (window as unknown as { __reelscript_settle?: () => Promise<void> }).__reelscript_settle?.()).catch(() => {});
         // A page that's gone still loads (the site's error page), and a demo ending there would be filmed.
-        if (response && response.status() >= 400) {
+        if (response && action.status !== undefined) {
+          if (response.status() !== action.status) warn(`goto("${action.url}") got HTTP ${response.status()}, not the ${action.status} the script expects\n  at ${this.at}`);
+        } else if (response && response.status() >= 400) {
+          // A local page that isn't there is a typo in the script, not a site's error page.
+          if (this.local.isLocal(url)) throw new Error(`reelscript: goto("${action.url}"): there's no page at ${fileURLToPath(this.local.file(url).replace(/[?#].*$/, ""))}`);
           warn(`goto("${action.url}") got HTTP ${response.status()} from ${url}; the page shown may be an error page\n  at ${this.at}`);
         }
         w.url = url;
@@ -792,10 +843,16 @@ class Engine {
           const refused = await field.evaluate((el) => {
             if ((el as HTMLInputElement).disabled || el.matches(":disabled")) return "it's disabled";
             if ((el as HTMLInputElement).readOnly) return "it's read-only";
-            let active = document.activeElement;
-            while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-            for (let n: Node | null = active; n; n = n.parentNode ?? ((n as ShadowRoot).host || null)) if (n === el) return null;
-            return "it can't take the keyboard (it isn't a text field)";
+            let active = document.activeElement as HTMLElement | null;
+            while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement as HTMLElement;
+            let inside = false;
+            for (let n: Node | null = active; n && !inside; n = n.parentNode ?? ((n as ShadowRoot).host || null)) inside = n === el;
+            // Where the keys land must take text: a button or link would treat a space as a click.
+            const text =
+              !!active &&
+              (active.isContentEditable ||
+                active.matches("textarea, input:not([type=button], [type=submit], [type=reset], [type=checkbox], [type=radio], [type=file], [type=range], [type=color], [type=image], [type=hidden])"));
+            return inside && text ? null : "it can't take the keyboard (it isn't a text field)";
           });
           if (refused) throw new Error(`reelscript: can't type into "${action.target}": ${refused}`);
         } else if (w.kind === "editor") {
@@ -843,7 +900,7 @@ class Engine {
         }
         this.aimed = null;
         const range: { from: number; to: number; fromX?: number; toX?: number } | null = action.target
-          ? await (await this.visible(w, action.target)).evaluate((el) => {
+          ? await (await this.present(w, action.target)).evaluate((el) => {
               // The nearest ancestor that scrolls down, and the nearest that
               // scrolls across (a carousel, a wide table, a board), or the page.
               // (No named helper functions in here; see expectClickLands.)
@@ -1376,7 +1433,8 @@ class Engine {
     if (w.kind === "editor") w.title = editorTitle(await w.page.title(), this.editorFallbackTitle);
     // A browser window shows where its page is now, in-page navigation
     // included, not the address it was opened at.
-    const url = w.kind === "browser" ? (this.address ? this.address(w.page.url()) : w.page.url()) : w.url;
+    const page = w.kind === "browser" ? this.local.file(w.page.url()) : w.url; // a local page shows as the file it is
+    const url = w.kind === "browser" && this.address ? this.address(page) : page;
     const style = { kind: w.kind, width: w.width, height: w.height, title: w.title, url, focused: w.id === this.focusedId };
     const key = `${JSON.stringify(style)}@${w.x},${w.y}`;
     if (w.frameOverlay?.key === key) return w.frameOverlay.overlay;

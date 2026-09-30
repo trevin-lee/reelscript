@@ -220,7 +220,18 @@ async function main(): Promise<void> {
       if (!positional.length) missing(`${command} needs a script`);
       if (flags.out !== undefined && positional.length > 1) fail("--out names one video; render several scripts without it");
       if (flags.out) process.env.REELSCRIPT_OUT = resolve(flags.out);
-      for (const script of positional) await runScript(script);
+      // With --out, the video waits beside it until the script has run to the end without failing.
+      const g = globalThis as { __reelscript_pending_out?: { from: string; to: string } };
+      const { rmSync, renameSync } = await import("node:fs");
+      const { onInterrupt } = await import("./cleanup.js");
+      const unregister = onInterrupt(() => g.__reelscript_pending_out && rmSync(g.__reelscript_pending_out.from, { force: true }));
+      try {
+        for (const script of positional) await runScript(script);
+        if (g.__reelscript_pending_out) renameSync(g.__reelscript_pending_out.from, g.__reelscript_pending_out.to);
+      } finally {
+        unregister();
+        if (g.__reelscript_pending_out) rmSync(g.__reelscript_pending_out.from, { force: true });
+      }
       break;
     }
     case "preview": {

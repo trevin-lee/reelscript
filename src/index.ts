@@ -10,16 +10,16 @@ import { render as renderTimeline, type RenderResult } from "./renderer.js";
 import type { Action, CallContext, Target } from "./timeline.js";
 import { resolveSession } from "./session.js";
 import { interrupted } from "./cleanup.js";
-import { warn } from "./warnings.js";
+import { warn, warningCount } from "./warnings.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
-import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording } from "./terminal.js";
+import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LIB_DIR = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +60,7 @@ function invalidChoice(action: Action): string | null {
     one("ease", a.ease, EASES) ??
     one("window", a.window, WINDOWS) ??
     (action.kind === "zoom.to" ? one("within", a.within, ["window"]) : null) ??
-    (action.kind === "cursor.click" ? one("button", a.button, ["left", "right"]) : null)
+    (action.kind === "cursor.click" ? one("button", a.button, ["left", "right"]) ?? one("dialog", a.dialog, ["accept", "dismiss"]) : null)
   );
 }
 
@@ -83,6 +83,9 @@ function invalidNumber(options: object): string | null {
       const v = o[k];
       if (v !== undefined && !(typeof v === "number" && Number.isFinite(v) && ok(v))) return `${k} must be ${rule}, not ${shown(v)}`;
     }
+  }
+  if (o.exitCode !== undefined && !(Number.isInteger(o.exitCode) && (o.exitCode as number) >= 0 && (o.exitCode as number) <= 255)) {
+    return `exitCode must be an exit code (0 to 255), not ${shown(o.exitCode)}`;
   }
   if (o.status !== undefined && !(Number.isInteger(o.status) && (o.status as number) >= 100 && (o.status as number) <= 599)) {
     return `status must be an HTTP status code, not ${shown(o.status)}`;
@@ -145,10 +148,10 @@ function invalidOption(o: DemoOptions): string | null {
  */
 type Fields<A> = { readonly [P in Exclude<keyof A, "kind">]-?: true };
 const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }>> } = {
-  "browser.goto": { url: true, hold: true, settle: true },
+  "browser.goto": { url: true, hold: true, settle: true, status: true },
   "browser.mockAPI": { pattern: true, response: true, status: true },
   "cursor.moveTo": { target: true, ease: true, duration: true, window: true },
-  "cursor.click": { button: true, duration: true },
+  "cursor.click": { button: true, duration: true, dialog: true },
   "zoom.to": { target: true, scale: true, duration: true, ease: true, window: true, within: true },
   "zoom.out": { duration: true, ease: true },
   type: { target: true, text: true, wpm: true, window: true },
@@ -166,7 +169,7 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "window.close": { window: true },
   "browser.open": { x: true, y: true, width: true, height: true },
   "window.place": { window: true, x: true, y: true, width: true, height: true },
-  "terminal.run": { command: true, output: true, events: true, duration: true, wpm: true, speed: true, maxGap: true, maxGapMs: true, prompt: true, cwd: true },
+  "terminal.run": { command: true, output: true, events: true, duration: true, wpm: true, speed: true, maxGap: true, maxGapMs: true, prompt: true, cwd: true, exitCode: true },
   "terminal.print": { text: true, events: true, speed: true, maxGap: true, maxGapMs: true, duration: true, prompt: true },
   call: { fn: true },
 };
@@ -464,6 +467,8 @@ export interface RunOptions {
   maxGapMs?: number;
   /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
   cwd?: string;
+  /** The exit code the command is meant to have, for a demo of a failure: then `record` doesn't warn. Default: 0 */
+  exitCode?: number;
   /**
    * The prompt once the output ends. Default: true, the terminal's prompt. A
    * string shows that prompt instead, and keeps it from then on (after a
@@ -494,6 +499,8 @@ export interface GotoOptions {
   hold?: number;
   /** @deprecated Renamed to `hold`, since `settle` elsewhere means time off camera. Still works; removed in 1.0. */
   settle?: number;
+  /** The HTTP status the page is meant to have, e.g. 404 for a demo of a not-found page: then it isn't a warning. */
+  status?: number;
 }
 
 export interface MockOptions {
@@ -514,7 +521,8 @@ class Cursor {
    * follow it with waitFor() and the frame after the click is the page the
    * click led to, not the page on its way there.
    */
-  async click(opts: { button?: "left" | "right"; duration?: number } = {}): Promise<void> {
+  /** Click where the cursor is. `dialog` answers an alert, confirm or prompt the click opens, and says it's meant (no warning). */
+  async click(opts: { button?: "left" | "right"; duration?: number; dialog?: "accept" | "dismiss" } = {}): Promise<void> {
     this.demo._push({ kind: "cursor.click", ...opts });
   }
 }
@@ -793,6 +801,8 @@ export class Demo {
     const g = globalThis as { __reelscript_recorded?: Map<string, Set<string>> };
     g.__reelscript_recorded ??= new Map();
     const done = g.__reelscript_recorded.get(dir) ?? new Set<string>();
+    const recorded: [TermRecording, RecordingKey][] = [];
+    const warningsAtStart = warningCount();
     for (const [i, key] of keys) {
       const a = this.actions[i] as Extract<Action, { kind: "terminal.run" }>;
       // A script that renders twice (an MP4 and a GIF) runs each command once.
@@ -809,13 +819,22 @@ export class Demo {
         warn(
           `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then`,
         );
-      } else if (rec.exitCode !== 0) {
+      } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(
-          `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is`,
+          a.exitCode === undefined
+            ? `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is (give the run { exitCode: ${rec.exitCode} } if that's meant)`
+            : `"${a.command}" exited with code ${rec.exitCode}, not the ${a.exitCode} the script expects; the recording shows its output as it is`,
         );
       }
-      files.push(saveRecording(dir, rec, key));
+      recorded.push([rec, key]);
     }
+    // Written only once every command has run (and, under --strict, without a warning), so a
+    // run that fails partway leaves the recordings a render replays as they were.
+    const warned = warningCount() - warningsAtStart;
+    if (process.env.REELSCRIPT_STRICT && warned) {
+      throw new Error(`reelscript: ${warned} warning${warned === 1 ? "" : "s"} above, and --strict makes a run with warnings fail; the recordings are unchanged`);
+    }
+    for (const [rec, key] of recorded) files.push(saveRecording(dir, rec, key));
     // Let `reelscript record --prune` know which recordings are still in use.
     for (const f of files) done.add(f);
     g.__reelscript_recorded.set(dir, done);
@@ -884,9 +903,11 @@ export class Demo {
     // --out and preview name one output; a second render() would overwrite it with something else.
     if (process.env.REELSCRIPT_OUT) {
       const g = globalThis as { __reelscript_out_taken?: boolean };
+      // preview shows the first render (a script that renders an MP4 and a GIF has the same frames in each).
+      if (g.__reelscript_out_taken && process.env.REELSCRIPT_SNAPSHOT_AT) return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
       if (g.__reelscript_out_taken) {
         throw new Error(
-          `reelscript: this script calls render() more than once, and ${process.env.REELSCRIPT_SNAPSHOT_AT ? "preview shows one" : "--out names one video"}; run it without ${process.env.REELSCRIPT_SNAPSHOT_AT ? "a second render(), or preview a script that renders once" : "--out"}\n  at ${callerLocation()} (render)`,
+          `reelscript: this script calls render() more than once, and --out names one video; run it without --out\n  at ${callerLocation()} (render)`,
         );
       }
       g.__reelscript_out_taken = true;
@@ -896,9 +917,12 @@ export class Demo {
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
     const verbose = this.options.verbose ?? true;
     const started = Date.now();
+    // Under render --out, the video goes to a pending file the CLI moves into place once the
+    // whole script has run: a script that fails after rendering leaves the previous video as it was.
+    const pending = process.env.REELSCRIPT_OUT && snapshotAt === undefined ? join(dirname(out), `.${basename(out, extname(out))}.pending${extname(out)}`) : null;
 
     const result = await unlessInterrupted(renderTimeline(this.actions, {
-      out,
+      out: pending ?? out,
       fps: this.options.fps,
       viewport: this.options.viewport,
       desktop: this.options.desktop,
@@ -928,6 +952,10 @@ export class Demo {
         : undefined,
     }));
 
+    if (pending) {
+      (globalThis as { __reelscript_pending_out?: { from: string; to: string } }).__reelscript_pending_out = { from: pending, to: out };
+      result.out = out;
+    }
     if (verbose) {
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       process.stderr.write(

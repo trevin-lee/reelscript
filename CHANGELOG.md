@@ -40,6 +40,13 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- The page clock leaves a page's own control of its animations alone: what the page pauses (`pause()`, `animation-play-state: paused`) stays paused, where it seeks is where the clock goes on from, and what it finishes stays finished. The clock stepped them all.
+- Local pages (`goto("./app.html")`) are served from this machine over http, not opened as files: their `fetch("/api/...")` reaches `mockAPI`, their cookies stick, ES modules load, and video can seek. A local page that isn't there fails with its path.
+- `demo.scroll(selector)` goes to content that only appears once it's scrolled into view (a reveal-on-scroll section), and a target that's there but not visible says so, with a hint to scroll to it.
+- A script can say a warning's cause is meant, so `--strict` passes it: `goto(url, { status: 404 })`, `terminal.run(cmd, { exitCode: 1 })`, and `cursor.click({ dialog: "accept" | "dismiss" })`, which also answers the dialog as asked.
+- `open()` on an open terminal or editor keeps what isn't passed (an editor moved with `{ x, y }` kept no workspace, a terminal given a font lost its prompt).
+- A failed run leaves earlier output alone: `render --out` moves the video into place only once the whole script has run, and `record` writes recordings only once every command has run (and, with `--strict`, without warnings).
+- `demo.type()` needs the keys to land in a text field (a button took a space as a click); `preview` of a script that renders twice shows the first; MCP tool calls that are cancelled stop the run.
 - Content that reacts to scrolling (a reveal-on-scroll, an IntersectionObserver) renders the same every time: after a page loads and after each scroll step, the page renders on its own frames, which is when Chromium delivers those callbacks, before its clock moves on. Renders of such pages differed visibly.
 - An action missing what it can't do without fails where it's queued: `wait()` with no time hung the render, and `scroll()` needs a selector or exactly one of `{ by }` and `{ to }`.
 - `login` without a terminal (an agent's shell, stdin from /dev/null) waits for the window to close instead of saving at once, and never writes an empty session, least of all over one that works.

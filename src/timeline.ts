@@ -13,10 +13,10 @@ export interface CallContext {
 export type Target = string | { x: number; y: number };
 
 export type Action =
-  | { kind: "browser.goto"; url: string; hold?: number; /** @deprecated use hold */ settle?: number }
+  | { kind: "browser.goto"; url: string; hold?: number; /** @deprecated use hold */ settle?: number; /** The HTTP status the page is meant to have (a 404 page demo). */ status?: number }
   | { kind: "browser.mockAPI"; pattern: string; response: unknown; status?: number }
   | { kind: "cursor.moveTo"; target: Target; ease?: Ease; duration?: number; window?: string }
-  | { kind: "cursor.click"; button?: "left" | "right"; duration?: number }
+  | { kind: "cursor.click"; button?: "left" | "right"; duration?: number; /** How to answer an alert, confirm or prompt the click opens. */ dialog?: "accept" | "dismiss" }
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
@@ -77,6 +77,8 @@ export type Action =
       prompt?: boolean | string;
       /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
       cwd?: string;
+      /** The exit code the command is meant to have (a demo of a failure). Default: 0 */
+      exitCode?: number;
     }
   | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number; duration?: number; prompt?: boolean | string }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };

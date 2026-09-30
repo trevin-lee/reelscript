@@ -98,6 +98,35 @@ const CLOCK_SHIM_SOURCE = String.raw`
   // document.getAnimations() after it finishes, and must not be taken for
   // a new one and started over on the next frame.
   const finished = new WeakSet();
+  // The page's own control of an animation: what it pauses stays paused, where
+  // it seeks is where the clock goes on from, and what it finishes stays
+  // finished. The clock steps animations through the originals, so its own
+  // pausing isn't taken for the page's.
+  const AP = Animation.prototype;
+  const animPause = AP.pause;
+  const animPlay = AP.play;
+  const animReverse = AP.reverse;
+  const animFinish = AP.finish;
+  const timeOf = Object.getOwnPropertyDescriptor(AP, "currentTime");
+  const held = new WeakSet(); // paused by the page
+  AP.pause = function () { held.add(this); return animPause.call(this); };
+  AP.play = function () { held.delete(this); return animPlay.call(this); };
+  AP.reverse = function () { held.delete(this); return animReverse.call(this); };
+  AP.finish = function () { held.delete(this); tracked.delete(this); finished.add(this); return animFinish.call(this); };
+  Object.defineProperty(AP, "currentTime", {
+    configurable: true,
+    get() { return timeOf.get.call(this); },
+    set(v) { if (v !== null) tracked.set(this, Number(v)); timeOf.set.call(this, v); },
+  });
+  // A CSS animation the page's style pauses (animation-play-state: paused).
+  const styleHeld = (a) => {
+    if (typeof CSSAnimation === "undefined" || !(a instanceof CSSAnimation) || !a.effect || !a.effect.target) return false;
+    const cs = getComputedStyle(a.effect.target, a.effect.pseudoElement || null);
+    const names = cs.animationName.split(/,\s*/);
+    const states = cs.animationPlayState.split(/,\s*/);
+    const i = names.indexOf(a.animationName);
+    return (states[i < 0 ? 0 : i % states.length] || "running") === "paused";
+  };
   const epoch = __EPOCH__;
   const RealDate = Date;
 
@@ -370,8 +399,8 @@ __PIN_NOW__
     for (const a of animations()) {
       if (finished.has(a) && a.playState === "running") {
         finished.delete(a);
-        tracked.set(a, a.currentTime ?? 0);
-        a.pause();
+        tracked.set(a, timeOf.get.call(a) ?? 0);
+        animPause.call(a);
       }
     }
     // Step every running CSS transition / animation by exactly ms.
@@ -381,6 +410,12 @@ __PIN_NOW__
       const rate = a.playbackRate;
       const timing = a.effect && a.effect.getComputedTiming();
       const end = timing ? timing.endTime : Infinity;
+      // Held by the page: it stays where it is until the page plays it again.
+      if (held.has(a) || styleHeld(a)) {
+        if (a.playState === "running") animPause.call(a);
+        if (ct === undefined) tracked.set(a, timeOf.get.call(a) ?? 0);
+        continue;
+      }
       if (ct === undefined) {
         // New since last frame: restart it on this frame boundary (at its
         // end if it plays backwards).
@@ -390,13 +425,13 @@ __PIN_NOW__
         ct += ms * rate;
       }
       // play() or reverse() by the page resumes real-time playback; keep it paused.
-      if (a.playState === "running") a.pause();
+      if (a.playState === "running") animPause.call(a);
       if ((rate >= 0 && ct >= end) || (rate < 0 && ct <= 0)) {
         tracked.delete(a);
         finished.add(a);
-        a.finish(); // to the end, or the start when reversed
+        animFinish.call(a); // to the end, or the start when reversed
       } else {
-        a.currentTime = ct;
+        timeOf.set.call(a, ct);
         tracked.set(a, ct);
       }
     }

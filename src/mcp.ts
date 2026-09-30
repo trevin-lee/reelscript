@@ -37,10 +37,18 @@ function cli(): string[] {
   return [process.execPath, "--import", "tsx", fileURLToPath(new URL("./cli.ts", import.meta.url))];
 }
 
-function runCli(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; output: string }> {
+/** Run the CLI; a cancelled tool call stops it, as Ctrl-C would (VS Code, ffmpeg and partial files cleaned up). */
+function runCli(args: string[], signal?: AbortSignal): Promise<{ code: number | null; output: string }> {
   const [cmd, ...pre] = cli();
   return new Promise((resolvePromise) => {
-    const child = spawn(cmd, [...pre, ...args], { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, [...pre, ...args], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const cancel = () => {
+      child.kill("SIGINT");
+      setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
+    };
+    if (signal?.aborted) cancel();
+    signal?.addEventListener("abort", cancel, { once: true });
+    child.on("close", () => signal?.removeEventListener("abort", cancel));
     let output = "";
     child.stdout!.on("data", (d) => (output += d.toString()));
     child.stderr!.on("data", (d) => (output += d.toString()));
@@ -152,6 +160,8 @@ export async function serve(): Promise<void> {
       const { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch } = await import("./time.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
       const browser = await launchChromium();
+      const { LocalPages } = await import("./localPages.js");
+      const local = new LocalPages();
       try {
         // The page as a demo's browser shows it: Chrome on a Mac, on the demo's date and timezone.
         const zone = timezone ?? DEFAULT_TIMEZONE;
@@ -169,8 +179,9 @@ export async function serve(): Promise<void> {
         await context.addInitScript(mac.script);
         await context.addInitScript(dateShim(epoch));
         const page = await context.newPage();
-        // A path is a local page, relative to the working directory like every path given to a tool.
-        await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : pathToFileURL(resolve(url)).href, { waitUntil: "load" });
+        // A path is a local page, relative to the working directory like every path given to a tool,
+        // served over http as a demo serves it.
+        await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : await local.url(pathToFileURL(resolve(url)).href), { waitUntil: "load" });
         const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
         const lines = elements.map((e) => `${e.tag.padEnd(9)} ${e.selector.padEnd(36)} ${JSON.stringify(e.label).padEnd(30)} at ${e.box}`);
         const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
@@ -183,6 +194,7 @@ export async function serve(): Promise<void> {
         return { content };
       } finally {
         await browser.close();
+        local.close();
       }
     },
   );
@@ -203,8 +215,8 @@ export async function serve(): Promise<void> {
       // Not read-only: it clicks through the real app and runs the script's demo.call() code.
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ script, strict = true }) => {
-      const { code, output } = await runCli(["check", resolve(script), ...(strict ? ["--strict"] : [])]);
+    async ({ script, strict = true }, { signal }) => {
+      const { code, output } = await runCli(["check", resolve(script), ...(strict ? ["--strict"] : [])], signal);
       return { content: [text(output || (code === 0 ? "check passed" : "check failed"))], isError: code !== 0 };
     },
   );
@@ -222,11 +234,11 @@ export async function serve(): Promise<void> {
       // Not read-only: the timeline up to that moment runs against the real app.
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ script, at, width = 1280 }) => {
+    async ({ script, at, width = 1280 }, { signal }) => {
       const dir = mkdtempSync(join(tmpdir(), "reelscript-preview-"));
       const out = join(dir, "frame.png");
       try {
-        const { code, output } = await runCli(["preview", resolve(script), "--at", String(at), "--out", out]);
+        const { code, output } = await runCli(["preview", resolve(script), "--at", String(at), "--out", out], signal);
         if (code !== 0 || !existsSync(out)) return { content: [text(output || "preview failed")], isError: true };
         const png = await sharp(out).resize({ width, withoutEnlargement: true }).png().toBuffer();
         return { content: [text(output), { type: "image", data: png.toString("base64"), mimeType: "image/png" }] };
@@ -247,10 +259,10 @@ export async function serve(): Promise<void> {
         strict: z.boolean().optional().describe("Fail on warnings, keeping the previous video, as `reelscript render --strict` does. Default false"),
       },
     },
-    async ({ script, out, strict = false }) => {
+    async ({ script, out, strict = false }, { signal }) => {
       const args = ["render", resolve(script), ...(strict ? ["--strict"] : [])];
       if (out) args.push("--out", resolve(out));
-      const { code, output } = await runCli(args);
+      const { code, output } = await runCli(args, signal);
       return { content: [text(output || (code === 0 ? "rendered" : "render failed"))], isError: code !== 0 };
     },
   );
@@ -270,10 +282,10 @@ export async function serve(): Promise<void> {
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async ({ scripts, prune = false }) => {
+    async ({ scripts, prune = false }, { signal }) => {
       const args = ["record", ...scripts.map((s) => resolve(s))];
       if (prune) args.push("--prune");
-      const { code, output } = await runCli(args);
+      const { code, output } = await runCli(args, signal);
       return { content: [text(output || (code === 0 ? "recorded" : "record failed"))], isError: code !== 0 };
     },
   );

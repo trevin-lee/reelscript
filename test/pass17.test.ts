@@ -36,7 +36,7 @@ test("an element inside something faded all the way out isn't a target, and insp
   demo(dir, `const demo = createDemo({ viewport: [400, 200] });\nawait demo.browser.goto("./p.html");\nawait demo.cursor.moveTo("#name");\nawait demo.render("out.mp4");`);
   const closed = await run(["check", "s.ts"], dir);
   assert.equal(closed.code, 1);
-  assert.match(closed.output, /target "#name" was not found or never became visible[\s\S]*s\.ts:4/);
+  assert.match(closed.output, /target "#name" is on the page but not visible[\s\S]*s\.ts:4/);
   demo(dir, `const demo = createDemo({ viewport: [400, 200] });\nawait demo.browser.goto("./p.html");\nawait demo.cursor.moveTo("#open");\nawait demo.cursor.click();\nawait demo.waitFor("#name", { timeout: 3000 });\nawait demo.type("#name", "Q3");\nawait demo.render("out.mp4");`);
   const opened = await run(["check", "s.ts"], dir);
   assert.equal(opened.code, 0, opened.output);
