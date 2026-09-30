@@ -844,6 +844,7 @@ class Engine {
             entered = true;
             await this.expectQuickInputMatch(w, text, isFile);
             await w.page.keyboard.press("Enter");
+            await this.quickInputDone(w, text, isFile);
           }
         };
         this.typing = { win: w, until: enterAt };
@@ -985,6 +986,37 @@ class Engine {
     const what = isFile ? `Quick Open found no file matching "${text}"` : `the Command Palette has no command matching "${text}"`;
     const offered = label && !/^No matching/i.test(label) ? ` (VS Code offered "${label.replace(/, similar commands$/i, "")}" instead)` : "";
     throw new Error(`reelscript: ${what}${offered}`);
+  }
+
+  /**
+   * After Enter, wait (on VS Code's real clock) until it has done what was
+   * asked, so the next step never races it: for a file, its tab is active
+   * and the caret is in it; for a command, the palette has closed or moved on
+   * to the command's own prompt (as "Go to Line" does).
+   */
+  private async quickInputDone(w: Win, text: string, isFile: boolean): Promise<void> {
+    const name = text.split("/").pop() ?? text;
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const done = await w.page.evaluate(
+        ([isFile, name, typed]) => {
+          const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
+          const open = !!widget && getComputedStyle(widget).display !== "none";
+          const input = document.querySelector(".quick-input-box input") as HTMLInputElement | null;
+          if (!isFile) return !open || (input !== null && input.value !== typed);
+          if (open) return false;
+          const tab = document.querySelector(".tabs-container .tab.active");
+          const inEditor = !!document.activeElement?.closest(".monaco-editor");
+          return (tab?.getAttribute("aria-label") ?? "").includes(name) && inEditor;
+        },
+        [isFile, name, isFile ? text : `>${text}`] as [boolean, string, string],
+      );
+      if (done) return;
+      if (Date.now() > deadline) {
+        throw new Error(isFile ? `reelscript: VS Code didn't finish opening "${text}"` : `reelscript: VS Code didn't run "${text}"`);
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
   }
 
   /** Time (ms) after which nothing is still animating or speaking. */

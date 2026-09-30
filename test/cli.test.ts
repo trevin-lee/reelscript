@@ -135,7 +135,7 @@ await demo.editor.type("ZZZ");
 await demo.call(async ({ page }) => {
   // VS Code paints on real time, so give the last keystroke a moment to show.
   await page!
-    .waitForFunction(() => (document.querySelector(".monaco-editor .view-lines")?.textContent ?? "").includes("ZZZ"), undefined, { timeout: 2000 })
+    .waitForFunction(() => (document.querySelector(".monaco-editor .view-lines")?.textContent ?? "").includes("ZZZ"), undefined, { timeout: 5000 })
     .catch(() => { throw new Error("editor.type didn't reach the editor"); });
 });
 await demo.editor.close();
