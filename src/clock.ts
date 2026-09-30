@@ -82,6 +82,87 @@ const CLOCK_SHIM_SOURCE = String.raw`
 
   const call = (fn, args) => { try { typeof fn === "function" ? fn(...args) : new Function(String(fn))(); } catch (e) { console.error(e); } };
 
+  // Text caret. Chromium blinks its own caret on real time, so two renders
+  // would differ wherever a text field has focus. Its caret is hidden, and
+  // this draws one at the same place instead: solid for half a second after
+  // each edit, then blinking every half second, on the frame clock.
+  let caret = null;
+  let caretCss = null;
+  let lastEdit = 0;
+  const edited = () => { lastEdit = now; };
+  document.addEventListener("input", edited, true);
+  document.addEventListener("selectionchange", edited, true);
+  document.addEventListener("focusin", edited, true);
+  const TEXT_TYPES = ["text", "search", "email", "url", "tel", "password", "number", ""];
+  const fieldCaret = (el) => {
+    const cs = getComputedStyle(el);
+    const isInput = el.tagName === "INPUT";
+    const mirror = document.createElement("div");
+    for (const p of ["direction", "boxSizing", "width", "height", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "borderStyle",
+      "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize", "lineHeight",
+      "fontFamily", "textAlign", "textTransform", "textIndent", "letterSpacing", "wordSpacing", "tabSize"]) mirror.style[p] = cs[p];
+    Object.assign(mirror.style, { position: "absolute", visibility: "hidden", top: "0", left: "-99999px", overflow: "hidden",
+      whiteSpace: isInput ? "pre" : "pre-wrap", overflowWrap: isInput ? "normal" : "break-word" });
+    const value = el.type === "password" ? "•".repeat(el.value.length) : el.value;
+    const at = el.selectionEnd ?? value.length;
+    mirror.textContent = value.slice(0, at);
+    const mark = document.createElement("span");
+    mark.textContent = value.slice(at) || ".";
+    mirror.appendChild(mark);
+    document.documentElement.appendChild(mirror);
+    const left = mark.offsetLeft, top = mark.offsetTop;
+    mirror.remove();
+    const r = el.getBoundingClientRect();
+    const bt = parseFloat(cs.borderTopWidth) || 0, bl = parseFloat(cs.borderLeftWidth) || 0;
+    const fs = parseFloat(cs.fontSize) || 16;
+    const lh = parseFloat(cs.lineHeight) || fs * 1.2;
+    let h = Math.min(lh, fs * 1.25);
+    let y = r.top + bt + top - el.scrollTop + (lh - h) / 2;
+    if (isInput) {
+      const inner = r.height - bt - (parseFloat(cs.borderBottomWidth) || 0) - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      h = Math.min(fs * 1.25, inner > 0 ? inner : h);
+      y = r.top + bt + (parseFloat(cs.paddingTop) || 0) + (inner - h) / 2;
+    }
+    return { x: r.left + bl + left - el.scrollLeft, y, h, color: cs.color };
+  };
+  const drawCaret = () => {
+    if (!document.documentElement) return;
+    if (!caretCss) {
+      caretCss = document.createElement("style");
+      caretCss.textContent = "*, *::before, *::after { caret-color: transparent !important; }";
+      document.documentElement.appendChild(caretCss);
+    }
+    let spot = null;
+    const el = document.activeElement;
+    const visible = (e) => {
+      const r = e.getBoundingClientRect();
+      return r.width > 2 && r.height > 2 && getComputedStyle(e).opacity !== "0";
+    };
+    if (el && document.hasFocus() && visible(el)) {
+      if ((el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT_TYPES.includes(el.type))) && el.selectionStart === el.selectionEnd && !el.readOnly) {
+        try { spot = fieldCaret(el); } catch (e) { spot = null; }
+      } else if (el.isContentEditable) {
+        const sel = getSelection();
+        if (sel && sel.rangeCount && sel.isCollapsed) {
+          const rr = sel.getRangeAt(0).getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          const fs = parseFloat(cs.fontSize) || 16;
+          if (rr.height > 0) spot = { x: rr.left, y: rr.top, h: rr.height, color: cs.color };
+          else { const er = el.getBoundingClientRect(); spot = { x: er.left + (parseFloat(cs.paddingLeft) || 0), y: er.top + (parseFloat(cs.paddingTop) || 0), h: fs * 1.2, color: cs.color }; }
+        }
+      }
+    }
+    const on = spot && (now - lastEdit) % 1000 < 500;
+    if (!on) { if (caret) caret.style.display = "none"; return; }
+    if (!caret || !caret.isConnected) {
+      caret = document.createElement("div");
+      caret.setAttribute("aria-hidden", "true");
+      Object.assign(caret.style, { position: "fixed", width: "1px", pointerEvents: "none", zIndex: "2147483647", margin: "0", padding: "0" });
+      document.documentElement.appendChild(caret);
+    }
+    Object.assign(caret.style, { display: "block", left: Math.round(spot.x) + "px", top: Math.round(spot.y) + "px", height: Math.round(spot.h) + "px", background: spot.color });
+  };
+
   g.__reelscript_advance = (ms) => {
     const target = now + ms;
     // Fire timers in chronological order, including ones scheduled while firing.
@@ -99,29 +180,42 @@ const CLOCK_SHIM_SOURCE = String.raw`
     const cbs = Array.from(rafs.values());
     rafs.clear();
     for (const cb of cbs) call(cb, [now]);
+    // An animation the page replays after it finished (play() again) is
+    // running once more: take it back onto the frame clock.
+    for (const a of document.getAnimations()) {
+      if (finished.has(a) && a.playState === "running") {
+        finished.delete(a);
+        tracked.set(a, a.currentTime ?? 0);
+        a.pause();
+      }
+    }
     // Step every running CSS transition / animation by exactly ms.
     for (const a of document.getAnimations()) {
       if (finished.has(a)) continue;
       let ct = tracked.get(a);
-      if (ct === undefined) {
-        // New since last frame: restart it on this frame boundary.
-        a.pause();
-        ct = 0;
-      } else {
-        ct += ms;
-      }
+      const rate = a.playbackRate;
       const timing = a.effect && a.effect.getComputedTiming();
       const end = timing ? timing.endTime : Infinity;
-      if (ct >= end) {
+      if (ct === undefined) {
+        // New since last frame: restart it on this frame boundary (at its
+        // end if it plays backwards).
+        ct = rate < 0 && end !== Infinity ? end : 0;
+      } else {
+        // At its own playback rate: reverse() and playbackRate = 0.5 count.
+        ct += ms * rate;
+      }
+      // play() or reverse() by the page resumes real-time playback; keep it paused.
+      if (a.playState === "running") a.pause();
+      if ((rate >= 0 && ct >= end) || (rate < 0 && ct <= 0)) {
         tracked.delete(a);
         finished.add(a);
-        a.playbackRate = 1;
-        a.finish();
+        a.finish(); // to the end, or the start when reversed
       } else {
         a.currentTime = ct;
         tracked.set(a, ct);
       }
     }
+    drawCaret();
   };
 })();
 `;

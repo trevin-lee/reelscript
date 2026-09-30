@@ -272,8 +272,11 @@ export class EditorServer {
     const common = ["--config", join(this.root, "config.yaml"), "--user-data-dir", userData, "--extensions-dir", extensionsDir];
     const baseDir = config.baseDir ?? process.cwd();
     for (const ext of config.extensions ?? []) {
+      // Anything that exists beside the script is a path ("acme-ext" as well as
+      // "./acme-ext"); otherwise it's an Open VSX id, unless it looks like a path.
+      const candidate = resolve(baseDir, ext);
       const looksLikePath = ext.endsWith(".vsix") || ext.includes("/") || ext.startsWith(".");
-      const path = looksLikePath ? resolve(baseDir, ext) : null;
+      const path = existsSync(candidate) || looksLikePath ? candidate : null;
       if (path && !existsSync(path)) throw new Error(`reelscript: extension not found: ${path}`);
       if (path && statSync(path).isDirectory()) {
         onStatus?.(`loading extension folder ${ext}`);

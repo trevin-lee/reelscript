@@ -11,7 +11,7 @@ const demo = createDemo({
   pronunciations: { Reelscript: "Reel script" },
 });
 
-await demo.browser.goto(new URL("./app.html", import.meta.url).href);
+await demo.browser.goto("./app.html");
 demo.say("Reelscript can put a browser and a terminal on the same desktop.");
 await demo.wait(600);
 

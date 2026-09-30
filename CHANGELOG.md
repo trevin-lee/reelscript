@@ -57,6 +57,9 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - The README is honest about VS Code's real-time clock, and the extension example waits for its result instead of a fixed time.
 - `browser.goto("./app.html")` opens a local page relative to the script, like every other path in a script.
 - `editor.openFile()` ends once the file is open with the caret in it, and `editor.command()` once VS Code has run it (or moved on to its own prompt), so the next step never races VS Code; this made editor checks flaky on slow machines.
+- The text caret in web pages blinks on the frame clock: Chromium's own blinks on real time, so two renders differed wherever a field had focus.
+- The page clock follows Web Animations the page reverses, slows, speeds up, or replays.
+- A misspelt `ease`, `window`, `within`, `button` or `camera` fails where the script sets it; typing or pressing keys in the terminal window fails with a pointer to `terminal.run()`; an extension folder named without `./` is a path; a missing `cwd` fails clearly in `record`.
 - The desktop's wallpaper and menu bar are drawn before any page loads, and a screenshot Chromium refuses under load is retried, fixing intermittent `preview` failures on heavy sites.
 - `cache clear narration` removes only the Kokoro model, not other files in a `REELSCRIPT_MODELS` folder.
 - Option names drop their units: `camera: { hold }` and `maxGap`. `holdMs` and `maxGapMs` still work until 1.0.

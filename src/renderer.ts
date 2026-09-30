@@ -657,6 +657,9 @@ class Engine {
       }
       case "type": {
         const w = action.window ? this.window(action.window) : this.focused();
+        if (w.kind === "terminal") {
+          throw new Error(`reelscript: typing into the terminal window isn't shown; use demo.terminal.run() or terminal.print()`);
+        }
         if (action.window) this.focus(w);
         if (action.target) {
           const field = await this.visible(w, action.target);
@@ -682,6 +685,9 @@ class Engine {
       }
       case "press": {
         const w = action.window ? this.window(action.window) : this.focused();
+        if (w.kind === "terminal") {
+          throw new Error(`reelscript: keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`);
+        }
         if (action.window) this.focus(w);
         await w.page.keyboard.press(action.key);
         return { end: start + 100 };

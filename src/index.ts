@@ -16,7 +16,7 @@ import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,6 +44,22 @@ async function unlessInterrupted<T>(work: Promise<T>): Promise<T> {
     if (interrupted()) await new Promise(() => {}); // the clean-up exits the process
     throw err;
   }
+}
+
+const EASES = ["smooth", "snappy", "overshoot", "linear"];
+const WINDOWS = ["browser", "terminal", "editor"];
+
+/** What's wrong with an option that takes one of a fixed set of values, if anything. */
+function invalidChoice(action: Action): string | null {
+  const a = action as Record<string, unknown>;
+  const one = (name: string, value: unknown, allowed: string[]) =>
+    value !== undefined && !allowed.includes(value as string) ? `unknown ${name} ${JSON.stringify(value)} (use ${allowed.map((x) => `"${x}"`).join(", ")})` : null;
+  return (
+    one("ease", a.ease, EASES) ??
+    one("window", a.window, WINDOWS) ??
+    (action.kind === "zoom.to" ? one("within", a.within, ["window"]) : null) ??
+    (action.kind === "cursor.click" ? one("button", a.button, ["left", "right"]) : null)
+  );
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
@@ -450,12 +466,21 @@ export class Demo {
   /** Where in the user's script each action was created, for error messages. */
   private sources: string[] = [];
 
-  constructor(readonly options: DemoOptions = {}) {}
+  constructor(readonly options: DemoOptions = {}) {
+    const camera = options.camera;
+    if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
+      throw new Error(`reelscript: unknown camera ${JSON.stringify(camera)} (use "manual", "follow", or { scale, hold })`);
+    }
+  }
 
   /** @internal */
   _push(action: Action): void {
+    const source = callerLocation();
+    // A misspelt choice fails here, where the script queued it, not deep in a render.
+    const problem = invalidChoice(action);
+    if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
     this.actions.push(action);
-    this.sources.push(callerLocation());
+    this.sources.push(source);
   }
 
   /** Type into a field with accelerated, evenly paced keystrokes. */
@@ -540,7 +565,11 @@ export class Demo {
     for (const [i, key] of keys) {
       const a = this.actions[i] as Extract<Action, { kind: "terminal.run" }>;
       process.stderr.write(`reelscript: recording "${a.command}"\n`);
-      const rec = await recordCommand(a.command, { cwd: fromScript(a.cwd ?? ".") });
+      const cwd = fromScript(a.cwd ?? ".");
+      if (!existsSync(cwd)) {
+        throw new Error(`reelscript: the folder "${a.cwd}" for "${a.command}" doesn't exist (${cwd})\n  at ${this.sources[i]} (terminal.run)`);
+      }
+      const rec = await recordCommand(a.command, { cwd });
       if (rec.timedOut) {
         process.stderr.write(
           `reelscript: warning: "${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then\n`,

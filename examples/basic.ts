@@ -10,7 +10,8 @@ const demo = createDemo({
 });
 
 // The sample app ships with the repo, so the demo is fully self-contained.
-await demo.browser.goto(new URL("./app.html", import.meta.url).href);
+// Local pages are paths relative to this script.
+await demo.browser.goto("./app.html");
 
 demo.say("Reelscript turns product demos into code.");
 await demo.wait(600);

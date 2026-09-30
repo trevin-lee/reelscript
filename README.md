@@ -29,7 +29,7 @@ await demo.render("out/demo.mp4");
 ## How it works
 
 - **Code-first, not a UI timeline.** The demo is a script you version, diff, and review.
-- **Deterministic offline rendering.** Frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Every frame is there, and it runs headless in CI.
+- **Deterministic offline rendering.** Frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Every frame is there, the same frames every time, and it runs headless in CI. (Chromium's text rasterizing can vary pixel values invisibly between runs, around 50 dB PSNR, so compare renders by eye or by PSNR, not byte for byte.)
 - **The page's clock is virtual and pinned.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and its iframes and steps CSS transitions through the Web Animations API, one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is, and the page's date is the same on every render.
 - **A camera that follows the action.** `camera: "follow"` eases in toward each click and the typing caret, holds, and eases back out when things go quiet. Or place zooms by hand with `zoom.to()`.
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing, done as math over frames rather than captured motion.
@@ -122,7 +122,7 @@ await demo.editor.command("Format Document");
 
 `openFile()` and `command()` type into Quick Open and the Command Palette the way a person would. If VS Code can't find the file or command, the render and `check` fail at that line instead of pressing Enter on whatever VS Code offered, so a renamed command breaks the build rather than the demo.
 
-The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded on first use, about 200 MB, and built into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, so your files are never edited, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time, not reelscript's frame-stepped clock. Its own animations are off by default, but anything VS Code or an extension does on a timer (a build, a deploy, a toast) happens in real time, so how far along it is at a given second can differ between `preview`, `check` and `render`, and between machines. Follow it with `waitFor()` on what it shows rather than a fixed `wait()`, as [examples/extension.ts](examples/extension.ts) does. See [examples/editor.ts](examples/editor.ts).
+The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded on first use, about 200 MB, and built into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, so your files are never edited, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time, not reelscript's frame-stepped clock, and shows the real date rather than the demo's `clock`. Its own animations are off by default, but anything VS Code or an extension does on a timer (a build, a deploy, a toast) happens in real time, so how far along it is at a given second can differ between `preview`, `check` and `render`, and between machines. Follow it with `waitFor()` on what it shows rather than a fixed `wait()`, as [examples/extension.ts](examples/extension.ts) does. See [examples/editor.ts](examples/editor.ts).
 
 ### Demo the extension you're building
 
@@ -182,7 +182,7 @@ reelscript: target "#new-project" was not found or never became visible in the b
 
 Run it on every pull request next to your tests, and render on `main`.
 
-The container is the canonical render environment, for amd64 and arm64. Chromium, ffmpeg, fonts, VS Code, and the narration model are built in, so a script renders the same pixels on every machine (in browser and terminal windows; see Editor demos for VS Code's real-time clock):
+The container is the canonical render environment, for amd64 and arm64. Chromium, ffmpeg, fonts, VS Code, and the narration model are built in, so a script renders the same demo on every machine (in browser and terminal windows; see Editor demos for VS Code's real-time clock):
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -v reelscript-cache:/cache \
@@ -277,7 +277,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a target. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
 | `demo.cursor.click({ button, duration })` | Click at the cursor, with a ripple. Focuses and raises the window under the cursor. `duration: 0` takes no video time, so a following `waitFor` cuts straight to the page the click led to. |
 | `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. Like `moveTo`, the field must be on screen. |
-| `demo.press(key, { window })` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`, in the focused window or the one named by `window`. |
+| `demo.press(key, { window })` | Press a key or chord, e.g. `"Enter"`, `"Control+K"`, in the focused window or the one named by `window`. Not in the terminal window, whose input is `terminal.run()`. |
 | `demo.wait(ms)` | Hold, on camera. |
 | `demo.scroll(selector \| { by, to }, { duration, ease, window })` | Scroll, on camera, stepped with the frame clock: to center an element (scrolling its nearest scrollable container), or by / to a position on the page. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold, off camera, until the selector is visible, then run the page's clock `settle` ms more. The page keeps running, so its loading isn't filmed. |
