@@ -560,6 +560,8 @@ class Engine {
 
   /** Where in the script the current action came from, for warnings. */
   private at = "";
+  /** mockAPI routes, to warn about any a whole run never used. */
+  mocks: { pattern: string; at: string; hits: number }[] = [];
   /** Script lines, by action, from renderTimeline's options. */
   sources: string[] = [];
   /** Targets already warned about as ambiguous, by script line. */
@@ -681,10 +683,17 @@ class Engine {
       }
       case "browser.mockAPI": {
         // On the context, so it applies to every window and opens none.
+        // A path ("/api/projects") matches it on any origin, with any query;
+        // anything else is Playwright's URL glob ("**/api/projects*") or a whole URL.
         const { pattern, response, status = 200 } = action;
-        await this.context.route(pattern, (route) =>
-          route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response) }),
-        );
+        const mock = { pattern, at: this.at, hits: 0 };
+        this.mocks.push(mock);
+        const byPath = /^\/(?!\/)/.test(pattern) && !/[*?{]/.test(pattern);
+        const matcher = byPath ? (url: URL) => url.pathname === pattern : /^\/(?!\/)/.test(pattern) ? `**${pattern}` : pattern;
+        await this.context.route(matcher, (route) => {
+          mock.hits++;
+          return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(response) });
+        });
         return null;
       }
       case "browser.open": {
@@ -956,11 +965,12 @@ class Engine {
             await new Promise((r) => setTimeout(r, 25));
           }
         }
-        if (action.cols && action.rows) {
+        if (action.cols || action.rows) {
+          // One without the other keeps the fitted size in the other direction.
           dims = await w.page.evaluate(
             ([cols, rows]) =>
               (window as unknown as { __rsTerm: { resize: (c: number, r: number) => { cols: number; rows: number } } }).__rsTerm.resize(cols, rows),
-            [action.cols, action.rows] as const,
+            [action.cols ?? dims!.cols, action.rows ?? dims!.rows] as const,
           );
         }
         w.termPrompt = action.prompt ?? DEFAULTS.terminalPrompt;
@@ -1504,6 +1514,14 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       const a = actions[i] as Extract<Action, { kind: "say" }>;
       const text = applyPronunciations(a.text, options.pronunciations);
       const cached = cachedClip(tts, text, { voice: a.voice ?? options.voice, speed: a.speed });
+      if (!cached) {
+        // Render would synthesize this line: the engine must be able to run.
+        try {
+          await tts.ready?.();
+        } catch (err) {
+          throw where(i, err);
+        }
+      }
       const words = text.split(/\s+/).filter(Boolean).length;
       clips.set(i, cached ?? { file: "", seconds: Math.max(0.6, words / 2.6) });
     }
@@ -1658,6 +1676,14 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       }
       options.onProgress?.({ frame: frames, timeMs: t });
       t += frameMs;
+    }
+    // A mock nothing asked for is usually a pattern that doesn't match what the page requests.
+    for (const m of snapshot === undefined ? engine.mocks : []) {
+      if (m.hits) continue;
+      process.stderr.write(
+        `reelscript: warning: mockAPI("${m.pattern}") never matched a request. ` +
+          `A pattern is a path ("/api/projects"), a URL glob ("**/api/projects*"), or a whole URL\n  at ${m.at}\n`,
+      );
     }
     await encoder?.finish();
     if (encoder) {

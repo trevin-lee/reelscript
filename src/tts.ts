@@ -31,6 +31,8 @@ export interface TtsEngine {
   readonly voices?: readonly string[];
   /** Release the model once narration is synthesized. */
   dispose?(): Promise<void>;
+  /** Fail as synthesize() would if the engine can't run here (a missing dependency), without loading a model. `check` calls it. */
+  ready?(): Promise<void>;
 }
 
 /** Kokoro-82M v1.0's voices. */
@@ -98,29 +100,35 @@ async function redirectModelCache(): Promise<void> {
   mod.env.cacheDir = (process.env.REELSCRIPT_MODELS ?? join(cacheDir(), "models")) + "/";
 }
 
+const KOKORO_JS = "kokoro-js";
+const kokoroMissing = () =>
+  new Error("reelscript: narration needs the optional dependency kokoro-js.\n  npm install kokoro-js\nor pass your own engine via createDemo({ tts })");
+
 /** Kokoro-82M via kokoro-js, loaded lazily on first use. */
 export function kokoro(model = KOKORO_MODEL): TtsEngine {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let loading: Promise<any> | null = null;
   const load = () =>
     (loading ??= (async () => {
-      const spec = "kokoro-js";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let mod: any;
       try {
-        mod = await import(spec);
+        mod = await import(KOKORO_JS);
       } catch {
-        throw new Error(
-          "reelscript: narration needs the optional dependency kokoro-js.\n" +
-            "  npm install kokoro-js\n" +
-            "or pass your own engine via createDemo({ tts })",
-        );
+        throw kokoroMissing();
       }
       await redirectModelCache();
       return mod.KokoroTTS.from_pretrained(model, { dtype: "q8", device: "cpu" });
     })());
 
   return {
+    ready: async () => {
+      try {
+        import.meta.resolve(KOKORO_JS);
+      } catch {
+        throw kokoroMissing();
+      }
+    },
     id: `kokoro:${model}:q8`,
     voices: model === KOKORO_MODEL ? KOKORO_VOICES : undefined,
     async dispose() {

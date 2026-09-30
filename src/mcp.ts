@@ -79,13 +79,23 @@ export const INSPECT_ELEMENTS = `(() => {
     const st = getComputedStyle(el);
     if (r.width < 1 || r.height < 1 || st.visibility === "hidden" || st.display === "none" || Number(st.opacity) === 0) continue;
     const tag = el.tagName.toLowerCase();
-    const label = (el.value || el.innerText || el.getAttribute("placeholder") || el.getAttribute("aria-label") || "").replace(/\\s+/g, " ").trim().slice(0, 60);
+    // A text field is described by its placeholder or label, never by what's typed in it (a password, say);
+    // and has-text() can't find it, since its text isn't its value.
+    const field = tag === "textarea" || (tag === "input" && !/^(button|submit|reset)$/i.test(el.type));
+    const wrapping = field ? el.closest("label") : null;
+    const wrappingText = wrapping ? wrapping.innerText.replace(/\\s+/g, " ").trim() : "";
+    const text = field
+      ? el.getAttribute("placeholder") || el.getAttribute("aria-label") || (el.labels && el.labels[0] ? el.labels[0].innerText : "") || ""
+      : el.value || el.innerText || el.getAttribute("aria-label") || "";
+    const label = text.replace(/\\s+/g, " ").trim().slice(0, 60);
     let selector = "";
     if (el.id) selector = "#" + CSS.escape(el.id);
     else if (el.dataset.testid) selector = '[data-testid="' + esc(el.dataset.testid) + '"]';
     else if (el.getAttribute("aria-label")) selector = tag + '[aria-label="' + esc(el.getAttribute("aria-label")) + '"]';
     else if (el.getAttribute("name")) selector = tag + '[name="' + esc(el.getAttribute("name")) + '"]';
-    else if (label) selector = tag + ':has-text("' + esc(label) + '")';
+    else if (field && el.getAttribute("placeholder")) selector = tag + '[placeholder="' + esc(el.getAttribute("placeholder")) + '"]';
+    else if (field && wrappingText) selector = 'label:has-text("' + esc(wrappingText.slice(0, 60)) + '") >> ' + tag;
+    else if (!field && label) selector = tag + ':has-text("' + esc(label) + '")';
     else continue;
     out.push({ tag, selector, label, box: Math.round(r.x) + "," + Math.round(r.y) + " " + Math.round(r.width) + "x" + Math.round(r.height) });
     if (out.length >= 80) break;

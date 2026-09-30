@@ -76,15 +76,29 @@ function parse(argv: string[]) {
   const [command, ...rest] = argv;
   const flags: Record<string, string> = {};
   const positional: string[] = [];
+  let problem: string | null = null;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2);
-      // On/off flags never take the next argument as their value.
-      flags[k] = v ?? (BOOLEAN_FLAGS.has(k) ? "" : rest[++i] ?? "");
+      if (BOOLEAN_FLAGS.has(k)) {
+        // On/off flags never take the next argument as their value, nor one of their own.
+        if (v !== undefined) problem ??= `--${k} takes no value`;
+        flags[k] = "";
+      } else {
+        const value = v ?? (rest[i + 1]?.startsWith("--") ? undefined : rest[++i]);
+        if (!value) problem ??= `--${k} needs a value`;
+        flags[k] = value ?? "";
+      }
     } else positional.push(a);
   }
-  return { command, flags, positional };
+  return { command, flags, positional, problem };
+}
+
+/** Name what's missing, then show the usage. */
+function missing(message: string): never {
+  console.error(`reelscript: ${message}\n`);
+  usage();
 }
 
 /** Run a script and fail if it never called demo.render(), which would otherwise pass silently. */
@@ -107,7 +121,10 @@ async function importScript(path: string): Promise<void> {
     // A .ts/.js script in a project without "type": "module" is compiled as
     // CommonJS, which forbids top-level await. Re-run it as an ES module via
     // a temporary .mts copy beside the original so relative paths still work.
-    if (!(err instanceof Error) || !/Top-level await|Cannot use import statement outside a module/.test(err.message)) throw err;
+    // Also when CommonJS can't load reelscript itself, an ES module: a script without top-level await
+    // gets that far ("No exports main" when installed, "Cannot find module" when run without a local install).
+    const asCommonJs = /Top-level await|Cannot use import statement outside a module|No "exports" main defined in \S*@reelscript[\\/]cli|Cannot find module '@reelscript\/cli'|ERR_REQUIRE_ESM/;
+    if (!(err instanceof Error) || !asCommonJs.test(err.message)) throw err;
     const { copyFileSync, unlinkSync } = await import("node:fs");
     const { dirname, basename, join } = await import("node:path");
     const tmp = join(dirname(script), `.${basename(script).replace(/\.[cm]?[jt]sx?$/, "")}.reelscript.mts`);
@@ -116,6 +133,10 @@ async function importScript(path: string): Promise<void> {
     const unregister = onInterrupt(() => unlinkSync(tmp));
     try {
       await tsImport(pathToFileURL(tmp).href, import.meta.url);
+    } catch (err) {
+      // Name the script, not its temporary copy.
+      if (err instanceof Error) err.message = err.message.split(tmp).join(script);
+      throw err;
     } finally {
       unregister();
       unlinkSync(tmp);
@@ -140,7 +161,7 @@ function fail(message: string): never {
 }
 
 async function main(): Promise<void> {
-  const { command, flags, positional } = parse(process.argv.slice(2));
+  const { command, flags, positional, problem } = parse(process.argv.slice(2));
   if ("help" in flags) usage(0);
   const allowed = OPTIONS[command];
   if (allowed) {
@@ -150,6 +171,7 @@ async function main(): Promise<void> {
       }
     }
   }
+  if (problem) fail(problem);
   const { installInterruptHandlers } = await import("./cleanup.js");
   installInterruptHandlers();
   // A mistyped script path fails before anything runs, and not with Node's module error.
@@ -159,7 +181,7 @@ async function main(): Promise<void> {
   }
   switch (command) {
     case "render": {
-      if (!positional.length) usage();
+      if (!positional.length) missing(`${command} needs a script`);
       if (flags.out !== undefined && positional.length > 1) fail("--out names one video; render several scripts without it");
       if (flags.out) process.env.REELSCRIPT_OUT = resolve(flags.out);
       for (const script of positional) await runScript(script);
@@ -177,7 +199,7 @@ async function main(): Promise<void> {
       break;
     }
     case "check": {
-      if (!positional.length) usage();
+      if (!positional.length) missing(`${command} needs a script`);
       for (const script of positional) {
         process.env.REELSCRIPT_CHECK = "1";
         await runScript(script);
@@ -185,7 +207,7 @@ async function main(): Promise<void> {
       break;
     }
     case "record": {
-      if (!positional.length) usage();
+      if (!positional.length) missing(`${command} needs a script`);
       process.env.REELSCRIPT_RECORD = "1";
       for (const script of positional) await runScript(script);
       if ("prune" in flags) {
@@ -196,6 +218,7 @@ async function main(): Promise<void> {
         const used = (globalThis as { __reelscript_recorded?: Map<string, Set<string>> }).__reelscript_recorded ?? new Map();
         let removed = 0;
         for (const [dir, files] of used) {
+          if (!existsSync(dir)) continue; // a script with no terminal commands has no recordings to prune
           for (const name of readdirSync(dir)) {
             const file = join(dir, name);
             if (!name.endsWith(".json") || files.has(file) || !isRecording(file)) continue;
@@ -256,11 +279,11 @@ async function main(): Promise<void> {
       const { cacheParts, clearCache, formatBytes, partPaths, sizeOf } = await import("./cache.js");
       const { cacheDir } = await import("./tts.js");
       if (positional[0] === "clear") {
-        const part = positional[1] ?? usage();
+        const part = positional[1] ?? missing(`cache clear needs a part: ${cacheParts().map((p) => p.name).join(", ")}, or all`);
         for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`);
         break;
       }
-      if (positional.length) usage();
+      if (positional.length) missing(`unknown cache command "${positional[0]}" (use cache, or cache clear <part|all>)`);
       console.log(`reelscript cache: ${cacheDir()}`);
       for (const p of cacheParts()) {
         const where = p.note ? `  (${p.note})` : "";

@@ -19,7 +19,9 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - A missing terminal recording names the script line.
 - Options render can't use fail at their `createDemo()` line: `fps`, `viewport`, `desktop` and `gif` sizes that aren't positive numbers (they failed in ffmpeg or sharp partway through a render), and a misspelt `theme`, `timezone` or `clock`. Number options on actions fail where they're queued too: a `wpm` or `speed` of 0, or a string, hung the render, and a negative `wait` ran time backwards.
 - A missing `session` file names the `createDemo()` line.
-- `openFile()` and `command()` accept only the file or command asked for. VS Code's search offers a near match for almost anything (webapp.ts for "app.ts"), and that used to be opened while `check` passed; now it fails at the line and names what VS Code offered. `editor.file()` and `editor.tab()` match exact names too, and the folder when you give one (`"src/app.ts"`).
+- `check` fails, at the `say()` line, when the voice engine can't run (no `kokoro-js` installed) for a line `render` would have to synthesize.
+- The CLI names what's missing instead of doing something else: an option without its value (`--out` last), a value on an on/off option (`--prune=no`), a command with no script, `cache clear` with no part, an unknown `cache` command.
+- `openFile()` and `command()` accept only the file or command asked for. VS Code's search offers a near match for almost anything (webapp.ts for "app.ts"), and that used to be opened while `check` passed; now it fails at the line and names what VS Code offered. `editor.file()` and `editor.tab()` match exact names too, and the folder the file is directly in when you give one (`"src/app.ts"`, spaces included).
 - A script path that doesn't exist is named plainly, instead of with Node's module error.
 
 **Fixes and additions**
@@ -28,10 +30,14 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - `reelscript warmup browser` installs the Chromium build reelscript drives, and the README uses it: in a project with its own Playwright, `npx playwright install` fetched that version's build, and the error it led to sent you round in a loop. `warmup` with no parts includes it, and it checks the browser starts: on Linux, `--with-deps` installs Chromium's system libraries, and a launch that fails for lack of them names them and that command. A missing browser names the command wherever it's found, in a form that also works without a local install (for MCP); `login` says it can't show a browser only where that's so; `reelscript cache` lists the browser, and `cache clear browser` removes it (`clear all` leaves it, since other projects share it).
 - The browser window has no tabs: a link or `window.open()` that would open a new tab opens in the window, instead of in a tab nobody sees.
 - A target is its first visible match, so a hidden copy (a collapsed mobile menu) no longer fails the step, and several visible matches are a warning at the line.
-- MCP: `inspect_page` lists elements inside web components.
+- MCP: `inspect_page` lists elements inside web components, suggests selectors that find text fields (by placeholder or label; `has-text` never matched them), and never shows what's typed in a field, such as a password.
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- Scripts without top-level `await` run in projects without `"type": "module"` too, as the README promised, and errors from such a script name it rather than its temporary copy.
+- `record --prune` works with scripts that have no recordings folder.
+- `mockAPI("/api/projects")` matches that path on any origin and with any query, as a path suggests (a pattern was only a URL glob, which a bare path never matched); the README gives the forms, and a mock nothing requested is a warning at its line.
+- `terminal.open({ cols })` or `{ rows }` alone fixes that one and fits the other; it was ignored without both.
 - `preview --at` past the end fails with the demo's length, instead of quietly returning the last frame.
 - A failure in the page clock itself is a warning, once, instead of silently leaving that page's animations on real time.
 - `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to the browser window without opening it.

@@ -404,7 +404,8 @@ class Zoom {
     this.demo._push({ kind: "zoom.to", target, ...opts });
   }
 
-  out(opts: Omit<ZoomOptions, "scale"> = {}): void {
+  /** Animate back to the whole desktop. Runs alongside following actions. */
+  out(opts: Pick<ZoomOptions, "duration" | "ease"> = {}): void {
     this.demo._push({ kind: "zoom.out", ...opts });
   }
 }
@@ -449,7 +450,12 @@ class Browser extends Win {
     this.demo._push({ kind: "browser.goto", url, ...opts });
   }
 
-  /** Intercept matching requests and return canned JSON — demos never hit a live backend. */
+  /**
+   * Intercept matching requests and return canned JSON — demos never hit a
+   * live backend. `pattern` is a path ("/api/projects": that path on any
+   * origin, with any query), a URL glob ("**\/api/projects*"), or a whole URL.
+   * One that no request matched by the end is a warning.
+   */
   mockAPI(pattern: string, response: unknown, opts: MockOptions = {}): void {
     this.demo._push({ kind: "browser.mockAPI", pattern, response, ...opts });
   }
@@ -527,15 +533,18 @@ class EditorWindow extends Win {
 }
 
 /**
- * A file's name, and a selector condition for the folder it's in, if the
- * name gives one: VS Code marks the icon of each Explorer row and tab with
- * the name of the file's folder ("src-name-dir-icon").
+ * A file's name, and a selector condition for the folder it's directly in,
+ * if the name gives one: VS Code marks the icon of each Explorer row and tab
+ * with that folder's name ("src-name-dir-icon"), split into classes at any
+ * space ("My Folder" gives "my" and "folder-name-dir-icon").
  */
 function fileName(name: string): { base: string; inFolder: string } {
   const parts = name.replace(/^\.\//, "").split("/");
   const base = parts.pop()!;
   const folder = parts.pop();
-  return { base, inFolder: folder ? `:has([class~=${JSON.stringify(`${folder.toLowerCase()}-name-dir-icon`)}])` : "" };
+  if (!folder) return { base, inFolder: "" };
+  const classes = `${folder.toLowerCase()}-name-dir-icon`.split(/\s+/).filter(Boolean);
+  return { base, inFolder: `:has(${classes.map((c) => `[class~=${JSON.stringify(c)}]`).join("")})` };
 }
 
 export class Demo {
@@ -689,8 +698,10 @@ export class Demo {
   /**
    * Run the whole timeline against the real app without capturing or
    * encoding: every selector must resolve, every file and command typed into
-   * the editor must be found, and every terminal recording must exist. Narration isn't synthesized; its length is
-   * estimated. Throws on the first failure with the script location.
+   * the editor must be found, and every terminal recording must exist.
+   * Narration isn't synthesized: a line spoken in an earlier render keeps its
+   * real length, and a new one's is estimated. Throws on the first failure
+   * with the script location.
    */
   async check(outPath?: string): Promise<RenderResult> {
     noteRun();
