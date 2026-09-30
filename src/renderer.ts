@@ -461,8 +461,24 @@ class Engine {
 
   // ------------------------------------------------------------ page clock
 
-  /** Media sources already warned about. */
+  /** Media sources, and page clock failures, already warned about. */
   private stuckMedia = new Set<string>();
+  private clockFailures = new Set<string>();
+
+  /**
+   * A frame that navigated or went away mid-step is expected. Anything else
+   * is the page clock itself failing, which would leave that page's
+   * animations off the frame clock: say so once, rather than pass silently.
+   */
+  private clockFailed(url: string, err: unknown): undefined {
+    const message = (err instanceof Error ? err.message : String(err)).split("\n")[0];
+    if (/Execution context was destroyed|detached|has been closed|Target closed|Cannot find context|navigat/i.test(message)) return undefined;
+    if (!this.clockFailures.has(message)) {
+      this.clockFailures.add(message);
+      process.stderr.write(`reelscript: warning: the page clock failed in ${url}, so its animations may differ between renders: ${message}\n`);
+    }
+    return undefined;
+  }
 
   /** Advance every window's virtual clock by `ms`. */
   async advanceClock(ms: number): Promise<void> {
@@ -476,7 +492,7 @@ class Engine {
               const g = window as unknown as { __reelscript_advance?: (ms: number) => Promise<(string | undefined)[]> | undefined };
               return g.__reelscript_advance?.(ms); // resolves once any media seek has landed, with media that wouldn't move
             }, ms)
-            .catch(() => undefined), // a frame that navigated or went away mid-step
+            .catch((err: unknown) => this.clockFailed(f.url(), err)),
         ),
       ),
     );
@@ -568,7 +584,10 @@ class Engine {
       this.ambiguous.add(key);
       process.stderr.write(
         `reelscript: warning: "${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
-          `An id, a data-testid, or role=button[name="…"] picks the one you mean\n  at ${this.at}\n`,
+          (w.kind === "editor"
+            ? `For a file, name its folder too, like editor.file("src/app.ts")`
+            : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
+          `\n  at ${this.at}\n`,
       );
     }
     return loc;
@@ -1598,7 +1617,13 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       if (check) {
         // nothing to capture
       } else if (snapshot !== undefined) {
-        if (t + frameMs / 2 >= snapshot || (endAt !== null && t + frameMs >= endAt)) {
+        const last = endAt !== null && t + frameMs >= endAt;
+        // This is the video's last frame, so it's as long as a render would say (allowing for that rounding).
+        const videoMs = last ? t + frameMs : Infinity;
+        if (snapshot > videoMs + 5) {
+          throw new Error(`reelscript: ${(snapshot / 1000).toFixed(2)}s is past the end of the demo, which is ${(videoMs / 1000).toFixed(2)}s long`);
+        }
+        if (t + frameMs / 2 >= snapshot || last) {
           const rgb = await engine.frame(t);
           mkdirSync(dirname(options.out), { recursive: true });
           await sharp(rgb, { raw: { width, height, channels: 3 } }).png().toFile(options.out);

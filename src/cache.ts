@@ -2,16 +2,22 @@
  * What reelscript keeps on disk between runs, and how to clear it.
  * Everything lives under one folder (REELSCRIPT_CACHE, default
  * ~/.cache/reelscript) unless REELSCRIPT_MODELS or REELSCRIPT_CODE_SERVER
- * point elsewhere, as they do in the container, where those are built in.
+ * point elsewhere, as they do in the container, where those are built in;
+ * the browser lives in Playwright's own folder.
  */
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { chromium } from "playwright";
 import { KOKORO_MODEL, cacheDir } from "./tts.js";
 
 export interface CachePart {
   name: string;
   description: string;
   path: string;
+  /** More folders that belong to it. */
+  also?: string[];
+  /** Outside reelscript's folder and shared with other tools: cleared only by name, never by "all". */
+  shared?: boolean;
   /** Not reelscript's to delete: built into the container, or a binary you pointed at. Listed, never cleared. */
   builtIn: boolean;
   /** Why it isn't cleared, for the listing. */
@@ -37,6 +43,7 @@ export function cacheParts(): CachePart[] {
   const editorPath = codeServer ? (existsSync(join(install, "lib", "vscode")) ? install : codeServer) : join(root, "code-server");
   const editorNote = codeServer && !isBuiltIn(editorPath) ? `REELSCRIPT_CODE_SERVER: ${codeServer}` : undefined;
   return [
+    ...browserPart(builtInDir),
     part("editor", "VS Code (code-server) for editor windows", editorPath, editorNote),
     part("extensions", "editor extensions installed from Open VSX or .vsix", join(root, "extensions")),
     // reelscript's own models folder is cleared whole (any voice model it
@@ -45,6 +52,31 @@ export function cacheParts(): CachePart[] {
     part("narration", "voice models", process.env.REELSCRIPT_MODELS ? join(modelsDir(), KOKORO_MODEL) : modelsDir()),
     part("narration-clips", "spoken lines, reused while their text and voice are unchanged", join(root, "tts")),
   ];
+}
+
+/**
+ * The Chromium build reelscript's Playwright drives, and its headless shell.
+ * They live in Playwright's folder (PLAYWRIGHT_BROWSERS_PATH, or its default),
+ * shared with other projects on the same Playwright version.
+ */
+function browserPart(builtInDir: string | undefined): CachePart[] {
+  const m = chromium.executablePath().match(/^(.*)[\\/]chromium-(\d+)[\\/]/);
+  if (!m) return [];
+  const [, folder, build] = m;
+  return [{
+    name: "browser",
+    description: "Chromium and its headless shell",
+    path: join(folder, `chromium-${build}`),
+    also: [join(folder, `chromium_headless_shell-${build}`)],
+    builtIn: !!builtInDir, // the container's own
+    shared: true,
+    note: builtInDir ? `built in at ${folder}` : `in Playwright's folder, ${folder}`,
+  }];
+}
+
+/** Every folder of a part. */
+export function partPaths(p: CachePart): string[] {
+  return [p.path, ...(p.also ?? [])];
 }
 
 /** Where the narration model is stored. */
@@ -79,7 +111,7 @@ export function formatBytes(n: number): string {
 /** Remove one part of the cache, or all of it. Returns what was removed. */
 export function clearCache(name: string): string[] {
   const parts = cacheParts();
-  const targets = name === "all" ? parts : parts.filter((p) => p.name === name);
+  const targets = name === "all" ? parts.filter((p) => !p.shared) : parts.filter((p) => p.name === name);
   if (!targets.length) throw new Error(`reelscript: unknown cache part "${name}". Parts: ${parts.map((p) => p.name).join(", ")}, all`);
   const removed: string[] = [];
   for (const p of targets) {
@@ -87,8 +119,11 @@ export function clearCache(name: string): string[] {
       if (name !== "all") throw new Error(`reelscript: ${p.name} isn't reelscript's to clear here (${p.note})`);
       continue;
     }
-    rmSync(p.path, { recursive: true, force: true });
-    removed.push(p.path);
+    for (const path of partPaths(p)) {
+      if (!existsSync(path)) continue;
+      rmSync(path, { recursive: true, force: true });
+      removed.push(path);
+    }
   }
   return removed;
 }

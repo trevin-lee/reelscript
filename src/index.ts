@@ -63,12 +63,42 @@ function invalidChoice(action: Action): string | null {
   );
 }
 
+/** Number options by what they allow: rates and sizes, durations, and positions. */
+const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height"];
+const AT_LEAST_0 = ["ms", "duration", "hold", "holdMs", "settle", "maxGap", "maxGapMs", "timeout"];
+const ANY_NUMBER = ["x", "y", "by", "to"];
+
+/** What's wrong with a number option, if anything: a 0 rate or a string would hang a render, a negative time run it backwards. */
+function invalidNumber(options: object): string | null {
+  const o = options as Record<string, unknown>;
+  const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
+  const rules = [
+    [ABOVE_0, (n: number) => n > 0, "a number above 0"],
+    [AT_LEAST_0, (n: number) => n >= 0, "a number, 0 or more"],
+    [ANY_NUMBER, () => true, "a number"],
+  ] as const;
+  for (const [keys, ok, rule] of rules) {
+    for (const k of keys) {
+      const v = o[k];
+      if (v !== undefined && !(typeof v === "number" && Number.isFinite(v) && ok(v))) return `${k} must be ${rule}, not ${shown(v)}`;
+    }
+  }
+  if (o.status !== undefined && !(Number.isInteger(o.status) && (o.status as number) >= 100 && (o.status as number) <= 599)) {
+    return `status must be an HTTP status code, not ${shown(o.status)}`;
+  }
+  return null;
+}
+
 /** What's wrong with createDemo()'s options, if anything: what a render would fail on, found before it starts. */
 function invalidOption(o: DemoOptions): string | null {
   const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
   const camera = o.camera;
   if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
     return `unknown camera ${shown(camera)} (use "manual", "follow", or { scale, hold })`;
+  }
+  if (typeof camera === "object" && camera !== null) {
+    const problem = invalidNumber(camera);
+    if (problem) return `camera ${problem}`;
   }
   const above0 = (name: string, v: unknown) =>
     v !== undefined && !(typeof v === "number" && Number.isFinite(v) && v > 0) ? `${name} must be a number above 0, not ${shown(v)}` : null;
@@ -482,17 +512,30 @@ class EditorWindow extends Win {
     this.demo._push({ kind: "type", text, ...opts, window: "editor" });
   }
 
-  /** Selector for a file or folder row in the Explorer, by its name ("app.ts", or "src/app.ts" for the row app.ts), for cursor.moveTo(). */
+  /** Selector for a file or folder row in the Explorer, by its name ("app.ts"), or its folder and name ("src/app.ts"), for cursor.moveTo(). */
   file(name: string): string {
-    return `.explorer-folders-view .monaco-list-row[aria-label=${JSON.stringify(name.split("/").pop())}]`;
+    const { base, inFolder } = fileName(name);
+    return `.explorer-folders-view .monaco-list-row[aria-label=${JSON.stringify(base)}]${inFolder}`;
   }
 
-  /** Selector for an open editor tab, by its file's name. */
+  /** Selector for an open editor tab, by its file's name ("app.ts"), or its folder and name ("src/app.ts"). */
   tab(name: string): string {
-    const base = name.split("/").pop()!;
+    const { base, inFolder } = fileName(name);
     // "app.ts", or "app.ts, …" in states where VS Code adds to the label.
-    return `.tabs-container .tab[aria-label=${JSON.stringify(base)}], .tabs-container .tab[aria-label^=${JSON.stringify(`${base}, `)}]`;
+    return `.tabs-container .tab[aria-label=${JSON.stringify(base)}]${inFolder}, .tabs-container .tab[aria-label^=${JSON.stringify(`${base}, `)}]${inFolder}`;
   }
+}
+
+/**
+ * A file's name, and a selector condition for the folder it's in, if the
+ * name gives one: VS Code marks the icon of each Explorer row and tab with
+ * the name of the file's folder ("src-name-dir-icon").
+ */
+function fileName(name: string): { base: string; inFolder: string } {
+  const parts = name.replace(/^\.\//, "").split("/");
+  const base = parts.pop()!;
+  const folder = parts.pop();
+  return { base, inFolder: folder ? `:has([class~=${JSON.stringify(`${folder.toLowerCase()}-name-dir-icon`)}])` : "" };
 }
 
 export class Demo {
@@ -506,16 +549,31 @@ export class Demo {
   /** Where in the user's script each action was created, for error messages. */
   private sources: string[] = [];
 
+  /** Where the script created the demo, for errors about its options found later. */
+  private readonly createdAt: string;
+
   constructor(readonly options: DemoOptions = {}) {
+    this.createdAt = callerLocation();
     const problem = invalidOption(options);
-    if (problem) throw new Error(`reelscript: ${problem}\n  at ${callerLocation()} (createDemo)`);
+    if (problem) throw new Error(`reelscript: ${problem}\n  at ${this.createdAt} (createDemo)`);
+  }
+
+  /** The session file to start signed in with, or an error at the createDemo line. */
+  private session() {
+    if (!this.options.session) return undefined;
+    try {
+      return resolveSession(this.options.session, dirname(scriptFile()));
+    } catch (err) {
+      if (err instanceof Error) err.message += `\n  at ${this.createdAt} (createDemo)`;
+      throw err;
+    }
   }
 
   /** @internal */
   _push(action: Action): void {
     const source = callerLocation();
-    // A misspelt choice fails here, where the script queued it, not deep in a render.
-    const problem = invalidChoice(action);
+    // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
+    const problem = invalidChoice(action) ?? invalidNumber(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
     this.actions.push(action);
     this.sources.push(source);
@@ -656,7 +714,7 @@ export class Demo {
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
       baseDir: dirname(scriptFile()),
-      session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
+      session: this.session(),
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
     }));
     const script = basename(scriptFile());
@@ -715,7 +773,7 @@ export class Demo {
       recordingsDir: this.recordingsDir(),
       sources: this.sources,
       baseDir: dirname(scriptFile()),
-      session: this.options.session ? resolveSession(this.options.session, dirname(scriptFile())) : undefined,
+      session: this.session(),
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
       onProgress: verbose
         ? ({ frame, timeMs }) => {

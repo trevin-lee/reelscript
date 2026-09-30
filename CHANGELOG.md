@@ -17,20 +17,23 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - An editor file or command that VS Code can't find fails at its script line, instead of pressing Enter on "No matching results" or a similar command.
 - A script that never calls `demo.render()` fails instead of passing silently.
 - A missing terminal recording names the script line.
-- Options render can't use fail at their `createDemo()` line: `fps`, `viewport`, `desktop` and `gif` sizes that aren't positive numbers (they failed in ffmpeg or sharp partway through a render), and a misspelt `theme`, `timezone` or `clock`.
-- `openFile()` and `command()` accept only the file or command asked for. VS Code's search offers a near match for almost anything (webapp.ts for "app.ts"), and that used to be opened while `check` passed; now it fails at the line and names what VS Code offered. `editor.file()` and `editor.tab()` match exact names too.
+- Options render can't use fail at their `createDemo()` line: `fps`, `viewport`, `desktop` and `gif` sizes that aren't positive numbers (they failed in ffmpeg or sharp partway through a render), and a misspelt `theme`, `timezone` or `clock`. Number options on actions fail where they're queued too: a `wpm` or `speed` of 0, or a string, hung the render, and a negative `wait` ran time backwards.
+- A missing `session` file names the `createDemo()` line.
+- `openFile()` and `command()` accept only the file or command asked for. VS Code's search offers a near match for almost anything (webapp.ts for "app.ts"), and that used to be opened while `check` passed; now it fails at the line and names what VS Code offered. `editor.file()` and `editor.tab()` match exact names too, and the folder when you give one (`"src/app.ts"`).
 - A script path that doesn't exist is named plainly, instead of with Node's module error.
 
 **Fixes and additions**
 
 - Renders no longer idle for about 10 seconds after finishing.
-- `reelscript warmup browser` installs the Chromium build reelscript drives, and the README uses it: in a project with its own Playwright, `npx playwright install` fetched that version's build, and the error it led to sent you round in a loop. `warmup` with no parts includes it; a missing browser names the command; `login` says it can't show a browser only where that's so.
+- `reelscript warmup browser` installs the Chromium build reelscript drives, and the README uses it: in a project with its own Playwright, `npx playwright install` fetched that version's build, and the error it led to sent you round in a loop. `warmup` with no parts includes it, and it checks the browser starts: on Linux, `--with-deps` installs Chromium's system libraries, and a launch that fails for lack of them names them and that command. A missing browser names the command wherever it's found, in a form that also works without a local install (for MCP); `login` says it can't show a browser only where that's so; `reelscript cache` lists the browser, and `cache clear browser` removes it (`clear all` leaves it, since other projects share it).
 - The browser window has no tabs: a link or `window.open()` that would open a new tab opens in the window, instead of in a tab nobody sees.
 - A target is its first visible match, so a hidden copy (a collapsed mobile menu) no longer fails the step, and several visible matches are a warning at the line.
 - MCP: `inspect_page` lists elements inside web components.
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- `preview --at` past the end fails with the demo's length, instead of quietly returning the last frame.
+- A failure in the page clock itself is a warning, once, instead of silently leaving that page's animations on real time.
 - `close()` on every window, and `browser.open(geometry)` to place the browser without navigating. `mockAPI` applies to the browser window without opening it.
 - `clock` and `timezone` options; the menu bar shows the demo's clock.
 - `reelscript cache` lists what's cached and `reelscript cache clear <part|all>` removes it; `reelscript warmup` also downloads VS Code. The parts share names with `warmup` (`narration`, `editor`).

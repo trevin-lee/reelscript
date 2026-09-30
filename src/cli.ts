@@ -42,8 +42,9 @@ usage:
   reelscript record  <script> [more...] [--prune]  run terminal commands for real and save
                                                    recordings; --prune deletes unused ones
   reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
-  reelscript warmup  [browser] [narration] [editor]
-                                                   download the browser, voice model and VS Code
+  reelscript warmup  [browser] [narration] [editor] [--with-deps]
+                                                   download the browser, voice model and VS Code;
+                                                   --with-deps adds Chromium's Linux libraries
   reelscript cache   [clear <part|all>]            show or clear what's cached on disk
   reelscript mcp                                   MCP server (stdio) for coding agents
   reelscript --version
@@ -59,7 +60,7 @@ env:
   process.exit(exitCode);
 }
 
-const BOOLEAN_FLAGS = new Set(["prune", "help"]);
+const BOOLEAN_FLAGS = new Set(["prune", "help", "with-deps"]);
 
 /** Whether a file is a terminal recording `reelscript record` wrote, and so safe to prune. */
 function isRecording(file: string): boolean {
@@ -129,7 +130,7 @@ const OPTIONS: Record<string, string[]> = {
   check: [],
   record: ["prune"],
   login: ["out"],
-  warmup: [],
+  warmup: ["with-deps"],
   cache: [],
   mcp: [],
 };
@@ -233,8 +234,9 @@ async function main(): Promise<void> {
             console.error("reelscript: browser built into the image");
             continue;
           }
-          const { installBrowser } = await import("./browser.js");
-          await installBrowser();
+          const { installBrowser, verifyBrowser } = await import("./browser.js");
+          await installBrowser("with-deps" in flags);
+          await verifyBrowser();
           console.error(`reelscript: browser ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
         } else if (part === "narration") {
           const { kokoro } = await import("./tts.js");
@@ -251,7 +253,7 @@ async function main(): Promise<void> {
       break;
     }
     case "cache": {
-      const { cacheParts, clearCache, formatBytes, sizeOf } = await import("./cache.js");
+      const { cacheParts, clearCache, formatBytes, partPaths, sizeOf } = await import("./cache.js");
       const { cacheDir } = await import("./tts.js");
       if (positional[0] === "clear") {
         const part = positional[1] ?? usage();
@@ -262,7 +264,7 @@ async function main(): Promise<void> {
       console.log(`reelscript cache: ${cacheDir()}`);
       for (const p of cacheParts()) {
         const where = p.note ? `  (${p.note})` : "";
-        console.log(`  ${p.name.padEnd(16)} ${formatBytes(sizeOf(p.path)).padStart(8)}  ${p.description}${where}`);
+        console.log(`  ${p.name.padEnd(16)} ${formatBytes(partPaths(p).reduce((n, path) => n + sizeOf(path), 0)).padStart(8)}  ${p.description}${where}`);
       }
       console.log(`clear a part with: reelscript cache clear <part|all>`);
       break;

@@ -45,7 +45,7 @@ npm install -D @reelscript/cli
 npx reelscript warmup browser
 ```
 
-The package installs a `reelscript` command, and `warmup browser` downloads the Chromium build it drives. (Use it rather than `npx playwright install`, which installs the build for your project's own Playwright if it has one.) Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
+The package installs a `reelscript` command, and `warmup browser` downloads the Chromium build it drives. (Use it rather than `npx playwright install`, which installs the build for your project's own Playwright if it has one.) On Linux, add `--with-deps` to install the system libraries Chromium needs too, with apt-get on Debian and Ubuntu; reelscript names the missing ones if a launch fails. Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
 Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
 
@@ -54,7 +54,7 @@ Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
 ```sh
 git clone https://github.com/trevin-lee/reelscript && cd reelscript
 npm install
-npx playwright install chromium
+npx playwright install chromium   # inside the repo, Playwright is reelscript's own, so this is the right build
 npm run example            # renders examples/basic.ts -> examples/out/basic.mp4
 ```
 
@@ -217,6 +217,7 @@ Scripts may `import { createDemo } from "@reelscript/cli"` without installing th
 
 ```sh
 claude mcp add reelscript -- npx -y @reelscript/cli mcp
+npx @reelscript/cli warmup browser   # once: the browser it drives
 ```
 
 | Tool | What the agent gets |
@@ -240,8 +241,9 @@ reelscript preview <script> --at <seconds> [--out frame.png]
 reelscript check   <script> [more scripts...]    run the timeline without rendering
 reelscript record  <script> [more...] [--prune]  run terminal commands for real and save recordings
 reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
-reelscript warmup  [browser] [narration] [editor]
-                                                   download the browser, voice model and VS Code
+reelscript warmup  [browser] [narration] [editor] [--with-deps]
+                                                   download the browser, voice model and VS Code;
+                                                   --with-deps adds Chromium's Linux libraries
 reelscript cache   [clear <part|all>]            show or clear what's cached on disk
 reelscript mcp                                   MCP server (stdio) for coding agents
 reelscript --version
@@ -258,16 +260,17 @@ A script must call `demo.render()`; if it finishes without doing so, every comma
 
 ## Cache
 
-reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscript` unless `REELSCRIPT_CACHE` says otherwise. `reelscript cache` lists it:
+reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscript` unless `REELSCRIPT_CACHE` says otherwise, except the browser, which lives in Playwright's folder (`~/Library/Caches/ms-playwright` on macOS, `~/.cache/ms-playwright` on Linux, or `PLAYWRIGHT_BROWSERS_PATH`). `reelscript cache` lists them all:
 
 | Part | What it holds |
 | --- | --- |
+| `browser` | Chromium and its headless shell, about 500 MB, shared with other projects on the same Playwright version |
 | `editor` | VS Code (code-server), about 200 MB compressed |
 | `extensions` | Editor extensions installed from Open VSX or `.vsix` |
 | `narration` | Voice models: Kokoro, about 90 MB, and any other downloaded with `kokoro(model)` |
 | `narration-clips` | Spoken lines, reused while their text and voice are unchanged |
 
-`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the default Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
+`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything in reelscript's folder; each is downloaded or generated again when next needed. The browser, shared with other projects in Playwright's folder, is deleted only by name, `reelscript cache clear browser`, and `reelscript warmup browser` installs it again. In the container, the browser, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the default Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
 
 ## API
 
@@ -299,7 +302,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open VS Code on a copy of a folder. `extensions` are Open VSX ids, `.vsix` files, or extension folders. `settings` merge over demo-friendly defaults; `notifications: true` shows VS Code's toasts. Reopening with a different workspace, extensions, or settings starts a fresh VS Code. |
 | `demo.editor.openFile(path, { wpm })`, `demo.editor.command(name, { wpm })` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. Fails if VS Code finds no match. |
 | `demo.editor.type(text, { wpm })` | Bring the editor forward and type at its caret. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
-| `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab, by the file's exact name. A row is on screen only once its folder is expanded. |
+| `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab, by the file's exact name, or its folder and name (`"src/app.ts"`) when two files share a name. A row is on screen only once its folder is expanded. |
 | `.focus()`, `.place({ x, y, width, height })`, `.close()` on `browser`, `terminal`, `editor` | Bring forward, move or resize (`x, y` is the frame's corner on the desktop; `width, height` the content size), or take off the desktop; a closed window can be opened again. |
 
 `createDemo` options:
