@@ -169,7 +169,7 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "window.close": { window: true },
   "browser.open": { x: true, y: true, width: true, height: true },
   "window.place": { window: true, x: true, y: true, width: true, height: true },
-  "terminal.run": { command: true, output: true, events: true, duration: true, wpm: true, speed: true, maxGap: true, maxGapMs: true, prompt: true, cwd: true, exitCode: true },
+  "terminal.run": { command: true, output: true, events: true, duration: true, wpm: true, speed: true, maxGap: true, maxGapMs: true, prompt: true, cwd: true, exitCode: true, until: true },
   "terminal.print": { text: true, events: true, speed: true, maxGap: true, maxGapMs: true, duration: true, prompt: true },
   call: { fn: true },
 };
@@ -469,6 +469,12 @@ export interface RunOptions {
   cwd?: string;
   /** The exit code the command is meant to have, for a demo of a failure: then `record` doesn't warn. Default: 0 */
   exitCode?: number;
+  /**
+   * For a command that keeps running (a dev server, with `prompt: false`):
+   * `record` stops it once its output shows this text, as meant, instead of
+   * after two minutes with a warning.
+   */
+  until?: string;
   /**
    * The prompt once the output ends. Default: true, the terminal's prompt. A
    * string shows that prompt instead, and keeps it from then on (after a
@@ -814,10 +820,10 @@ export class Demo {
       }
       // At the size of the terminal it runs in, when the script fixes one, so its lines wrap as they will on screen.
       const open = this.actions.slice(0, i).reverse().find((x): x is Extract<Action, { kind: "terminal.open" }> => x.kind === "terminal.open");
-      const rec = await recordCommand(a.command, { cwd, cols: open?.cols, rows: open?.rows });
+      const rec = await recordCommand(a.command, { cwd, cols: open?.cols, rows: open?.rows, until: a.until });
       if (rec.timedOut) {
         warn(
-          `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then`,
+          `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then. For a command that keeps running (a server), give the run { until: "text it prints once it's up" }`,
         );
       } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(
@@ -876,7 +882,7 @@ export class Demo {
     }));
     const script = basename(scriptFile());
     if (verbose) process.stderr.write(
-      `reelscript: check passed for ${script}: ${this.actions.length} actions, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
+      `reelscript: check passed for ${script}: ${this.actions.length} action${this.actions.length === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
     );
     return result;
   }
@@ -959,7 +965,7 @@ export class Demo {
     if (verbose) {
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       process.stderr.write(
-        `${process.stderr.isTTY ? "\r" : ""}reelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frames, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
+        `${process.stderr.isTTY ? "\r" : ""}reelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frame${result.frames === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
       );
     }
     return result;

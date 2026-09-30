@@ -198,7 +198,7 @@ function fail(message: string): never {
 async function main(): Promise<void> {
   const { command, flags, positional, problem } = parse(process.argv.slice(2));
   if ("strict" in flags) process.env.REELSCRIPT_STRICT = "1"; // so a strict render keeps the previous output
-  if ("help" in flags) usage(0);
+  if ("help" in flags || positional.includes("-h")) usage(0);
   const allowed = OPTIONS[command];
   if (allowed) {
     for (const k of Object.keys(flags)) {
@@ -336,7 +336,9 @@ async function main(): Promise<void> {
         const known = cacheParts().map((p) => p.name);
         const unknown = parts.find((p) => p !== "all" && !known.includes(p));
         if (unknown) fail(`unknown cache part "${unknown}". Parts: ${known.join(", ")}, all`);
-        for (const part of parts) for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`);
+        let removed = 0;
+        for (const part of parts) for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`), removed++;
+        if (!removed) console.error(`reelscript: nothing to remove`);
         break;
       }
       if (positional.length) missing(`unknown cache command "${positional[0]}" (use cache, or cache clear <part|all>)`);

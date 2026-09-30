@@ -21,6 +21,8 @@ export interface TermRecording {
   exitCode: number | null;
   /** Set when the command ran past the time limit and was stopped. */
   timedOut?: boolean;
+  /** Set when it was stopped, as the script asked, once its output showed `until`. */
+  stoppedAtUntil?: boolean;
   durationMs: number;
   recordedAt: string;
   events: TermEvent[];
@@ -152,6 +154,19 @@ export interface RecordOptions {
   cols?: number;
   rows?: number;
   timeoutMs?: number;
+  /** Stop the command once its output shows this (a server that's up): meant, not a time-out. */
+  until?: string;
+}
+
+/**
+ * The environment a recorded command runs in: the user's, without the
+ * settings the CLI passes itself (a recorded `reelscript render` would
+ * otherwise think it was being recorded too).
+ */
+function commandEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of ["REELSCRIPT_RECORD", "REELSCRIPT_SCRIPT", "REELSCRIPT_STRICT", "REELSCRIPT_CHECK", "REELSCRIPT_OUT", "REELSCRIPT_SNAPSHOT_AT"]) delete env[key];
+  return env;
 }
 
 /** Run a command for real and capture its output with timestamps. */
@@ -164,7 +179,7 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
     const child = spawn(command, {
       shell: true,
       cwd: opts.cwd,
-      env: { ...process.env, FORCE_COLOR: "1", TERM: "xterm-256color", COLUMNS: String(cols), LINES: String(rows) },
+      env: { ...commandEnv(), FORCE_COLOR: "1", TERM: "xterm-256color", COLUMNS: String(cols), LINES: String(rows) },
       stdio: ["ignore", "pipe", "pipe"],
       // Its own process group: `a && b`, `npm run x` and the like start children
       // that outlive the shell and keep its output open.
@@ -178,7 +193,16 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
       }
     };
     const unregister = onInterrupt(killGroup);
-    const onData = (chunk: Buffer) => events.push([Date.now() - start, chunk.toString("utf8")]);
+    let seen = "";
+    let stoppedAtUntil = false;
+    const onData = (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      events.push([Date.now() - start, text]);
+      if (opts.until && !stoppedAtUntil && (seen += text).includes(opts.until)) {
+        stoppedAtUntil = true;
+        setTimeout(killGroup, 100); // a moment for the rest of that line
+      }
+    };
     child.stdout!.on("data", onData);
     child.stderr!.on("data", onData);
     let timedOut = false;
@@ -198,8 +222,9 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
         command,
         cols,
         rows,
-        exitCode: code,
-        ...(timedOut ? { timedOut: true } : {}),
+        exitCode: stoppedAtUntil ? 0 : code,
+        ...(timedOut && !stoppedAtUntil ? { timedOut: true } : {}),
+        ...(stoppedAtUntil ? { stoppedAtUntil: true } : {}),
         durationMs: Date.now() - start,
         recordedAt: new Date().toISOString(),
         events,

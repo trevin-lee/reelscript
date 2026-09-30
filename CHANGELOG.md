@@ -40,6 +40,12 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- `terminal.run(cmd, { until })`: `record` stops a command that keeps running (a dev server) once its output shows that text, as meant, instead of at its two-minute limit with a warning (and a failure under `--strict`).
+- A recorded command doesn't see the settings the CLI passes itself, so recording a command that runs reelscript records what it really does.
+- `check` and `render` warn about a recording of a command that failed (without the run's `exitCode` saying so) or was cut off, so `check --strict` catches it in CI; it was a warning only at `record`. MCP's `record_script` is strict by default.
+- `demo.scroll(selector)` takes the first visible match like every other target, and warns when several are; it falls back to the first on the page only for content that appears once it's scrolled to.
+- MCP `inspect_page` says when a local page isn't there, and when a page answered with an HTTP error.
+- `render -h` shows the help, `cache clear` says when there was nothing to remove, and counts read "1 frame" and "an alert()".
 - The page clock leaves a page's own control of its animations alone: what the page pauses (`pause()`, `animation-play-state: paused`) stays paused, where it seeks is where the clock goes on from, and what it finishes stays finished. The clock stepped them all.
 - Local pages (`goto("./app.html")`) are served from this machine over http, not opened as files: their `fetch("/api/...")` reaches `mockAPI`, their cookies stick, ES modules load, and video can seek. A local page that isn't there fails with its path.
 - `demo.scroll(selector)` goes to content that only appears once it's scrolled into view (a reveal-on-scroll section), and a target that's there but not visible says so, with a hint to scroll to it.

@@ -318,7 +318,7 @@ class Engine {
         if (!this.dialogs.has(key)) {
           this.dialogs.add(key);
           warn(
-            `the page opened a ${type}("${dialog.message()}") dialog, which isn't drawn in the video; reelscript answered OK\n  at ${this.at}`,
+            `the page opened ${/^[aeiou]/.test(type) ? "an" : "a"} ${type}("${dialog.message()}") dialog, which isn't drawn in the video; reelscript answered OK\n  at ${this.at}`,
           );
         }
       }
@@ -634,34 +634,43 @@ class Engine {
       await new Promise((r) => setTimeout(r, 25));
       seen = await shownMatches(all);
     }
-    const loc = all.nth(seen[0]);
-    const count = seen.length;
+    this.noteAmbiguity(w, target, seen.length);
+    return all.nth(seen[0]);
+  }
+
+  /** Several visible matches: the first is used, and may not be the one meant. */
+  private noteAmbiguity(w: Win, target: string, count: number): void {
     const key = `${this.at} ${target}`;
-    if (count > 1 && !this.ambiguous.has(key)) {
-      this.ambiguous.add(key);
-      warn(
-        `"${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
-          (w.kind === "editor"
-            ? `For a file, name its folder too, like editor.file("src/app.ts")`
-            : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
-          `\n  at ${this.at}`,
-      );
-    }
-    return loc;
+    if (count <= 1 || this.ambiguous.has(key)) return;
+    this.ambiguous.add(key);
+    warn(
+      `"${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
+        (w.kind === "editor"
+          ? `For a file, name its folder too, like editor.file("src/app.ts")`
+          : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
+        `\n  at ${this.at}`,
+    );
   }
 
   /**
-   * A selector's first match that's on the page with a box, seen or not: what
-   * demo.scroll() goes to, since content that fades in as it scrolls into view
-   * isn't visible until scroll has brought it there.
+   * What demo.scroll() goes to: the first visible match, like every target,
+   * or, when none is visible yet, the first on the page with a box, since
+   * content that fades in as it scrolls into view isn't visible until scroll
+   * has brought it there. (A hidden copy, like a collapsed mobile menu, has
+   * no box and doesn't count.)
    */
   private async present(w: Win, target: string) {
-    const loc = w.page.locator(target).first();
-    for (const deadline = Date.now() + 3000; !(await loc.boundingBox().catch(() => null)); ) {
+    const all = w.page.locator(target);
+    for (const deadline = Date.now() + 3000; ; await new Promise((r) => setTimeout(r, 25))) {
+      const seen = await shownMatches(all);
+      if (seen.length) {
+        this.noteAmbiguity(w, target, seen.length);
+        return all.nth(seen[0]);
+      }
+      const boxed = await all.evaluateAll((els) => els.findIndex((el) => { const r = el.getBoundingClientRect(); return el.isConnected && r.width > 0 && r.height > 0; }));
+      if (boxed >= 0) return all.nth(boxed);
       if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found in the ${w.id} window`);
-      await new Promise((r) => setTimeout(r, 25));
     }
-    return loc;
   }
 
   private async resolveRect(target: Target, windowId?: string): Promise<Rect> {
@@ -1800,6 +1809,17 @@ export async function render(actions: Action[], options: RenderOptions): Promise
               `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
               `  npx @reelscript/cli record <script>`,
           ),
+        );
+      }
+      // What went wrong when it was recorded is filmed on every render, so say so on every check, not just at record.
+      const at = options.sources?.[i] ? `\n  at ${options.sources[i]} (terminal.run)` : "";
+      if (rec.timedOut) {
+        warn(`the recording of "${a.command}" was cut off at record's two-minute limit; give the run { until: "text it prints once it's up" } and record it again${at}`);
+      } else if (rec.exitCode !== null && rec.exitCode !== (a.exitCode ?? 0)) {
+        warn(
+          `the recording of "${a.command}" shows it exiting with code ${rec.exitCode}` +
+            (a.exitCode === undefined ? ` (give the run { exitCode: ${rec.exitCode} } if that's meant)` : `, not the ${a.exitCode} the script expects`) +
+            at,
         );
       }
       events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGap: a.maxGap ?? a.maxGapMs }));

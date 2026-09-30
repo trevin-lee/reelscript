@@ -181,11 +181,16 @@ export async function serve(): Promise<void> {
         const page = await context.newPage();
         // A path is a local page, relative to the working directory like every path given to a tool,
         // served over http as a demo serves it.
-        await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : await local.url(pathToFileURL(resolve(url)).href), { waitUntil: "load" });
+        const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : await local.url(pathToFileURL(resolve(url)).href);
+        const response = await page.goto(target, { waitUntil: "load" });
+        const status = response?.status() ?? 200;
+        // As in a demo: a local page that isn't there is an error, and a site's error page says so.
+        if (status >= 400 && local.isLocal(target)) return { content: [text(`there's no page at ${resolve(url)}`)], isError: true };
+        const note = status >= 400 ? `The page answered HTTP ${status}: this may be its error page.\n` : "";
         const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
         const lines = elements.map((e) => `${e.tag.padEnd(9)} ${e.selector.padEnd(36)} ${JSON.stringify(e.label).padEnd(30)} at ${e.box}`);
         const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
-          text(`${elements.length} interactive elements on ${await page.title() || url}:\n${lines.join("\n") || "(none found)"}`),
+          text(`${note}${elements.length} interactive element${elements.length === 1 ? "" : "s"} on ${await page.title() || url}:\n${lines.join("\n") || "(none found)"}`),
         ];
         if (screenshot) {
           const png = await page.screenshot({ type: "png" });
@@ -279,12 +284,17 @@ export async function serve(): Promise<void> {
           .boolean()
           .optional()
           .describe("Also delete recordings in those scripts' folders that none of the listed scripts uses. Default false"),
+        strict: z
+          .boolean()
+          .optional()
+          .describe("Fail on warnings (a command that failed without the run's exitCode saying so, or ran past two minutes), keeping the previous recordings, as `reelscript record --strict` does. Default true"),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async ({ scripts, prune = false }, { signal }) => {
+    async ({ scripts, prune = false, strict = true }, { signal }) => {
       const args = ["record", ...scripts.map((s) => resolve(s))];
       if (prune) args.push("--prune");
+      if (strict) args.push("--strict");
       const { code, output } = await runCli(args, signal);
       return { content: [text(output || (code === 0 ? "recorded" : "record failed"))], isError: code !== 0 };
     },

@@ -79,6 +79,8 @@ export type Action =
       cwd?: string;
       /** The exit code the command is meant to have (a demo of a failure). Default: 0 */
       exitCode?: number;
+      /** For `record`: stop the command once its output shows this (a server that's up). */
+      until?: string;
     }
   | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number; duration?: number; prompt?: boolean | string }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };
