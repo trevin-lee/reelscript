@@ -36,7 +36,7 @@ test("inspect_page suggests selectors that find text fields, and never shows wha
     const found = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string }[];
     assert.doesNotMatch(JSON.stringify(found), /hunter2/, "no password in the output");
     const selectors = found.map((e) => e.selector);
-    assert.deepEqual([...selectors].sort(), ['button:has-text("Go")', 'input[placeholder="Password"]', 'input[placeholder="Search projects"]', 'label:has-text("Notes") >> textarea']);
+    assert.deepEqual([...selectors].sort(), ['button:text-is("Go")', 'input[placeholder="Password"]', 'input[placeholder="Search projects"]', 'label:has-text("Notes") >> textarea']);
     for (const s of selectors) assert.equal(await page.locator(s).count(), 1, `${s} finds its element`);
   } finally {
     await browser.close();

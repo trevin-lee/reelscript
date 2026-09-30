@@ -177,7 +177,7 @@ reelscript record demos/terminal.ts
 
 once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. A command that appears twice (`ls`, `touch new.txt`, `ls`) or runs in two folders gets a recording for each run, so each replays what it showed at that point. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
 
-Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning, or as soon as its output shows the run's `until` text, which is how to record a server starting; when a command exits, anything it left running in the background is stopped too. Commands run at the size of the terminal they run in when it has `cols` and `rows` (`terminal.open({ cols: 100 })`), so their lines wrap as they will on screen, and at 120×36 otherwise, since a terminal that fits its window has no size until it opens. They run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, without a pseudo-terminal, so tools that insist on a TTY for progress bars print their plain output. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it with [asciinema](https://asciinema.org) and play the recording:
+Rendering replays a recording with long silences capped (`maxGap`) and an optional `speed`, and never needs the tool installed. `record` stops a command, and anything it started, after two minutes and keeps the output up to then, with a warning, or as soon as its output shows the run's `until` text, which is how to record a server starting; when a command exits, anything it left running in the background is stopped too. Commands run at the size of the terminal they run in when it has `cols` and `rows` (`terminal.open({ cols: 100 })`), so their lines wrap as they will on screen, and at 120×36 otherwise, since a terminal that fits its window has no size until it opens. They run through a shell with `FORCE_COLOR=1` and a 256-color `TERM`, but without a pseudo-terminal, so a tool that checks for one prints its plain output: no progress bars, `ls` one name per line, `git` without colour. Ask for what you mean to show: `ls -C --color=always`, `git -c color.ui=always status`. A full-screen program (an agent's TUI, an editor) needs a real terminal: record it with [asciinema](https://asciinema.org) and play the recording:
 
 ```ts
 import { createDemo, readAsciicast } from "@reelscript/cli";
@@ -185,6 +185,8 @@ const cast = readAsciicast("claude.cast"); // asciinema rec claude.cast, v2 or v
 await demo.terminal.open({ cols: cast.cols, rows: cast.rows, lineHeight: 1 });
 await demo.terminal.run("claude", { events: cast.events });
 ```
+
+A recording as wide as your own terminal needs a window as big: give `open()` a `width` and `height`, or a smaller `fontSize`. `check` warns when the terminal's `cols` and `rows` don't fit its window, since the rest would be cut off.
 
 See [examples/terminal.ts](examples/terminal.ts).
 

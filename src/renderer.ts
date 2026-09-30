@@ -328,6 +328,8 @@ class Engine {
   }
   /** Dialogs already warned about. */
   private dialogs = new Set<string>();
+  /** A goto() is navigating: it judges its own response (see its status option). */
+  private inGoto = false;
   /** How the latest click said to answer a dialog it opens, until the next step. */
   private dialogAnswer: "accept" | "dismiss" | null = null;
 
@@ -410,6 +412,15 @@ class Engine {
       await ctx.addInitScript(NAME_HELPER);
     }
     const page = await (ctx ?? this.context).newPage();
+    if (kind === "browser") {
+      // A click or a page's own redirect that lands on an error page is filmed as one, like a goto()
+      // that does (which says so itself, and can say it's meant).
+      page.on("response", (response) => {
+        const request = response.request();
+        if (this.inGoto || !request.isNavigationRequest() || response.frame() !== page.mainFrame() || response.status() < 400) return;
+        warn(`the browser went to ${this.local.file(response.url())}, which answered HTTP ${response.status()}; the page shown may be an error page\n  at ${this.at}`);
+      });
+    }
     const win: Win = {
       id,
       kind,
@@ -776,7 +787,8 @@ class Engine {
           }
           url = new URL(action.url, site).href;
         } else url = await this.local.url(new URL(action.url, pathToFileURL(this.baseDir + "/")).href); // keeps ?query and #hash; see LocalPages
-        const response = await w.page.goto(url, { waitUntil: "load" }).catch((err: unknown) => {
+        this.inGoto = true;
+        const response = await w.page.goto(url, { waitUntil: "load" }).finally(() => (this.inGoto = false)).catch((err: unknown) => {
           if (!(err instanceof Error) || !/ERR_CONNECTION_REFUSED/.test(err.message)) throw err;
           // Nothing listening: most often the app isn't running, or (in the container) localhost isn't your machine.
           const inContainer = !!process.env.REELSCRIPT_BUILTIN && /\/\/(localhost|127\.0\.0\.1)[:/]/.test(url);
@@ -1149,6 +1161,14 @@ class Engine {
           }
         }
         if (action.cols || action.rows) {
+          // More than the window shows is cut off on screen, with the title still claiming the full size.
+          const fits = dims!;
+          if ((action.cols ?? 0) > fits.cols || (action.rows ?? 0) > fits.rows) {
+            warn(
+              `the terminal is ${action.cols ?? fits.cols}×${action.rows ?? fits.rows}, but its window shows ${fits.cols}×${fits.rows} at this font size, so the rest is cut off; ` +
+                `give terminal.open() a bigger width and height, or a smaller fontSize\n  at ${this.at}`,
+            );
+          }
           // One without the other keeps the fitted size in the other direction.
           dims = await w.page.evaluate(
             ([cols, rows]) =>
@@ -1848,11 +1868,12 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       const at = options.sources?.[i] ? `\n  at ${options.sources[i]} (terminal.run)` : "";
       if (rec.timedOut) {
         warn(`the recording of "${a.command}" was cut off at record's two-minute limit; give the run { until: "text it prints once it's up" } and record it again${at}`);
-      } else if (rec.exitCode !== null && rec.exitCode !== (a.exitCode ?? 0)) {
+      } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(
-          `the recording of "${a.command}" shows it exiting with code ${rec.exitCode}` +
-            (a.exitCode === undefined ? ` (give the run { exitCode: ${rec.exitCode} } if that's meant)` : `, not the ${a.exitCode} the script expects`) +
-            at,
+          (rec.exitCode === null
+            ? `the recording of "${a.command}" never finished (record was stopped); record it again`
+            : `the recording of "${a.command}" shows it exiting with code ${rec.exitCode}` +
+              (a.exitCode === undefined ? ` (give the run { exitCode: ${rec.exitCode} } if that's meant)` : `, not the ${a.exitCode} the script expects`)) + at,
         );
       }
       events.set(i, playbackEvents(rec.events, { speed: a.speed, maxGap: a.maxGap ?? a.maxGapMs }));

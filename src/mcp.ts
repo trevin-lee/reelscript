@@ -107,12 +107,21 @@ export const INSPECT_ELEMENTS = `(() => {
     else if (el.getAttribute("name")) selector = tag + '[name="' + esc(el.getAttribute("name")) + '"]';
     else if (field && el.getAttribute("placeholder")) selector = tag + '[placeholder="' + esc(el.getAttribute("placeholder")) + '"]';
     else if (field && wrappingText) selector = 'label:has-text("' + esc(wrappingText.slice(0, 60)) + '") >> ' + tag;
-    else if (!field && label) selector = tag + ':has-text("' + esc(label) + '")';
+    // Its whole text when it's short (so "Save" isn't also "Save draft"), else the start of it.
+    else if (!field && label) selector = tag + (text.replace(/\\s+/g, " ").trim().length <= 60 ? ':text-is("' : ':has-text("') + esc(label) + '")';
     else continue;
-    out.push({ tag, selector, label, box: Math.round(r.x) + "," + Math.round(r.y) + " " + Math.round(r.width) + "x" + Math.round(r.height) });
-    if (out.length >= 80) break;
+    out.push({ el, tag, selector, label, box: Math.round(r.x) + "," + Math.round(r.y) + " " + Math.round(r.width) + "x" + Math.round(r.height) });
   }
-  return out;
+  // A selector several listed elements share (an "Edit" in every row) gets which one, counted
+  // among the visible matches in page order as Playwright counts, so each suggestion is one element.
+  const groups = new Map();
+  for (const o of out) groups.set(o.selector, [...(groups.get(o.selector) || []), o]);
+  for (const [selector, group] of groups) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    group.forEach((o, i) => { o.selector = selector + " >> visible=true >> nth=" + i; });
+  }
+  return out.map(({ el, ...o }) => o);
 })()`;
 
 export async function serve(): Promise<void> {
@@ -187,10 +196,12 @@ export async function serve(): Promise<void> {
         // As in a demo: a local page that isn't there is an error, and a site's error page says so.
         if (status >= 400 && local.isLocal(target)) return { content: [text(`there's no page at ${resolve(url)}`)], isError: true };
         const note = status >= 400 ? `The page answered HTTP ${status}: this may be its error page.\n` : "";
-        const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
+        const found = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];
+        const elements = found.slice(0, 80);
+        const more = found.length > elements.length ? `\n(the first 80 of ${found.length}, top to bottom; inspect a narrower page, or a smaller viewport, for the rest)` : "";
         const lines = elements.map((e) => `${e.tag.padEnd(9)} ${e.selector.padEnd(36)} ${JSON.stringify(e.label).padEnd(30)} at ${e.box}`);
         const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
-          text(`${note}${elements.length} interactive element${elements.length === 1 ? "" : "s"} on ${await page.title() || url}:\n${lines.join("\n") || "(none found)"}`),
+          text(`${note}${found.length} interactive element${found.length === 1 ? "" : "s"} on ${await page.title() || url}:\n${lines.join("\n") || "(none found)"}${more}`),
         ];
         if (screenshot) {
           const png = await page.screenshot({ type: "png" });

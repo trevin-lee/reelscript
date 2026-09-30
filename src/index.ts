@@ -830,7 +830,7 @@ export class Demo {
       } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(
           a.exitCode === undefined
-            ? `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is (give the run { exitCode: ${rec.exitCode} } if that's meant)\n  at ${this.sources[i]} (terminal.run)`
+            ? `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is ${rec.exitCode === null ? "(it was stopped, not finished)" : `(give the run { exitCode: ${rec.exitCode} } if that's meant)`}\n  at ${this.sources[i]} (terminal.run)`
             : `"${a.command}" exited with code ${rec.exitCode}, not the ${a.exitCode} the script expects; the recording shows its output as it is\n  at ${this.sources[i]} (terminal.run)`,
         );
       }
@@ -842,6 +842,8 @@ export class Demo {
     if (process.env.REELSCRIPT_STRICT && warned) {
       throw new Error(`reelscript: ${warned} warning${warned === 1 ? "" : "s"} above, and --strict makes a run with warnings fail; the recordings are unchanged`);
     }
+    // Ctrl-C part way: nothing is saved, so the recordings a render replays stay as they were.
+    if (interrupted()) throw new Error("reelscript: interrupted; the recordings are unchanged");
     for (const [rec, key] of recorded) files.push(saveRecording(dir, rec, key));
     // Let `reelscript record --prune` know which recordings are still in use.
     for (const f of files) done.add(f);

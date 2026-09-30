@@ -40,6 +40,11 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- Ctrl-C during `record` saves nothing, so the recordings a render replays stay as they were (it overwrote them with partial and empty ones); `check` warns about a recording that never finished.
+- A click, or a page's own redirect, that lands on an HTTP error page is a warning at the line, as a `goto()` that does is.
+- A terminal whose `cols` and `rows` don't fit its window warns that the rest is cut off (the README's asciinema recipe says to give it room).
+- MCP `inspect_page` suggests one element per selector (`:text-is` for a short label, and which one when several share it, such as an Edit in every row) and says when it lists only the first 80.
+- The README says what recorded commands print without a pseudo-terminal (`ls` one name per line, `git` without colour) and the flags that change it. An empty `REELSCRIPT_CACHE` counts as unset, as an empty `REELSCRIPT_MODELS` does; it made `cache clear all` clear the working folder.
 - The test suite never clears a contributor's own `REELSCRIPT_MODELS` folder, and an empty `REELSCRIPT_MODELS` counts as unset.
 - No `module.register()` deprecation warning on every command under Node 26 (the Node Homebrew installs), nor in MCP results.
 - A `goto()` nothing answers says so (is the app running?), and in the container explains that `localhost` is the container and how to reach your machine; the README says so too.

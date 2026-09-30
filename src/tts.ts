@@ -55,7 +55,8 @@ export const KOKORO_MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
 /** Root of reelscript's on-disk cache (models, synthesized clips). */
 export function cacheDir(): string {
-  return process.env.REELSCRIPT_CACHE ?? join(homedir(), ".cache", "reelscript");
+  // Empty is unset: an empty value would make the working folder the cache, and `cache clear all` clear it.
+  return process.env.REELSCRIPT_CACHE || join(homedir(), ".cache", "reelscript");
 }
 
 /** Split narration into sentences; TTS models prefer short inputs. */
