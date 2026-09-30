@@ -40,6 +40,11 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- A target counts as visible only when a viewer could see it: an element inside something faded all the way out (a closed modal at `opacity: 0`) isn't, for targets, `waitFor`, the caret and MCP's `inspect_page` alike. The repo's own example let a script aim at its closed dialog and pass.
+- `demo.type()` fails on a field that can't take the keyboard (disabled, read-only, not a text field), instead of typing into whatever had it before.
+- A cookie the page sets to expire in a month, by its pinned date, is kept; Chromium judged it by the real date and dropped it at once (a consent banner that came back).
+- `render --strict` with warnings leaves the previous video in place, like any failed render.
+- The README shows your own first script (check, preview, render) right after Install, says a target is in the window's page and not inside an iframe (with the off-camera way to fill one), and that a saved sign-in wants `clock: new Date()` when the app checks its token's expiry. The CLI help shows `preview --at` as optional and `cache clear` taking several parts.
 - `demo.scroll(selector)` scrolls across as well as down, so a card in a carousel, a column of a wide table or a board comes into view; it only scrolled down, and the next step's hint to scroll sent you round in a loop.
 - `record` runs a command at the size of the terminal it runs in when the script fixes one (`cols`, `rows`), so its lines wrap as they will on screen.
 - `check --strict` (and `render`, `record`) fails on warnings too, for CI: a page that answered 404, a mock no request used, an ambiguous target.

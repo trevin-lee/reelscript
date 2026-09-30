@@ -34,7 +34,8 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
 
     const inspected = (await client.callTool({ name: "inspect_page", arguments: { url: app, screenshot: true } })).content as Content;
     assert.match(inspected[0].text ?? "", /#new-project/);
-    assert.match(inspected[0].text ?? "", /#project-name|input/);
+    // The new-project dialog is closed (faded out), so its field isn't something a script could target yet.
+    assert.doesNotMatch(inspected[0].text ?? "", /#project-name/);
     assert.equal(inspected[1].type, "image");
 
     const ok = await client.callTool({ name: "check_script", arguments: { script: "examples/basic.ts" } });

@@ -77,7 +77,11 @@ export const INSPECT_ELEMENTS = `(() => {
   found.sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left); // reading order, wherever each lives
   for (const { el, r } of found) {
     const st = getComputedStyle(el);
-    if (r.width < 1 || r.height < 1 || st.visibility === "hidden" || st.display === "none" || Number(st.opacity) === 0) continue;
+    if (r.width < 1 || r.height < 1 || st.visibility !== "visible" || st.display === "none") continue;
+    // Not inside anything faded all the way out (a closed modal): a script couldn't target it either.
+    let faded = false;
+    for (let n = el; n && !faded; n = n.parentElement || (n.getRootNode().host || null)) faded = getComputedStyle(n).opacity === "0";
+    if (faded) continue;
     const tag = el.tagName.toLowerCase();
     // A text field is described by its placeholder or label, never by what's typed in it (a password, say);
     // and has-text() can't find it, since its text isn't its value.

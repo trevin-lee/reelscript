@@ -49,6 +49,26 @@ The package installs a `reelscript` command, and `warmup browser` downloads the 
 
 Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
 
+## Your first demo
+
+A script is a TypeScript file. Save this as `demos/signup.ts`, pointed at your app:
+
+```ts
+import { createDemo } from "@reelscript/cli";
+
+const demo = createDemo();
+await demo.browser.goto("http://localhost:3000");
+await demo.cursor.moveTo("text=Sign up");
+await demo.cursor.click();
+await demo.render("out/signup.mp4");
+```
+
+```sh
+npx reelscript check demos/signup.ts            # drive the app through it in seconds, no video
+npx reelscript preview demos/signup.ts --at 1.5 # one frame, as a PNG
+npx reelscript render demos/signup.ts           # the video, in demos/out/
+```
+
 ## Try it
 
 ```sh
@@ -65,7 +85,7 @@ The example drives a small dashboard app that ships with the repo, so it's fully
 A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. A few rules hold everywhere:
 
 - **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, an editor's `workspace` and `extensions`, and a local page in `browser.goto("./app.html")` (anything with a scheme, like `https://` or `file://`, is a URL as is, and a path from the root, `goto("/pricing")`, is a page on the site the browser is showing, as it is in `mockAPI`). Paths you pass on the command line are relative to your working directory.
-- **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates.
+- **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates. A target is in the window's own page, not inside an iframe; fill a field in an iframe (a payment form) off camera with `demo.call(({ page }) => page!.frameLocator("iframe#pay").locator("#card").fill("4242 4242 4242 4242"))`. A target counts as visible when a viewer could see it: an element inside something faded all the way out (a closed modal at `opacity: 0`) isn't, and `demo.type()` fails on a field that can't take the keyboard (disabled, read-only, not a text field).
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
 - **Windows.** There is at most one browser, one terminal, and one editor window. The browser has no tabs: a link or `window.open()` that would open a new tab opens in the browser window, as if the demo had switched to it. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Calling `open()` on a window that's open applies what you pass: the browser moves, the terminal starts over with the new settings, and the editor reopens (a new VS Code if its workspace, extensions or settings changed). Selectors resolve in the focused window unless you name one with `window`.
 - **The desktop is a Mac, on every host.** The browser is Chrome on macOS and VS Code has the macOS keybindings, like the desktop they sit on, so a local preview and a render in CI show the same ⌘ shortcut hints and take the same keys: press `Meta+K`, `Meta+P`, and in a web page's fields `Meta+A` or `Alt+ArrowLeft`, which do what they do on a Mac on every host. Fonts come from the machine, though: a page that asks for `system-ui` gets San Francisco on a Mac and a Linux font in the container, so text can look different between a local preview and a CI render. Give the page a web font, or judge the final look from CI.
@@ -90,7 +110,7 @@ const demo = createDemo({ session: "session.json" });
 await demo.browser.goto("https://app.example.com/dashboard");
 ```
 
-It keeps cookies, local storage and IndexedDB, where apps such as Firebase keep their sign-in. The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > demos/session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
+It keeps cookies, local storage and IndexedDB, where apps such as Firebase keep their sign-in. The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > demos/session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. The page's date is pinned (see the clock, above), so an app that checks its sign-in token against the page's clock (Supabase and Firebase do) takes an expired token for a fresh one, doesn't refresh it, and the server turns it away: with a session, pass `clock: new Date()` so the page's date is the real one. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
 
 ## Several windows
 
@@ -238,7 +258,7 @@ npx @reelscript/cli warmup browser   # once: the browser it drives
 ```text
 reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                  render scripts to .mp4 or .gif
-reelscript preview <script> --at <seconds> [--out frame.png]
+reelscript preview <script> [--at <seconds>] [--out frame.png]
                                                  render one frame as a PNG
 reelscript check   <script> [more...] [--strict]  run the timeline without rendering; --strict
                                                  fails on warnings too (a 404, an unused mock)
@@ -248,7 +268,7 @@ reelscript login   <url> [--out session.json]    sign in once in a real browser;
 reelscript warmup  [browser] [narration] [editor] [--with-deps]
                                                    download the browser, voice model and VS Code;
                                                    --with-deps adds Chromium's Linux libraries
-reelscript cache   [clear <part|all>]            show or clear what's cached on disk
+reelscript cache   [clear <part...|all>]         show or clear what's cached on disk
 reelscript mcp                                   MCP server (stdio) for coding agents
 reelscript --version
 ```
@@ -274,7 +294,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `narration` | Voice models: Kokoro, about 90 MB, and any other downloaded with `kokoro(model)` |
 | `narration-clips` | Spoken lines, reused while their text and voice are unchanged |
 
-`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything in reelscript's folder; each is downloaded or generated again when next needed. The browser, shared with other projects in Playwright's folder, is deleted only by name, `reelscript cache clear browser`, and `reelscript warmup browser` installs it again. In the container, the browser, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the default Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
+`reelscript cache clear <part...>` deletes the parts you name and `reelscript cache clear all` deletes everything in reelscript's folder; each is downloaded or generated again when next needed. The browser, shared with other projects in Playwright's folder, is deleted only by name, `reelscript cache clear browser`, and `reelscript warmup browser` installs it again. In the container, the browser, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the default Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
 
 ## API
 

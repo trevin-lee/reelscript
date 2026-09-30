@@ -1,4 +1,4 @@
-import type { Page, Browser, BrowserContext, CDPSession } from "playwright";
+import type { Page, Browser, BrowserContext, CDPSession, Locator } from "playwright";
 import { launchChromium, macChrome } from "./browser.js";
 import { macShortcut, pressMacShortcut } from "./macKeys.js";
 import sharp, { type OverlayOptions } from "sharp";
@@ -13,7 +13,7 @@ import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
 import { applyPronunciations, cachedClip, kokoro, synthesizeClip, voiceFor, type Clip, type TtsEngine } from "./tts.js";
 import { onInterrupt } from "./cleanup.js";
-import { warn } from "./warnings.js";
+import { warn, warningCount } from "./warnings.js";
 import {
   TERMINAL_URL,
   loadRecording,
@@ -558,10 +558,9 @@ class Engine {
     // helpers (__name) that don't exist in the page.
     let hits: boolean;
     try {
-      hits = await w.page
-        .locator(aimed.selector)
-        .filter({ visible: true }) // the element visible() aimed at
-        .first()
+      const all = w.page.locator(aimed.selector);
+      hits = await all
+        .nth((await shownMatches(all))[0] ?? 0) // the element visible() aimed at
         .evaluate(
           (el, [x, y]) => {
             let hit = document.elementFromPoint(x, y);
@@ -602,14 +601,16 @@ class Engine {
    * visible matches are a warning: the first may not be the one meant.
    */
   private async visible(w: Win, target: string) {
-    const matches = w.page.locator(target).filter({ visible: true });
-    const loc = matches.first();
+    const all = w.page.locator(target);
     const deadline = Date.now() + 3000;
-    while (!(await loc.isVisible())) {
+    let seen = await shownMatches(all);
+    while (!seen.length) {
       if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible in the ${w.id} window`);
       await new Promise((r) => setTimeout(r, 25));
+      seen = await shownMatches(all);
     }
-    const count = await matches.count();
+    const loc = all.nth(seen[0]);
+    const count = seen.length;
     const key = `${this.at} ${target}`;
     if (count > 1 && !this.ambiguous.has(key)) {
       this.ambiguous.add(key);
@@ -785,6 +786,16 @@ class Engine {
           const field = await this.visible(w, action.target);
           await this.inView(w, field, action.target); // like moveTo: no silent jump to an off-screen field
           await field.focus();
+          // A field that can't take the keyboard would leave the keys to whatever had it before.
+          const refused = await field.evaluate((el) => {
+            if ((el as HTMLInputElement).disabled || el.matches(":disabled")) return "it's disabled";
+            if ((el as HTMLInputElement).readOnly) return "it's read-only";
+            let active = document.activeElement;
+            while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+            for (let n: Node | null = active; n; n = n.parentNode ?? ((n as ShadowRoot).host || null)) if (n === el) return null;
+            return "it can't take the keyboard (it isn't a text field)";
+          });
+          if (refused) throw new Error(`reelscript: can't type into "${action.target}": ${refused}`);
         } else if (w.kind === "editor") {
           await this.editorFocus(w);
         }
@@ -907,9 +918,9 @@ class Engine {
         // time between steps for the page to lay out and paint, until the
         // target shows. No frame is filmed and no video time passes.
         const w = action.window ? this.window(action.window) : this.focused();
-        const loc = w.page.locator(action.target).filter({ visible: true }).first();
+        const all = w.page.locator(action.target);
         const deadline = Date.now() + (action.timeout ?? 15_000);
-        while (!(await loc.isVisible())) {
+        while (!(await shownMatches(all)).length) {
           if (Date.now() > deadline) throw new Error(`reelscript: waitFor "${action.target}" timed out in the ${w.id} window`);
           await this.advanceClock(this.frameMs);
           await new Promise((r) => setTimeout(r, 16));
@@ -1460,6 +1471,30 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
 }
 
 /**
+ * Which of a locator's matches a viewer could see, by index: a box, visible
+ * itself, and nothing it's inside faded all the way out. Playwright counts
+ * an element in an opacity: 0 container (a closed modal) as visible; a
+ * target there would be filmed as an empty page. Anything fading in (above
+ * 0) counts. The same rule decides the caret and MCP's inspect_page.
+ */
+async function shownMatches(all: Locator): Promise<number[]> {
+  return all.evaluateAll((els) => {
+    const out: number[] = [];
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const r = el.getBoundingClientRect();
+      if (!el.isConnected || r.width <= 0 || r.height <= 0 || getComputedStyle(el).visibility !== "visible") continue;
+      let clear = true;
+      for (let n: Element | null = el; n && clear; n = n.parentElement ?? ((n.getRootNode() as ShadowRoot).host || null)) {
+        if (getComputedStyle(n).opacity === "0") clear = false;
+      }
+      if (clear) out.push(i);
+    }
+    return out;
+  });
+}
+
+/**
  * The browser window has no tabs, and a page Chromium opened in a new one
  * would never be seen: a link or window.open() that would open a new tab
  * or window opens in this one instead, as if the demo had switched to it.
@@ -1602,6 +1637,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
 
+  const warningsAtStart = warningCount();
   // Before anything slow (synthesizing narration, first downloading its model): a format render can't write fails now.
   if (snapshot === undefined && options.out) checkOutputFormat(options.out);
 
@@ -1815,6 +1851,11 @@ export async function render(actions: Action[], options: RenderOptions): Promise
         unlinkSync(videoPath);
       } else if (videoPath !== partial) {
         renameSync(videoPath, partial);
+      }
+      // Under --strict, a render with warnings fails, and like any failed render leaves the previous output in place.
+      const warned = warningCount() - warningsAtStart;
+      if (process.env.REELSCRIPT_STRICT && warned) {
+        throw new Error(`reelscript: ${warned} warning${warned === 1 ? "" : "s"} above, and --strict makes a render with warnings fail; ${options.out} is unchanged`);
       }
       renameSync(partial, options.out);
     }

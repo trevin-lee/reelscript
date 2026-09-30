@@ -30,6 +30,25 @@ function pinNow(nowMs: string): string {
     });
     const realParts = DTF.formatToParts;
     DTF.formatToParts = function (d) { return realParts.call(this, d === undefined ? current() : d); };
+    // A cookie the page sets to expire in 30 days, by its own date, would be long
+    // expired by the real one Chromium judges it by, and dropped at once (a
+    // consent banner that comes back): move expiries by the gap between them.
+    const gap = () => RealDate.now() - current();
+    const cookie = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
+    Object.defineProperty(Document.prototype, "cookie", {
+      configurable: true,
+      get() { return cookie.get.call(this); },
+      set(v) {
+        cookie.set.call(this, String(v).replace(/;\s*expires=([^;]*)/i, (m, d) => {
+          const t = RealDate.parse(d);
+          return isNaN(t) ? m : "; expires=" + new RealDate(t + gap()).toUTCString();
+        }));
+      },
+    });
+    if (typeof cookieStore !== "undefined") {
+      const set = cookieStore.set.bind(cookieStore);
+      cookieStore.set = (a, b) => a && typeof a === "object" && typeof a.expires === "number" ? set({ ...a, expires: a.expires + gap() }) : set(a, b);
+    }
     if (typeof Temporal !== "undefined" && Temporal.Now) {
       const T = Temporal;
       const zone = T.Now.timeZoneId;
@@ -200,9 +219,12 @@ __PIN_NOW__
     // The focused element itself, inside whatever web components hold it.
     let el = document.activeElement;
     for (let r = el && shadowOf(el); r && r.activeElement; r = shadowOf(el)) el = r.activeElement;
+    // Seen, as a target must be: not in anything faded all the way out (a closed modal).
     const visible = (e) => {
       const r = e.getBoundingClientRect();
-      return r.width > 2 && r.height > 2 && getComputedStyle(e).opacity !== "0";
+      if (r.width <= 2 || r.height <= 2 || getComputedStyle(e).visibility !== "visible") return false;
+      for (let n = e; n; n = n.parentElement || (n.getRootNode().host || null)) if (getComputedStyle(n).opacity === "0") return false;
+      return true;
     };
     if (el && document.hasFocus() && visible(el)) {
       if ((el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT_TYPES.includes(el.type))) && el.selectionStart === el.selectionEnd && !el.readOnly) {

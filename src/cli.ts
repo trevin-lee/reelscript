@@ -35,7 +35,7 @@ function usage(exitCode = 1): never {
 usage:
   reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                    render scripts to .mp4 or .gif
-  reelscript preview <script> --at <seconds> [--out frame.png]
+  reelscript preview <script> [--at <seconds>] [--out frame.png]
                                                    render one frame as a PNG
   reelscript check   <script> [more...] [--strict]  run the timeline without rendering; fail on
                                                    anything missing, with the script line;
@@ -47,7 +47,7 @@ usage:
   reelscript warmup  [browser] [narration] [editor] [--with-deps]
                                                    download the browser, voice model and VS Code;
                                                    --with-deps adds Chromium's Linux libraries
-  reelscript cache   [clear <part|all>]            show or clear what's cached on disk
+  reelscript cache   [clear <part...|all>]         show or clear what's cached on disk
   reelscript mcp                                   MCP server (stdio) for coding agents
   reelscript --version
 
@@ -197,6 +197,7 @@ function fail(message: string): never {
 
 async function main(): Promise<void> {
   const { command, flags, positional, problem } = parse(process.argv.slice(2));
+  if ("strict" in flags) process.env.REELSCRIPT_STRICT = "1"; // so a strict render keeps the previous output
   if ("help" in flags) usage(0);
   const allowed = OPTIONS[command];
   if (allowed) {
