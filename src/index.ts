@@ -15,7 +15,7 @@ import type { Menubar, ThemeName } from "./theme.js";
 import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
-import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
+import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -93,6 +93,12 @@ function invalidNumber(options: object): string | null {
 function invalidOption(o: DemoOptions): string | null {
   const unknown = unknownField(o, DEMO_FIELDS);
   if (unknown) return unknown;
+  // And inside the options that are objects themselves.
+  const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS]];
+  for (const [name, value, fields] of inside) {
+    const problem = value && typeof value === "object" ? unknownField(value, fields) : null;
+    if (problem) return `${name}: ${problem}`;
+  }
   const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
   const camera = o.camera;
   if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
@@ -191,6 +197,10 @@ const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
 };
 
+const CAMERA_FIELDS: { readonly [P in keyof FollowCamera]-?: true } = { scale: true, hold: true, holdMs: true };
+const MENUBAR_FIELDS: { readonly [P in keyof Exclude<Menubar, false>]-?: true } = { app: true, clockText: true, clock: true };
+const GIF_FIELDS: { readonly [P in keyof GifOptions]-?: true } = { width: true, fps: true };
+
 /** An option name the object doesn't take, with the one it's probably a misspelling of. */
 function unknownField(options: object, fields: object): string | null {
   const known = Object.keys(fields);
@@ -213,9 +223,10 @@ function editDistance(a: string, b: string): number {
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
-function noteRun(): void {
-  const g = globalThis as { __reelscript_runs?: number };
-  g.__reelscript_runs = (g.__reelscript_runs ?? 0) + 1;
+function noteRun(kind: "render" | "check"): void {
+  const g = globalThis as { __reelscript_runs?: { render: number; check: number } };
+  g.__reelscript_runs ??= { render: 0, check: 0 };
+  g.__reelscript_runs[kind]++;
 }
 
 /** "demo.ts:14:7" for the user code that called into the Demo API. */
@@ -305,8 +316,8 @@ export interface DemoOptions {
   address?: (url: string) => string;
   /**
    * The macOS theme's menu bar. `false` leaves it out, and the first window
-   * moves up into its place; `{ app, clock }` sets what it says. Default:
-   * "reelscript" and a fixed clock.
+   * moves up into its place; `{ app, clockText }` sets what it says. Default:
+   * "reelscript", and the demo's `clock`.
    */
   menubar?: Menubar;
 }
@@ -586,7 +597,7 @@ class EditorWindow extends Win {
     this.demo._push({ kind: "editor.open", ...opts });
   }
 
-  /** Open a file through Quick Open (Ctrl+P), typing its name. */
+  /** Open a file through Quick Open (⌘P), typing its name. */
   async openFile(path: string, opts: TypeOptions = {}): Promise<void> {
     this.demo._push({ kind: "editor.openFile", path, ...opts });
   }
@@ -676,7 +687,7 @@ export class Demo {
     this._push({ kind: "type", target, text, ...opts });
   }
 
-  /** Press a key or chord, e.g. "Enter" or "Control+K", in the focused window or the one named by `window` (it comes to the front). */
+  /** Press a key or chord, e.g. "Enter" or "Meta+K", in the focused window or the one named by `window` (it comes to the front). */
   async press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): Promise<void> {
     this._push({ kind: "press", key, ...opts });
   }
@@ -750,8 +761,13 @@ export class Demo {
     const dir = this.recordingsDir();
     const files: string[] = [];
     const keys = recordingKeys(this.actions as never);
+    const g = globalThis as { __reelscript_recorded?: Map<string, Set<string>> };
+    g.__reelscript_recorded ??= new Map();
+    const done = g.__reelscript_recorded.get(dir) ?? new Set<string>();
     for (const [i, key] of keys) {
       const a = this.actions[i] as Extract<Action, { kind: "terminal.run" }>;
+      // A script that renders twice (an MP4 and a GIF) runs each command once.
+      if (done.has(recordingPath(dir, a.command, key))) continue;
       if (this.options.verbose ?? true) process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const cwd = fromScript(a.cwd ?? ".");
       if (!existsSync(cwd)) {
@@ -770,11 +786,8 @@ export class Demo {
       files.push(saveRecording(dir, rec, key));
     }
     // Let `reelscript record --prune` know which recordings are still in use.
-    const g = globalThis as { __reelscript_recorded?: Map<string, Set<string>> };
-    g.__reelscript_recorded ??= new Map();
-    const used = g.__reelscript_recorded.get(dir) ?? new Set<string>();
-    for (const f of files) used.add(f);
-    g.__reelscript_recorded.set(dir, used);
+    for (const f of files) done.add(f);
+    g.__reelscript_recorded.set(dir, done);
     return files;
   }
 
@@ -787,7 +800,7 @@ export class Demo {
    * with the script location.
    */
   async check(outPath?: string): Promise<RenderResult> {
-    noteRun();
+    noteRun("check");
     const started = Date.now();
     const verbose = this.options.verbose ?? true;
     const result = await unlessInterrupted(renderTimeline(this.actions, {
@@ -826,7 +839,8 @@ export class Demo {
    * REELSCRIPT_RECORD and REELSCRIPT_OUT.
    */
   async render(outPath: string): Promise<RenderResult> {
-    noteRun();
+    if (process.env.REELSCRIPT_CHECK) return this.check(outPath);
+    noteRun("render");
     if (process.env.REELSCRIPT_RECORD) {
       const files = await this.recordTerminals();
       if (this.options.verbose ?? true) process.stderr.write(
@@ -836,10 +850,15 @@ export class Demo {
       );
       return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
     }
-    if (process.env.REELSCRIPT_CHECK) {
-      const g = globalThis as { __reelscript_runs?: number };
-      g.__reelscript_runs = (g.__reelscript_runs ?? 1) - 1; // check() counts itself
-      return this.check(outPath);
+    // --out and preview name one output; a second render() would overwrite it with something else.
+    if (process.env.REELSCRIPT_OUT) {
+      const g = globalThis as { __reelscript_out_taken?: boolean };
+      if (g.__reelscript_out_taken) {
+        throw new Error(
+          `reelscript: this script calls render() more than once, and ${process.env.REELSCRIPT_SNAPSHOT_AT ? "preview shows one" : "--out names one video"}; run it without ${process.env.REELSCRIPT_SNAPSHOT_AT ? "a second render(), or preview a script that renders once" : "--out"}\n  at ${callerLocation()} (render)`,
+        );
+      }
+      g.__reelscript_out_taken = true;
     }
     const out = process.env.REELSCRIPT_OUT || fromScript(outPath);
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;

@@ -94,9 +94,16 @@ export async function ensureCodeServer(onStatus?: (m: string) => void): Promise<
   return bin;
 }
 
-function run(cmd: string, args: string[]): Promise<void> {
+/**
+ * code-server writes its logs under $XDG_DATA_HOME (~/.local/share/code-server
+ * by default), outside anything reelscript lists or clears; each run keeps
+ * them in its own temporary folder instead.
+ */
+const logsIn = (dir: string) => ({ ...process.env, XDG_DATA_HOME: join(dir, "data") });
+
+function run(cmd: string, args: string[], logDir?: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"], env: logDir ? logsIn(logDir) : process.env });
     let err = "";
     p.stderr!.on("data", (d) => (err += d.toString()));
     p.on("error", reject);
@@ -199,7 +206,7 @@ async function cachedInstall(bin: string, spec: string, vsixPath: string | null,
       "--user-data-dir", join(scratch, "user"),
       "--extensions-dir", join(scratch, "ext"),
       "--install-extension", vsixPath ?? spec,
-    ]);
+    ], scratch);
     if (!existsSync(join(scratch, "ext", "extensions.json"))) {
       throw new Error(`reelscript: installing extension ${spec} produced nothing`);
     }
@@ -303,7 +310,7 @@ export class EditorServer {
       ],
       // Its own process group, so stop() can end the extension host and
       // other children too, not just the parent.
-      { stdio: ["ignore", "pipe", "pipe"], detached: true },
+      { stdio: ["ignore", "pipe", "pipe"], detached: true, env: logsIn(this.root) },
     );
     this.proc = proc;
     let log = "";

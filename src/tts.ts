@@ -222,6 +222,10 @@ export async function synthesizeClip(engine: TtsEngine, text: string, opts: TtsO
 export function applyPronunciations(text: string, map: Record<string, string> | undefined): string {
   if (!map) return text;
   let out = text;
-  for (const [word, spoken] of Object.entries(map)) out = out.split(word).join(spoken);
+  // Whole words only: { SQL: "sequel" } leaves PostgreSQL alone.
+  for (const [word, spoken] of Object.entries(map)) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "gu"), () => spoken);
+  }
   return out;
 }

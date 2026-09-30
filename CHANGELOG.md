@@ -17,11 +17,11 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 **`check` can be trusted**
 
 - An editor file or command that VS Code can't find fails at its script line, instead of pressing Enter on "No matching results" or a similar command.
-- A script that never calls `demo.render()` fails instead of passing silently.
+- A script that never calls `demo.render()` fails instead of passing silently, and `render`, `preview` and `record` don't take a `demo.check()` for one (they exited 0 having written nothing).
 - A missing terminal recording names the script line.
 - Options render can't use fail at their `createDemo()` line: `fps`, `viewport`, `desktop` and `gif` sizes that aren't positive numbers (they failed in ffmpeg or sharp partway through a render), and a misspelt `theme`, `timezone` or `clock`. Number options on actions fail where they're queued too: a `wpm` or `speed` of 0, or a string, hung the render, and a negative `wait` ran time backwards.
 - A missing `session` file names the `createDemo()` line.
-- A misspelt option name fails where it's written, with the name it probably meant (`viewPort`: did you mean `viewport`?), as a misspelt value does; scripts run without type-checking, so `duraton: 3000` used to be ignored.
+- A misspelt option name fails where it's written, with the name it probably meant (`viewPort`: did you mean `viewport`?), as a misspelt value does; scripts run without type-checking, so `duraton: 3000` used to be ignored. Inside `camera`, `menubar` and `gif` too.
 - `check` fails, at the `say()` line, when the voice engine can't run (no `kokoro-js` installed) for a line `render` would have to synthesize.
 - The CLI names what's missing instead of doing something else: an option without its value (`--out` last), a value on an on/off option (`--prune=no`), a command with no script, `cache clear` with no part, an unknown `cache` command.
 - `openFile()` and `command()` accept only the file or command asked for. VS Code's search offers a near match for almost anything (webapp.ts for "app.ts"), and that used to be opened while `check` passed; now it fails at the line and names what VS Code offered. `editor.file()` and `editor.tab()` match exact names too, and the folder the file is directly in when you give one (`"src/app.ts"`, spaces included).
@@ -37,6 +37,13 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- `scroll({ by })` and `scroll({ to })` move an app's own scrolling area when the page itself doesn't scroll (the usual app layout, where they did nothing), and fail when nothing on the page scrolls.
+- A script that renders twice (an MP4 and a GIF) runs each command once under `record`, and `--out` or `preview`, which name one output, refuse it instead of overwriting one render with the other.
+- A format `render` can't write is refused before narration is synthesized (and before the voice model downloads).
+- VS Code's logs stay in each run's temporary folder instead of piling up in `~/.local/share/code-server`.
+- `cache clear` takes several parts, like `warmup`, and refuses a misspelt one before removing anything; `login` names a missing web address.
+- `pronunciations` respell whole words: `{ SQL: "sequel" }` leaves PostgreSQL alone.
+- The README says network responses arrive in real time, and how to keep them out of the timing.
 - `editor.type()` after clicking a file in the Explorer types into the file; the keys went to the Explorer (and selected files) while `check` passed. With no file open, it fails at its line.
 - The browser window is Chrome on a Mac on every host, like the desktop: pages show the same shortcut hints in a local preview as in the container, and a site that checks the user agent or client hints for a headless browser sees an ordinary one. The README says which keys follow the host.
 - Opening a terminal that's open applies a new `fontSize` or `lineHeight` too, as the README's rule for `open()` now says.

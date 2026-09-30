@@ -103,11 +103,19 @@ function missing(message: string): never {
 
 /** Run a script and fail if it never called demo.render(), which would otherwise pass silently. */
 async function runScript(path: string): Promise<void> {
-  const g = globalThis as { __reelscript_runs?: number };
-  const before = g.__reelscript_runs ?? 0;
+  const g = globalThis as { __reelscript_runs?: { render: number; check: number } };
+  const counts = () => ({ render: 0, check: 0, ...g.__reelscript_runs });
+  const before = counts();
   await importScript(path);
-  if ((g.__reelscript_runs ?? 0) === before) {
-    throw new Error(`reelscript: ${path} finished without calling demo.render(), so there was nothing to render, check or record`);
+  const after = counts();
+  // demo.check() is a run only for `reelscript check`; render, preview and record need demo.render().
+  const ran = after.render > before.render || (process.env.REELSCRIPT_CHECK && after.check > before.check);
+  if (!ran) {
+    const onlyChecked = after.check > before.check;
+    throw new Error(
+      `reelscript: ${path} finished without calling demo.render(), so there was nothing to render, check or record` +
+        (onlyChecked ? " (it calls demo.check(), which only reelscript check runs)" : ""),
+    );
   }
 }
 
@@ -264,6 +272,7 @@ async function main(): Promise<void> {
     case "login": {
       if (positional.length !== 1) fail("login takes one URL");
       const url = positional[0];
+      if (!/^https?:\/\//i.test(url)) fail(`login takes the web address of your app's sign-in page, like https://app.example.com/login, not "${url}"`);
       const out = flags.out || "session.json";
       const { login } = await import("./session.js");
       const r = await login(url, out);
@@ -304,8 +313,13 @@ async function main(): Promise<void> {
       const { cacheParts, clearCache, formatBytes, partPaths, sizeOf } = await import("./cache.js");
       const { cacheDir } = await import("./tts.js");
       if (positional[0] === "clear") {
-        const part = positional[1] ?? missing(`cache clear needs a part: ${cacheParts().map((p) => p.name).join(", ")}, or all`);
-        for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`);
+        const parts = positional.slice(1);
+        if (!parts.length) missing(`cache clear needs a part: ${cacheParts().map((p) => p.name).join(", ")}, or all`);
+        // Several parts, like warmup; a misspelt one fails before anything is removed.
+        const known = cacheParts().map((p) => p.name);
+        const unknown = parts.find((p) => p !== "all" && !known.includes(p));
+        if (unknown) fail(`unknown cache part "${unknown}". Parts: ${known.join(", ")}, all`);
+        for (const part of parts) for (const path of clearCache(part)) console.error(`reelscript: removed ${path}`);
         break;
       }
       if (positional.length) missing(`unknown cache command "${positional[0]}" (use cache, or cache clear <part|all>)`);

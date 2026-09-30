@@ -843,11 +843,28 @@ class Engine {
               return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
             })
           : await w.page.evaluate(([by, to]) => {
-              const box = document.scrollingElement!;
+              // The page's scroller: the document, or, in an app whose document
+              // doesn't scroll, the scrolling area with the most of it on screen.
+              const doc = document.scrollingElement!;
+              let box: Element | null = doc.scrollHeight > doc.clientHeight ? doc : null;
+              let most = 0;
+              for (const el of box ? [] : Array.from(document.querySelectorAll("*"))) {
+                if (el.scrollHeight <= el.clientHeight + 1) continue;
+                const oy = getComputedStyle(el).overflowY;
+                if (oy !== "auto" && oy !== "scroll") continue;
+                const r = el.getBoundingClientRect();
+                const area = Math.max(0, Math.min(r.right, innerWidth) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0));
+                if (area > most) {
+                  most = area;
+                  box = el;
+                }
+              }
+              if (!box) return null;
               (window as unknown as { __reelscript_scroller: Element }).__reelscript_scroller = box;
               const want = to ?? box.scrollTop + (by ?? 0);
               return { from: box.scrollTop, to: Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight)) };
             }, [action.by ?? null, action.to ?? null] as [number | null, number | null]);
+        if (!range) throw new Error("reelscript: demo.scroll() found nothing on the page that scrolls");
         const dist = Math.abs(range.to - range.from);
         const dur = action.duration ?? clamp(Math.round(300 + dist * 0.6), 300, 1600);
         const ease = action.ease ?? "smooth";
@@ -1595,6 +1612,9 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   if (options.baseDir) engine.baseDir = options.baseDir;
   const [width, height] = engine.desktop;
 
+  // Before anything slow (synthesizing narration, first downloading its model): a format render can't write fails now.
+  if (snapshot === undefined && options.out) checkOutputFormat(options.out);
+
   const where = (index: number, err: unknown): Error => {
     const e = err instanceof Error ? err : new Error(String(err));
     const loc = options.sources?.[index];
@@ -1711,7 +1731,6 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     for (const p of [partial, videoPath]) rmSync(p, { force: true });
   };
   const unregisterPartial = onInterrupt(removePartials);
-  if (snapshot === undefined && options.out) checkOutputFormat(options.out);
   const encoder = snapshot === undefined && !check ? new Encoder({ out: videoPath, width, height, fps, gif: options.gif }) : null;
 
   let stepIndex = -1;
