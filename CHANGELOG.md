@@ -17,6 +17,8 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - An editor file or command that VS Code can't find fails at its script line, instead of pressing Enter on "No matching results" or a similar command.
 - A script that never calls `demo.render()` fails instead of passing silently.
 - A missing terminal recording names the script line.
+- `fps`, `viewport`, `desktop` and `gif` sizes that aren't positive numbers fail at their `createDemo()` line, instead of in ffmpeg or sharp partway through a render.
+- A script path that doesn't exist is named plainly, instead of with Node's module error.
 
 **Fixes and additions**
 
@@ -59,6 +61,8 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Quick Open and the Command Palette ask again if VS Code hasn't registered an extension's commands or indexed files yet, instead of failing on a slow machine.
 - `editor.openFile()` ends once the file is open with the caret in it, and `editor.command()` once VS Code has run it (or moved on to its own prompt), so the next step never races VS Code; this made editor checks flaky on slow machines.
 - `<video>`, `<audio>` and SVG (SMIL) animations follow the frame clock, so pages with a hero video or an animated SVG render the same every time; a page's own `play()`/`pause()` still work. Animated GIFs can't be controlled and are documented as playing on their own.
+- Web components render the same every time too: animations, `<video>`, `<audio>` and SVG in shadow roots, open or closed, follow the frame clock, and their text fields get the drawn caret.
+- A `<video>` that can't be moved to the clock's time (served without HTTP Range requests, as `python -m http.server` does) is a warning instead of a silently still picture.
 - An odd `desktop` size is rounded up to even numbers, as H.264 needs, instead of failing the `.mp4` render; `goto("./app.html#route")` keeps its query and hash; `record` honours `verbose: false`; `cache clear narration` clears every voice model reelscript downloaded.
 - The text caret in web pages blinks on the frame clock: Chromium's own blinks on real time, so two renders differed wherever a field had focus.
 - The page clock follows Web Animations the page reverses, slows, speeds up, or replays.

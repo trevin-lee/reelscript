@@ -459,22 +459,33 @@ class Engine {
 
   // ------------------------------------------------------------ page clock
 
+  /** Media sources already warned about. */
+  private stuckMedia = new Set<string>();
+
   /** Advance every window's virtual clock by `ms`. */
   async advanceClock(ms: number): Promise<void> {
     if (!this.deterministic) return;
     // Every frame of every window, iframes included: each has its own clock.
-    await Promise.all(
+    const results = await Promise.all(
       [...this.windows.values()].flatMap((w) =>
         w.page.frames().map((f) =>
           f
             .evaluate((ms) => {
-              const g = window as unknown as { __reelscript_advance?: (ms: number) => void };
-              return g.__reelscript_advance?.(ms); // resolves once any media seek has landed
+              const g = window as unknown as { __reelscript_advance?: (ms: number) => Promise<(string | undefined)[]> | undefined };
+              return g.__reelscript_advance?.(ms); // resolves once any media seek has landed, with media that wouldn't move
             }, ms)
-            .catch(() => {}), // a frame that navigated or went away mid-step
+            .catch(() => undefined), // a frame that navigated or went away mid-step
         ),
       ),
     );
+    for (const src of results.flat()) {
+      if (!src || this.stuckMedia.has(src)) continue;
+      this.stuckMedia.add(src);
+      process.stderr.write(
+        `reelscript: warning: ${src} can't be moved to the page clock's time, so it stands still in the video. ` +
+          `Its server may not support HTTP Range requests (python -m http.server doesn't); open the page from a file, or serve it with one that does\n`,
+      );
+    }
   }
 
   // ------------------------------------------------------------ targets

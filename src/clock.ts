@@ -83,12 +83,38 @@ const CLOCK_SHIM_SOURCE = String.raw`
 
   const call = (fn, args) => { try { typeof fn === "function" ? fn(...args) : new Function(String(fn))(); } catch (e) { console.error(e); } };
 
+  // Web components keep their animations, media and text fields in shadow
+  // roots, which document-wide queries don't reach. A closed root can only be
+  // found through the host it was attached to, so those are remembered.
+  const closedRoots = new WeakMap(); // host -> its closed shadow root
+  const realAttachShadow = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function (init) {
+    const root = realAttachShadow.call(this, init);
+    if (init && init.mode === "closed") closedRoots.set(this, root);
+    return root;
+  };
+  const shadowOf = (el) => el.shadowRoot || closedRoots.get(el) || null;
+  // The document and every shadow root in it, nested ones included.
+  const scopes = () => {
+    const found = [document];
+    for (let i = 0; i < found.length; i++) {
+      const start = found[i] === document ? document.documentElement : found[i];
+      if (!start) continue;
+      const walker = document.createTreeWalker(start, NodeFilter.SHOW_ELEMENT);
+      for (let n = walker.currentNode; n; n = walker.nextNode()) {
+        const root = shadowOf(n);
+        if (root) found.push(root);
+      }
+    }
+    return found;
+  };
+
   // Text caret. Chromium blinks its own caret on real time, so two renders
   // would differ wherever a text field has focus. Its caret is hidden, and
   // this draws one at the same place instead: solid for half a second after
   // each edit, then blinking every half second, on the frame clock.
   let caret = null;
-  let caretCss = null;
+  let caretCss = null; // hides Chromium's caret in the document and in every shadow root
   let lastEdit = 0;
   const edited = () => { lastEdit = now; };
   document.addEventListener("input", edited, true);
@@ -126,15 +152,18 @@ const CLOCK_SHIM_SOURCE = String.raw`
     }
     return { x: r.left + bl + left - el.scrollLeft, y, h, color: cs.color };
   };
-  const drawCaret = () => {
+  const drawCaret = (roots) => {
     if (!document.documentElement) return;
     if (!caretCss) {
-      caretCss = document.createElement("style");
-      caretCss.textContent = "*, *::before, *::after { caret-color: transparent !important; }";
-      document.documentElement.appendChild(caretCss);
+      caretCss = new CSSStyleSheet();
+      caretCss.replaceSync("*, *::before, *::after { caret-color: transparent !important; }");
     }
+    // Added again if the page replaces a scope's adopted sheets (Lit sets them on first render).
+    for (const r of roots) if (!r.adoptedStyleSheets.includes(caretCss)) r.adoptedStyleSheets = [...r.adoptedStyleSheets, caretCss];
     let spot = null;
-    const el = document.activeElement;
+    // The focused element itself, inside whatever web components hold it.
+    let el = document.activeElement;
+    for (let r = el && shadowOf(el); r && r.activeElement; r = shadowOf(el)) el = r.activeElement;
     const visible = (e) => {
       const r = e.getBoundingClientRect();
       return r.width > 2 && r.height > 2 && getComputedStyle(e).opacity !== "0";
@@ -143,7 +172,8 @@ const CLOCK_SHIM_SOURCE = String.raw`
       if ((el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && TEXT_TYPES.includes(el.type))) && el.selectionStart === el.selectionEnd && !el.readOnly) {
         try { spot = fieldCaret(el); } catch (e) { spot = null; }
       } else if (el.isContentEditable) {
-        const sel = getSelection();
+        const scope = el.getRootNode();
+        const sel = scope !== document && scope.getSelection ? scope.getSelection() : getSelection();
         if (sel && sel.rangeCount && sel.isCollapsed) {
           const rr = sel.getRangeAt(0).getBoundingClientRect();
           const cs = getComputedStyle(el);
@@ -207,8 +237,9 @@ const CLOCK_SHIM_SOURCE = String.raw`
     get() { const s = media.get(this); return s ? !s.playing : pausedDesc.get.call(this); },
   });
   const svgStart = new WeakMap();
-  const stepMedia = (ms) => {
-    for (const svg of document.querySelectorAll("svg")) {
+  const inScopes = (roots, selector) => roots.flatMap((r) => Array.from(r.querySelectorAll(selector)));
+  const stepMedia = (ms, roots) => {
+    for (const svg of inScopes(roots, "svg")) {
       if (svg.ownerSVGElement || !svg.querySelector("animate, animateTransform, animateMotion, set")) continue;
       if (!svgStart.has(svg)) svgStart.set(svg, now - ms);
       if (!svg.animationsPaused()) svg.pauseAnimations();
@@ -222,7 +253,8 @@ const CLOCK_SHIM_SOURCE = String.raw`
     });
     // Bring one element to its page-clock time: first wait for its data if it
     // isn't loaded yet (a slow load delays the render, never changes a frame),
-    // then seek and wait for the seek to land.
+    // then seek and wait for the seek to land. Returns the source of media
+    // that won't move, for the renderer to warn about.
     const sync = async (el, s) => {
       if (el.readyState < 2 && !el.error && (el.currentSrc || el.src || el.querySelector("source"))) {
         await until(el, ["loadeddata", "error"], 5000);
@@ -236,10 +268,12 @@ const CLOCK_SHIM_SOURCE = String.raw`
       if (Math.abs(timeDesc.get.call(el) - s.t) > 0.0005) {
         timeDesc.set.call(el, s.t); // the real setter: this isn't the page moving it
         await until(el, ["seeked"], 2000);
+        // A server that doesn't answer HTTP Range requests leaves it where it was.
+        if (Math.abs(timeDesc.get.call(el) - s.t) > 0.05) return el.currentSrc || el.src;
       }
     };
     const syncs = [];
-    for (const el of document.querySelectorAll("video, audio")) {
+    for (const el of inScopes(roots, "video, audio")) {
       const s = mediaState(el);
       if (!pausedDesc.get.call(el)) realPause.call(el);
       // Its time moves with the page clock from the first frame, loaded or not.
@@ -266,9 +300,11 @@ const CLOCK_SHIM_SOURCE = String.raw`
     const cbs = Array.from(rafs.values());
     rafs.clear();
     for (const cb of cbs) call(cb, [now]);
+    const roots = scopes();
+    const animations = () => roots.flatMap((r) => r.getAnimations());
     // An animation the page replays after it finished (play() again) is
     // running once more: take it back onto the frame clock.
-    for (const a of document.getAnimations()) {
+    for (const a of animations()) {
       if (finished.has(a) && a.playState === "running") {
         finished.delete(a);
         tracked.set(a, a.currentTime ?? 0);
@@ -276,7 +312,7 @@ const CLOCK_SHIM_SOURCE = String.raw`
       }
     }
     // Step every running CSS transition / animation by exactly ms.
-    for (const a of document.getAnimations()) {
+    for (const a of animations()) {
       if (finished.has(a)) continue;
       let ct = tracked.get(a);
       const rate = a.playbackRate;
@@ -301,8 +337,8 @@ const CLOCK_SHIM_SOURCE = String.raw`
         tracked.set(a, ct);
       }
     }
-    drawCaret();
-    return stepMedia(ms);
+    drawCaret(roots);
+    return stepMedia(ms, roots);
   };
 })();
 `;

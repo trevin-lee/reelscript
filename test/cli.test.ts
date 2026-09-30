@@ -13,13 +13,18 @@ const tsx = import.meta.resolve("tsx");
 const acme = join(root, "examples/acme");
 
 function cli(args: string[], cwd: string, env: Record<string, string> = {}) {
-  return new Promise<{ code: number | null; output: string; ms: number }>((resolve) => {
+  return new Promise<{ code: number | null; output: string; ms: number; afterRender: number }>((resolve) => {
     const started = Date.now();
     const child = spawn(process.execPath, ["--import", tsx, join(root, "src/cli.ts"), ...args], { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
-    child.stdout!.on("data", (d) => (output += d));
-    child.stderr!.on("data", (d) => (output += d));
-    child.on("close", (code) => resolve({ code, output, ms: Date.now() - started }));
+    let renderedAt = 0; // when "rendered in" was printed: start-up time (slow on a cold install) isn't exit time
+    const seen = (d: Buffer) => {
+      output += d;
+      if (!renderedAt && /rendered in/.test(output)) renderedAt = Date.now();
+    };
+    child.stdout!.on("data", seen);
+    child.stderr!.on("data", seen);
+    child.on("close", (code) => resolve({ code, output, ms: Date.now() - started, afterRender: renderedAt ? Date.now() - renderedAt : NaN }));
   });
 }
 
@@ -45,8 +50,7 @@ test("render output is relative to the script, and the process exits promptly", 
   assert.equal(r.code, 0, r.output);
   assert.ok(existsSync(join(dir, "demos/out/s.mp4")), "written beside the script");
   assert.ok(!existsSync(join(dir, "out")), "not relative to the working directory");
-  const rendered = Number(/rendered in ([\d.]+)s/.exec(r.output)?.[1]) * 1000;
-  assert.ok(r.ms - rendered < 5000, `exited ${r.ms - rendered}ms after rendering`);
+  assert.ok(r.afterRender < 5000, `exited ${r.afterRender}ms after rendering`);
 });
 
 test("a missing terminal recording names the script line", async () => {

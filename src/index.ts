@@ -62,6 +62,24 @@ function invalidChoice(action: Action): string | null {
   );
 }
 
+/** What's wrong with createDemo()'s options, if anything: what a render would fail on, found before it starts. */
+function invalidOption(o: DemoOptions): string | null {
+  const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
+  const camera = o.camera;
+  if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
+    return `unknown camera ${shown(camera)} (use "manual", "follow", or { scale, hold })`;
+  }
+  const above0 = (name: string, v: unknown) =>
+    v !== undefined && !(typeof v === "number" && Number.isFinite(v) && v > 0) ? `${name} must be a number above 0, not ${shown(v)}` : null;
+  const pixels = (name: string, v: unknown) =>
+    v !== undefined && !(Number.isInteger(v) && (v as number) > 0) ? `${name} must be a whole number of pixels above 0, not ${shown(v)}` : null;
+  const size = (name: string, v: unknown) =>
+    v !== undefined && !(Array.isArray(v) && v.length === 2 && v.every((n) => Number.isInteger(n) && n > 0))
+      ? `${name} must be [width, height] in whole pixels above 0, not ${shown(v)}`
+      : null;
+  return above0("fps", o.fps) ?? size("viewport", o.viewport) ?? size("desktop", o.desktop) ?? above0("gif.fps", o.gif?.fps) ?? pixels("gif.width", o.gif?.width);
+}
+
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
 function noteRun(): void {
   const g = globalThis as { __reelscript_runs?: number };
@@ -467,10 +485,8 @@ export class Demo {
   private sources: string[] = [];
 
   constructor(readonly options: DemoOptions = {}) {
-    const camera = options.camera;
-    if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
-      throw new Error(`reelscript: unknown camera ${JSON.stringify(camera)} (use "manual", "follow", or { scale, hold })`);
-    }
+    const problem = invalidOption(options);
+    if (problem) throw new Error(`reelscript: ${problem}\n  at ${callerLocation()} (createDemo)`);
   }
 
   /** @internal */

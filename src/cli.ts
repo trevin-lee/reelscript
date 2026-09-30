@@ -150,6 +150,11 @@ async function main(): Promise<void> {
   }
   const { installInterruptHandlers } = await import("./cleanup.js");
   installInterruptHandlers();
+  // A mistyped script path fails before anything runs, and not with Node's module error.
+  if (["render", "preview", "check", "record"].includes(command)) {
+    const missing = positional.find((p) => !existsSync(resolve(p)));
+    if (missing !== undefined) fail(`no script at ${missing}`);
+  }
   switch (command) {
     case "render": {
       if (!positional.length) usage();
