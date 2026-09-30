@@ -597,7 +597,16 @@ class Engine {
     const w = windowId ? this.window(windowId) : this.focused();
     if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
     const loc = await this.visible(w, target);
-    const box = await this.inView(w, loc, target);
+    let box = await this.inView(w, loc, target);
+    // VS Code runs on real time, and may still be laying out (a folder
+    // expanding, a panel opening) as the script aims: wait for the target to
+    // stay put, so the cursor goes where the click will still find it.
+    for (const deadline = Date.now() + 2000; w.kind === "editor" && Date.now() < deadline; ) {
+      await new Promise((r) => setTimeout(r, 100));
+      const now = await loc.boundingBox();
+      if (!now || (Math.abs(now.x - box.x) < 0.5 && Math.abs(now.y - box.y) < 0.5)) break;
+      box = await this.inView(w, loc, target);
+    }
     return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
   }
 
@@ -1074,27 +1083,39 @@ class Engine {
   /**
    * After Enter, wait (on VS Code's real clock) until it has done what was
    * asked, so the next step never races it: for a file, its tab is active
-   * and the caret is in it; for a command, the palette has closed or moved on
-   * to the command's own prompt (as "Go to Line" does).
+   * and the caret is in it, and the Explorer, if it's showing, has revealed
+   * it (expanding its folder moves the rows below, which the next click may
+   * be aiming at); for a command, the palette has closed or moved on to the
+   * command's own prompt (as "Go to Line" does).
    */
   private async quickInputDone(w: Win, text: string, isFile: boolean): Promise<void> {
     const name = text.split("/").pop() ?? text;
     const deadline = Date.now() + 10_000;
+    let openedAt = 0;
     for (;;) {
-      const done = await w.page.evaluate(
+      const state = await w.page.evaluate(
         ([isFile, name, typed]) => {
           const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
           const open = !!widget && getComputedStyle(widget).display !== "none";
           const input = document.querySelector(".quick-input-box input") as HTMLInputElement | null;
-          if (!isFile) return !open || (input !== null && input.value !== typed);
-          if (open) return false;
+          if (!isFile) return !open || (input !== null && input.value !== typed) ? "done" : "waiting";
+          if (open) return "waiting";
           const tab = document.querySelector(".tabs-container .tab.active");
           const inEditor = !!document.activeElement?.closest(".monaco-editor");
-          return (tab?.getAttribute("aria-label") ?? "").includes(name) && inEditor;
+          if (!(tab?.getAttribute("aria-label") ?? "").includes(name) || !inEditor) return "waiting";
+          const explorer = document.querySelector(".explorer-folders-view") as HTMLElement | null;
+          if (!explorer || explorer.getBoundingClientRect().height === 0) return "done";
+          const rows = Array.from(explorer.querySelectorAll(".monaco-list-row.selected"));
+          return rows.some((r) => r.getAttribute("aria-label") === name) ? "done" : "opened";
         },
         [isFile, name, isFile ? text : `>${text}`] as [boolean, string, string],
       );
-      if (done) return;
+      if (state === "done") return;
+      // A workspace set not to reveal files (explorer.autoReveal) never will; don't wait long for it.
+      if (state === "opened") {
+        openedAt ||= Date.now();
+        if (Date.now() - openedAt > 2000) return;
+      }
       if (Date.now() > deadline) {
         throw new Error(isFile ? `reelscript: VS Code didn't finish opening "${text}"` : `reelscript: VS Code didn't run "${text}"`);
       }
