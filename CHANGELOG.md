@@ -57,6 +57,8 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - The README is honest about VS Code's real-time clock, and the extension example waits for its result instead of a fixed time.
 - `browser.goto("./app.html")` opens a local page relative to the script, like every other path in a script.
 - `editor.openFile()` ends once the file is open with the caret in it, and `editor.command()` once VS Code has run it (or moved on to its own prompt), so the next step never races VS Code; this made editor checks flaky on slow machines.
+- `<video>`, `<audio>` and SVG (SMIL) animations follow the frame clock, so pages with a hero video or an animated SVG render the same every time; a page's own `play()`/`pause()` still work. Animated GIFs can't be controlled and are documented as playing on their own.
+- An odd `desktop` size is rounded up to even numbers, as H.264 needs, instead of failing the `.mp4` render; `goto("./app.html#route")` keeps its query and hash; `record` honours `verbose: false`; `cache clear narration` clears every voice model reelscript downloaded.
 - The text caret in web pages blinks on the frame clock: Chromium's own blinks on real time, so two renders differed wherever a field had focus.
 - The page clock follows Web Animations the page reverses, slows, speeds up, or replays.
 - A misspelt `ease`, `window`, `within`, `button` or `camera` fails where the script sets it; typing or pressing keys in the terminal window fails with a pointer to `terminal.run()`; an extension folder named without `./` is a path; a missing `cwd` fails clearly in `record`.

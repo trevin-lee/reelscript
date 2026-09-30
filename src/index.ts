@@ -564,7 +564,7 @@ export class Demo {
     const keys = recordingKeys(this.actions as never);
     for (const [i, key] of keys) {
       const a = this.actions[i] as Extract<Action, { kind: "terminal.run" }>;
-      process.stderr.write(`reelscript: recording "${a.command}"\n`);
+      if (this.options.verbose ?? true) process.stderr.write(`reelscript: recording "${a.command}"\n`);
       const cwd = fromScript(a.cwd ?? ".");
       if (!existsSync(cwd)) {
         throw new Error(`reelscript: the folder "${a.cwd}" for "${a.command}" doesn't exist (${cwd})\n  at ${this.sources[i]} (terminal.run)`);
@@ -639,7 +639,7 @@ export class Demo {
     noteRun();
     if (process.env.REELSCRIPT_RECORD) {
       const files = await this.recordTerminals();
-      process.stderr.write(
+      if (this.options.verbose ?? true) process.stderr.write(
         files.length
           ? `reelscript: saved ${files.length} recording${files.length === 1 ? "" : "s"} in ${this.recordingsDir()}\n`
           : "reelscript: nothing to record (no terminal.run without output)\n",

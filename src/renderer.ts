@@ -225,7 +225,8 @@ class Engine {
   ) {
     this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar);
     this.epoch = clockEpoch(DEFAULT_CLOCK, DEFAULT_TIMEZONE);
-    this.desktop = desktop ?? this.theme.defaultDesktop(viewport);
+    // Even sizes, as H.264 needs; the default desktop already is.
+    this.desktop = desktop ? [desktop[0] + (desktop[0] % 2), desktop[1] + (desktop[1] % 2)] : this.theme.defaultDesktop(viewport);
     this.cursor = { x: this.desktop[0] / 2, y: this.desktop[1] / 2 };
     this.zoom = { scale: 1, cx: this.desktop[0] / 2, cy: this.desktop[1] / 2 };
   }
@@ -468,7 +469,7 @@ class Engine {
           f
             .evaluate((ms) => {
               const g = window as unknown as { __reelscript_advance?: (ms: number) => void };
-              g.__reelscript_advance?.(ms);
+              return g.__reelscript_advance?.(ms); // resolves once any media seek has landed
             }, ms)
             .catch(() => {}), // a frame that navigated or went away mid-step
         ),
@@ -607,7 +608,9 @@ class Engine {
         const w = await this.ensureWindow("browser", "browser");
         this.focus(w);
         // A URL as is; a path to a local page (no scheme) is relative to the script, like every path in it.
-        const url = /^[a-z][a-z0-9+.-]*:/i.test(action.url) ? action.url : pathToFileURL(resolvePath(this.baseDir, action.url)).href;
+        const url = /^[a-z][a-z0-9+.-]*:/i.test(action.url)
+          ? action.url
+          : new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
         await w.page.goto(url, { waitUntil: "load" });
         w.url = url;
         return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };

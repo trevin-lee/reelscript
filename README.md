@@ -29,8 +29,8 @@ await demo.render("out/demo.mp4");
 ## How it works
 
 - **Code-first, not a UI timeline.** The demo is a script you version, diff, and review.
-- **Deterministic offline rendering.** Frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Every frame is there, the same frames every time, and it runs headless in CI. (Chromium's text rasterizing can vary pixel values invisibly between runs, around 50 dB PSNR, so compare renders by eye or by PSNR, not byte for byte.)
-- **The page's clock is virtual and pinned.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and its iframes and steps CSS transitions through the Web Animations API, one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is, and the page's date is the same on every render.
+- **Deterministic offline rendering.** Frames are produced one at a time: drive a headless Chromium to the state for frame *n*, capture it, composite the animated cursor and zoom, and pipe it to ffmpeg. Every frame is there, the same frames every time, and it runs headless in CI. (Chromium's text rasterizing and video decoding can vary pixel values invisibly between runs, so compare renders by eye or by PSNR, not byte for byte. What's on screen at each frame, and when, doesn't vary.)
+- **The page's clock is virtual and pinned.** reelscript replaces timers, `requestAnimationFrame`, `Date`, and `performance.now` inside the page and its iframes, steps CSS and Web Animations, and moves `<video>`, `<audio>` and SVG animations, one frame per rendered frame. A 200ms fade is 12 frames at 60fps no matter how slow capture is, and the page's date is the same on every render.
 - **A camera that follows the action.** `camera: "follow"` eases in toward each click and the typing caret, holds, and eases back out when things go quiet. Or place zooms by hand with `zoom.to()`.
 - **Cinematic layer.** Eased cursor motion, click ripples, zoom-to-element, accelerated typing, done as math over frames rather than captured motion.
 - **Own the DOM.** Targets are Playwright selectors, and `browser.mockAPI()` returns canned JSON so demos needn't depend on a live backend.
@@ -70,6 +70,7 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 - **Windows.** There is at most one browser, one terminal, and one editor window. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
 - **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page, stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
+- **What the clock can't reach.** Animated GIF, APNG and WebP images play on their own and differ between renders; use a `<video>` or CSS animation for motion that must match. VS Code runs on real time (see Editor demos).
 - **The clock.** Every demo happens at the same moment, Tuesday, September 23, 2025, 9:41 AM UTC, unless you set `clock` and `timezone`. The page's `Date` starts there and the menu bar shows it.
 
 ## Logged-in apps
@@ -260,10 +261,10 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | --- | --- |
 | `editor` | VS Code (code-server), about 200 MB compressed |
 | `extensions` | Editor extensions installed from Open VSX or `.vsix` |
-| `narration` | The Kokoro voice model, about 90 MB |
+| `narration` | Voice models: Kokoro, about 90 MB, and any other downloaded with `kokoro(model)` |
 | `narration-clips` | Spoken lines, reused while their text and voice are unchanged |
 
-`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
+`reelscript cache clear <part>` deletes one part and `reelscript cache clear all` deletes everything; each is downloaded or generated again when next needed. In the container, VS Code and the voice model are built in and aren't cleared. If you set `REELSCRIPT_MODELS`, clearing `narration` removes only the default Kokoro model's folder inside it, and a code-server set with `REELSCRIPT_CODE_SERVER` is never deleted.
 
 ## API
 
@@ -287,7 +288,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.say(text, { voice, speed })` | Queue narration. Starts now or after the previous sentence, while following actions run. |
 | `demo.waitForNarration()` | Hold until everything queued with `say()` has been spoken. |
 | `demo.browser.open({ x, y, width, height })` | Open the browser window without navigating. Optional; `goto()` opens it too. |
-| `demo.browser.goto(url, { hold })` | Navigate to a URL, or to a local page by its path relative to the script, then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
+| `demo.browser.goto(url, { hold })` | Navigate to a URL, or to a local page by its path relative to the script (a `?query` or `#hash` is kept), then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
 | `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from the browser window with canned JSON. Opens no window. (The editor is VS Code's own page and isn't mocked.) |
 | `demo.terminal.open({ title, prompt, fontSize, lineHeight, cols, rows, x, y, width, height })` | Open a terminal window. `cols` and `rows` fix its size in characters; `lineHeight: 1` (default 1.3) joins block characters, as full-screen programs expect. |
 | `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGap, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |
@@ -303,7 +304,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | Option | Default | What it does |
 | --- | --- | --- |
 | `viewport` | `[1280, 800]` | Content size of the first window opened. |
-| `desktop` | first window plus margins | Output size. |
+| `desktop` | first window plus margins | Output size, rounded up to even numbers as H.264 needs. |
 | `theme` | `"macos"` | `"macos"` draws a desktop, menu bar, and window frames; `"bare"` shows window content only. |
 | `fps` | `60` | Output frame rate. |
 | `camera` | `"manual"` | `"follow"` zooms toward clicks and typing on its own; `{ scale, hold }` tunes it. |

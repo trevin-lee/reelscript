@@ -52,6 +52,7 @@ const CLOCK_SHIM_SOURCE = String.raw`
   const RealDate = Date;
 
   const g = window;
+  const realSetTimeout = window.setTimeout.bind(window);
   g.setTimeout = (fn, delay = 0, ...args) => {
     const id = nextId++;
     timers.set(id, { at: now + Math.max(0, Number(delay) || 0), fn, args, every: 0 });
@@ -163,6 +164,91 @@ const CLOCK_SHIM_SOURCE = String.raw`
     Object.assign(caret.style, { display: "block", left: Math.round(spot.x) + "px", top: Math.round(spot.y) + "px", height: Math.round(spot.h) + "px", background: spot.color });
   };
 
+  // Media. <video> and <audio> play on Chromium's real clock, and SVG (SMIL)
+  // animations on their own; both would differ between renders. Media is
+  // held paused and moved to where the page clock says it should be each
+  // frame (the renderer waits for the seek), and each SVG's animation
+  // timeline is set from the page clock.
+  const media = new WeakMap(); // element -> { playing, t }
+  const MediaProto = HTMLMediaElement.prototype;
+  const realPlay = MediaProto.play;
+  const realPause = MediaProto.pause;
+  const pausedDesc = Object.getOwnPropertyDescriptor(MediaProto, "paused");
+  const timeDesc = Object.getOwnPropertyDescriptor(MediaProto, "currentTime");
+  // Media starts where the page puts it: 0, or a time the page sets. Whatever
+  // it played on Chromium's real clock before the page clock took it over
+  // (an autoplay during page load) is discarded, so every render agrees.
+  const mediaState = (el) => {
+    let s = media.get(el);
+    if (!s) {
+      s = { playing: el.autoplay || !pausedDesc.get.call(el), t: 0 };
+      media.set(el, s);
+    }
+    return s;
+  };
+  Object.defineProperty(MediaProto, "currentTime", {
+    configurable: true,
+    get() { return timeDesc.get.call(this); },
+    set(v) { mediaState(this).t = Number(v) || 0; timeDesc.set.call(this, v); },
+  });
+  MediaProto.play = function () {
+    const s = mediaState(this);
+    s.playing = true;
+    this.dispatchEvent(new Event("play"));
+    return Promise.resolve();
+  };
+  MediaProto.pause = function () {
+    const s = mediaState(this);
+    if (s.playing) { s.playing = false; this.dispatchEvent(new Event("pause")); }
+    realPause.call(this);
+  };
+  Object.defineProperty(MediaProto, "paused", {
+    configurable: true,
+    get() { const s = media.get(this); return s ? !s.playing : pausedDesc.get.call(this); },
+  });
+  const svgStart = new WeakMap();
+  const stepMedia = (ms) => {
+    for (const svg of document.querySelectorAll("svg")) {
+      if (svg.ownerSVGElement || !svg.querySelector("animate, animateTransform, animateMotion, set")) continue;
+      if (!svgStart.has(svg)) svgStart.set(svg, now - ms);
+      if (!svg.animationsPaused()) svg.pauseAnimations();
+      svg.setCurrentTime((now - svgStart.get(svg)) / 1000);
+    }
+    // Wait (in real time, off camera) for one of a media element's events.
+    const until = (el, events, ms) => new Promise((resolve) => {
+      const done = () => { for (const e of events) el.removeEventListener(e, done); resolve(); };
+      for (const e of events) el.addEventListener(e, done);
+      realSetTimeout(done, ms); // never wait on a broken source
+    });
+    // Bring one element to its page-clock time: first wait for its data if it
+    // isn't loaded yet (a slow load delays the render, never changes a frame),
+    // then seek and wait for the seek to land.
+    const sync = async (el, s) => {
+      if (el.readyState < 2 && !el.error && (el.currentSrc || el.src || el.querySelector("source"))) {
+        await until(el, ["loadeddata", "error"], 5000);
+      }
+      if (el.error || el.readyState < 1) return;
+      const d = el.duration;
+      if (isFinite(d) && d > 0 && s.t >= d) {
+        if (el.loop) s.t = s.t % d;
+        else if (s.playing) { s.t = d; s.playing = false; el.dispatchEvent(new Event("ended")); }
+      }
+      if (Math.abs(timeDesc.get.call(el) - s.t) > 0.0005) {
+        timeDesc.set.call(el, s.t); // the real setter: this isn't the page moving it
+        await until(el, ["seeked"], 2000);
+      }
+    };
+    const syncs = [];
+    for (const el of document.querySelectorAll("video, audio")) {
+      const s = mediaState(el);
+      if (!pausedDesc.get.call(el)) realPause.call(el);
+      // Its time moves with the page clock from the first frame, loaded or not.
+      if (s.playing) s.t += (ms / 1000) * (el.playbackRate || 1);
+      syncs.push(sync(el, s));
+    }
+    return syncs.length ? Promise.all(syncs) : undefined;
+  };
+
   g.__reelscript_advance = (ms) => {
     const target = now + ms;
     // Fire timers in chronological order, including ones scheduled while firing.
@@ -216,6 +302,7 @@ const CLOCK_SHIM_SOURCE = String.raw`
       }
     }
     drawCaret();
+    return stepMedia(ms);
   };
 })();
 `;

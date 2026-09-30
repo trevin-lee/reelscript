@@ -39,8 +39,10 @@ export function cacheParts(): CachePart[] {
   return [
     part("editor", "VS Code (code-server) for editor windows", editorPath, editorNote),
     part("extensions", "editor extensions installed from Open VSX or .vsix", join(root, "extensions")),
-    // Only the Kokoro model's own folder: a folder set with REELSCRIPT_MODELS may hold other things.
-    part("narration", "the Kokoro voice model", join(modelsDir(), KOKORO_MODEL)),
+    // reelscript's own models folder is cleared whole (any voice model it
+    // downloaded); a folder set with REELSCRIPT_MODELS may hold other things,
+    // so only the default Kokoro model is cleared there.
+    part("narration", "voice models", process.env.REELSCRIPT_MODELS ? join(modelsDir(), KOKORO_MODEL) : modelsDir()),
     part("narration-clips", "spoken lines, reused while their text and voice are unchanged", join(root, "tts")),
   ];
 }
