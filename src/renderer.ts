@@ -980,7 +980,12 @@ class Engine {
    * thing. File search is asynchronous, so wait a little for results.
    */
   private async expectQuickInputMatch(w: Win, text: string, isFile: boolean): Promise<void> {
-    const deadline = Date.now() + 5000;
+    // VS Code can still be registering extensions (their commands) or indexing
+    // files when the script gets here, and an open palette doesn't refresh its
+    // list. So if nothing matches after a moment, close it and ask again with
+    // the same text; this all happens between frames, so nothing extra is filmed.
+    const deadline = Date.now() + 10_000;
+    let asked = Date.now();
     let label: string | null = null;
     for (;;) {
       label = await w.page.evaluate(() => {
@@ -990,6 +995,12 @@ class Engine {
       const bad = !label || /^No matching (results|commands)|similar commands$/i.test(label);
       if (!bad) return;
       if (Date.now() > deadline) break;
+      if (Date.now() - asked > 1200) {
+        await w.page.keyboard.press("Escape");
+        await w.page.keyboard.press(isFile ? "Control+P" : "F1");
+        await w.page.keyboard.type(text);
+        asked = Date.now();
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
     const what = isFile ? `Quick Open found no file matching "${text}"` : `the Command Palette has no command matching "${text}"`;

@@ -56,6 +56,7 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - `demo.type()` requires the field to be on screen, like `moveTo`; `demo.press()` takes a `window`.
 - The README is honest about VS Code's real-time clock, and the extension example waits for its result instead of a fixed time.
 - `browser.goto("./app.html")` opens a local page relative to the script, like every other path in a script.
+- Quick Open and the Command Palette ask again if VS Code hasn't registered an extension's commands or indexed files yet, instead of failing on a slow machine.
 - `editor.openFile()` ends once the file is open with the caret in it, and `editor.command()` once VS Code has run it (or moved on to its own prompt), so the next step never races VS Code; this made editor checks flaky on slow machines.
 - `<video>`, `<audio>` and SVG (SMIL) animations follow the frame clock, so pages with a hero video or an animated SVG render the same every time; a page's own `play()`/`pause()` still work. Animated GIFs can't be controlled and are documented as playing on their own.
 - An odd `desktop` size is rounded up to even numbers, as H.264 needs, instead of failing the `.mp4` render; `goto("./app.html#route")` keeps its query and hash; `record` honours `verbose: false`; `cache clear narration` clears every voice model reelscript downloaded.
