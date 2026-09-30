@@ -26,6 +26,7 @@ function zoneOffset(ms: number, timeZone: string): number {
  */
 export function clockEpoch(clock: string | Date, timeZone: string): number {
   if (clock instanceof Date) return clock.getTime();
+  if (clock === "now") return Date.now(); // the real time, as with new Date()
   if (/(Z|[+-]\d{2}:?\d{2})$/i.test(clock)) {
     const ms = Date.parse(clock);
     if (Number.isNaN(ms)) throw new Error(`reelscript: can't read clock "${clock}"`);

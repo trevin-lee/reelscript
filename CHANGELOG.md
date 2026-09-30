@@ -40,6 +40,14 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- `demo.press("Meta+K")` sends the key a Mac does, `k`, so a command palette listening for it opens (it sent `K`).
+- A function a script passes to `page.evaluate()` in `demo.call()` can use named helpers; tsx's `__name` wasn't defined in the page.
+- Ctrl-C during `login` saves nothing and leaves any session already there as it was.
+- Typed YAML lands as written in the editor; VS Code's own YAML settings turned auto-indent back on.
+- A local page's paths from the root (`/pricing.html`, a built app's `/assets/...`) are its folder's, as a site's root would be.
+- `check`, `render` and `record` with several scripts run them all, report each failure, and end with how many failed; the first failure used to stop the rest without a word.
+- `until` matches in any case and says when the text never came; `record` stops what a command left running before exiting; a voice engine that returns no audio fails clearly (it made the render run forever); `clock: "now"` means the real time, as in MCP.
+- The README says a live server's data is stamped with the real date (and what to do), and its CI recipe starts the app.
 - `terminal.run(cmd, { until })`: `record` stops a command that keeps running (a dev server) once its output shows that text, as meant, instead of at its two-minute limit with a warning (and a failure under `--strict`).
 - A recorded command doesn't see the settings the CLI passes itself, so recording a command that runs reelscript records what it really does.
 - `check` and `render` warn about a recording of a command that failed (without the run's `exitCode` saying so) or was cut off, so `check --strict` catches it in CI; it was a warning only at `record`. MCP's `record_script` is strict by default.

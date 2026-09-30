@@ -306,7 +306,7 @@ export interface DemoOptions {
    * The moment the demo happens at. The page's Date starts here and the
    * menu bar shows it, so every render shows the same dates. A Date, or an
    * ISO string ("2026-03-10T14:30"; without an offset it's a time in
-   * `timezone`). Pass `new Date()` for the real time. Default: Tue Sep 23
+   * `timezone`). Pass `new Date()` or "now" for the real time. Default: Tue Sep 23
    * 2025, 9:41 AM.
    */
   clock?: string | Date;
@@ -823,7 +823,9 @@ export class Demo {
       const rec = await recordCommand(a.command, { cwd, cols: open?.cols, rows: open?.rows, until: a.until });
       if (rec.timedOut) {
         warn(
-          `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then. For a command that keeps running (a server), give the run { until: "text it prints once it's up" }`,
+          a.until
+            ? `"${a.command}" never printed "${a.until}" in ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then`
+            : `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then. For a command that keeps running (a server), give the run { until: "text it prints once it's up" }`,
         );
       } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(

@@ -6,6 +6,7 @@
  */
 import { chromium, type BrowserContext } from "playwright";
 import { INSTALL_BROWSER, browserMissing, macChrome } from "./browser.js";
+import { interrupted } from "./cleanup.js";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -81,6 +82,8 @@ export async function login(url: string, out: string, log: (m: string) => void =
     });
     rl?.close();
     clearInterval(poll);
+    // Ctrl-C is a way out: leave any session already there as it was.
+    if (interrupted()) throw new Error("reelscript: interrupted; nothing saved");
     try {
       latest = await context.storageState({ indexedDB: true });
     } catch {

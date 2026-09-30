@@ -91,7 +91,7 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 - **The desktop is a Mac, on every host.** The browser is Chrome on macOS and VS Code has the macOS keybindings, like the desktop they sit on, so a local preview and a render in CI show the same ⌘ shortcut hints and take the same keys: press `Meta+K`, `Meta+P`, and in a web page's fields `Meta+A` or `Alt+ArrowLeft`, which do what they do on a Mac on every host. Fonts come from the machine, though: a page that asks for `system-ui` gets San Francisco on a Mac and a Linux font in the container, so text can look different between a local preview and a CI render. Give the page a web font, or judge the final look from CI.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
 - **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page (the document, or in an app whose document doesn't scroll, its main scrolling area), stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
-- **What the clock can't reach.** Animated GIF, APNG and WebP images play on their own and differ between renders; use a `<video>` or CSS animation for motion that must match. Network responses arrive in real time, so data a page fetches after it opens can appear at a different moment in `preview`, `check` and `render`: wait for it off camera with `waitFor()`, or answer the request with `mockAPI()`. `crypto.randomUUID()` and `crypto.getRandomValues()` stay random, timers in a Web Worker run on real time, and so does a closed shadow root written into the HTML (`<template shadowrootmode="closed">`); other shadow roots are covered. A `<video>` from a site follows the clock only if its server answers Range requests (`python -m http.server` doesn't; reelscript warns when a video stands still); a local page opened with `goto("./page.html")` is served with them. VS Code runs on real time (see Editor demos).
+- **What the clock can't reach.** Animated GIF, APNG and WebP images play on their own and differ between renders; use a `<video>` or CSS animation for motion that must match. Network responses arrive in real time, so data a page fetches after it opens can appear at a different moment in `preview`, `check` and `render`: wait for it off camera with `waitFor()`, or answer the request with `mockAPI()`. `crypto.randomUUID()` and `crypto.getRandomValues()` stay random, timers in a Web Worker run on real time, and so does a closed shadow root written into the HTML (`<template shadowrootmode="closed">`); other shadow roots are covered. A `<video>` from a site follows the clock only if its server answers Range requests (`python -m http.server` doesn't; reelscript warns when a video stands still); a local page opened with `goto("./page.html")` is served with them. VS Code runs on real time (see Editor demos). Data from a live server is stamped with the real date, so a page that shows how long ago something happened reads it against the pinned one ("in 5 days" for something just made): answer those requests with `mockAPI()`, or give the demo `clock: "now"`.
 - **What isn't drawn.** Chromium draws some things outside the page, and they aren't in the video: a `<select>`'s list (pick an option off camera with `demo.call(({ page }) => page!.selectOption("#plan", "pro"))`), date and colour pickers, file choosers, context menus, and `title` tooltips. `alert()`, `confirm()` and `prompt()` are answered OK, with a warning at the line. A page's own sound isn't recorded; narration is.
 - **The clock.** Every demo happens at the same moment, Tuesday, September 23, 2025, 9:41 AM UTC, unless you set `clock` and `timezone`. The page's `Date` starts there and the menu bar shows it.
 
@@ -201,7 +201,7 @@ To use another voice engine, pass `tts`: any object with a stable `id` (part of 
 `check` is the guard. It drives the real app through the whole timeline, cursor and all, with nothing captured or encoded, in a few seconds, and fails when the UI changes under a script, pointing at the line. Things that may or may not be what the script means (a page that answered 404, a mock no request used, several elements matching a selector) are warnings at their line; `check --strict` makes them fail too, as CI should. Narration is timed with the real length of lines already spoken in an earlier render or preview, and estimated for new ones:
 
 ```text
-reelscript: target "#new-project" was not found or never became visible in the browser window
+reelscript: target "#new-project" was not found in the browser window
   at demos/signup.ts:14:19 (cursor.moveTo)
 ```
 
@@ -223,6 +223,8 @@ jobs:
     container: ghcr.io/trevin-lee/reelscript:0.4.0
     steps:
       - uses: actions/checkout@v5
+      # Start the app the demos drive (or point them at a preview deployment instead).
+      - run: npm ci && (npm start &) && npx --yes wait-on http://localhost:3000
       - run: reelscript check --strict demos/*.ts   # --strict: warnings fail too
       - run: reelscript render demos/signup.ts
       - uses: actions/upload-artifact@v5
@@ -338,7 +340,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `theme` | `"macos"` | `"macos"` draws a desktop, menu bar, and window frames; `"bare"` shows window content only. |
 | `fps` | `60` | Output frame rate. |
 | `camera` | `"manual"` | `"follow"` zooms toward clicks and typing on its own, except between a `zoom.to()` and the next `zoom.out()`; `{ scale, hold }` tunes it. |
-| `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` gives the real time. |
+| `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` or `"now"` gives the real time. |
 | `timezone` | `"UTC"` | IANA timezone for the page and the menu bar. |
 | `session` | none | A saved login from `reelscript login`, relative to the script. |
 | `address` | none | `(url) => string`, rewriting what the browser's address pill shows. |

@@ -43,6 +43,10 @@ export const EDITOR_DEFAULT_SETTINGS: Record<string, unknown> = {
   "git.openRepositoryInParentFolders": "never",
   "telemetry.telemetryLevel": "off",
   "update.mode": "none",
+  // VS Code's own YAML settings turn auto-indent back on for these languages
+  // (so typed lines stepped further in each time): typed text lands as written.
+  "[yaml]": { "editor.autoIndent": "none" },
+  "[dockercompose]": { "editor.autoIndent": "none" },
 };
 
 /** CSS injected into the workbench: bundled fonts and demo-unfriendly chrome hidden. */

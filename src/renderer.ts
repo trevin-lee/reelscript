@@ -303,6 +303,7 @@ class Engine {
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await this.context.addInitScript(this.deterministic ? clockShim(this.epoch) : dateShim(this.epoch));
     await this.context.addInitScript(ONE_TAB);
+    await this.context.addInitScript(NAME_HELPER);
     // alert(), confirm() and prompt() are Chromium's, not the page's, and are
     // never drawn. Answer OK, as a demo clicking "Delete" means to, and say so
     // at the line; leaving a page (beforeunload) is the script's own doing.
@@ -406,6 +407,7 @@ class Engine {
         userAgent: macChrome(this.browser).userAgent,
       });
       await ctx.addInitScript(macChrome(this.browser).script);
+      await ctx.addInitScript(NAME_HELPER);
     }
     const page = await (ctx ?? this.context).newPage();
     const win: Win = {
@@ -893,7 +895,7 @@ class Engine {
         // A shortcut that edits text does what it does on a Mac, as the page believes it's on one (see macKeys).
         const mac = w.kind === "browser" && process.platform !== "darwin" ? macShortcut(action.key) : null;
         if (mac) await pressMacShortcut(w.page, w.cdp, mac);
-        else await w.page.keyboard.press(action.key);
+        else await w.page.keyboard.press(asTyped(action.key));
         return { end: start + 100 };
       }
       case "wait":
@@ -903,7 +905,7 @@ class Engine {
         if (w.kind !== "browser") {
           throw new Error(
             w.kind === "editor"
-              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys (demo.press("Meta+ArrowDown")) or demo.editor.command("Go to Line")`
+              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("Meta+ArrowDown") for the end of the file`
               : `reelscript: demo.scroll() scrolls web pages; a terminal scrolls as its output grows`,
           );
         }
@@ -1540,6 +1542,25 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
   if (hi - lo <= size) return (lo + hi) / 2;
   return clamp(c, lo + size / 2, hi - size / 2);
 }
+
+/**
+ * A chord as a person's keyboard sends it: "Meta+K" is the K key with Meta
+ * held, whose key is "k", as a Mac sends it (Playwright would send "K", and
+ * a command palette listening for "k" wouldn't open). Shift keeps it upper case.
+ */
+export function asTyped(chord: string): string {
+  const parts = chord.split("+");
+  const key = parts[parts.length - 1];
+  if (parts.length > 1 && /^[A-Z]$/.test(key) && !parts.includes("Shift")) parts[parts.length - 1] = key.toLowerCase();
+  return parts.join("+");
+}
+
+/**
+ * Scripts run through tsx, which names functions with a __name helper. A
+ * function a script hands to page.evaluate() (from demo.call()) takes calls
+ * to it into the page, where it doesn't exist: define it there, doing nothing.
+ */
+const NAME_HELPER = `if (typeof globalThis.__name !== "function") Object.defineProperty(globalThis, "__name", { value: (f) => f, configurable: true });`;
 
 /**
  * Which of a locator's matches a viewer could see, by index: a box, visible

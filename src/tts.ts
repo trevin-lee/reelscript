@@ -212,6 +212,10 @@ export async function synthesizeClip(engine: TtsEngine, text: string, opts: TtsO
   const cached = cachedClip(engine, text, opts);
   if (cached) return cached;
   const audio = await engine.synthesize(text, { voice, speed });
+  // A clip with no rate or samples has no length, and would pace the timeline forever.
+  if (!audio || !(audio.sampleRate > 0) || !audio.audio?.length) {
+    throw new Error(`reelscript: the voice engine "${engine.id}" returned no audio for "${text}"; synthesize() must return { audio, sampleRate }`);
+  }
   const seconds = audio.audio.length / audio.sampleRate;
   writeFileSync(file, toWav(audio));
   writeFileSync(meta, JSON.stringify({ seconds, text, voice, speed, engine: engine.id }));

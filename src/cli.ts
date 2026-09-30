@@ -121,6 +121,27 @@ async function runScript(path: string): Promise<void> {
   }
 }
 
+/**
+ * Run each script. With several (check demos/*.ts in CI), one that fails
+ * doesn't stop the rest: each failure is reported as it happens, and the
+ * command fails at the end, saying how many did.
+ */
+async function runScripts(paths: string[]): Promise<void> {
+  if (paths.length === 1) return runScript(paths[0]);
+  const { interrupted } = await import("./cleanup.js");
+  let failed = 0;
+  for (const path of paths) {
+    try {
+      await runScript(path);
+    } catch (err) {
+      if (interrupted()) throw err;
+      failed++;
+      console.error(err instanceof Error ? err.message : err);
+    }
+  }
+  if (failed) fail(`${failed} of ${paths.length} scripts failed`);
+}
+
 async function importScript(path: string): Promise<void> {
   const script = resolve(path);
   process.env.REELSCRIPT_SCRIPT = script;
@@ -226,7 +247,7 @@ async function main(): Promise<void> {
       const { onInterrupt } = await import("./cleanup.js");
       const unregister = onInterrupt(() => g.__reelscript_pending_out && rmSync(g.__reelscript_pending_out.from, { force: true }));
       try {
-        for (const script of positional) await runScript(script);
+        await runScripts(positional);
         if (g.__reelscript_pending_out) renameSync(g.__reelscript_pending_out.from, g.__reelscript_pending_out.to);
       } finally {
         unregister();
@@ -247,16 +268,14 @@ async function main(): Promise<void> {
     }
     case "check": {
       if (!positional.length) missing(`${command} needs a script`);
-      for (const script of positional) {
-        process.env.REELSCRIPT_CHECK = "1";
-        await runScript(script);
-      }
+      process.env.REELSCRIPT_CHECK = "1";
+      await runScripts(positional);
       break;
     }
     case "record": {
       if (!positional.length) missing(`${command} needs a script`);
       process.env.REELSCRIPT_RECORD = "1";
-      for (const script of positional) await runScript(script);
+      await runScripts(positional);
       if ("prune" in flags) {
         // Remove recordings no given script uses. Scripts in one folder share
         // its recordings/, so pass every script that uses it.
@@ -347,7 +366,7 @@ async function main(): Promise<void> {
         const where = p.note ? `  (${p.note})` : "";
         console.log(`  ${p.name.padEnd(16)} ${formatBytes(partPaths(p).reduce((n, path) => n + sizeOf(path), 0)).padStart(8)}  ${p.description}${where}`);
       }
-      console.log(`clear a part with: reelscript cache clear <part|all>`);
+      console.log(`clear parts with: reelscript cache clear <part...|all>`);
       break;
     }
     case "--help":

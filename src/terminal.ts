@@ -198,7 +198,8 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
     const onData = (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       events.push([Date.now() - start, text]);
-      if (opts.until && !stoppedAtUntil && (seen += text).includes(opts.until)) {
+      // Any case: "Ready" is what Next.js prints for a script's "ready".
+      if (opts.until && !stoppedAtUntil && (seen += text).toLowerCase().includes(opts.until.toLowerCase())) {
         stoppedAtUntil = true;
         setTimeout(killGroup, 100); // a moment for the rest of that line
       }
@@ -213,7 +214,7 @@ export function recordCommand(command: string, opts: RecordOptions = {}): Promis
     child.on("error", reject);
     // When the command itself ends, so does anything it left running in the
     // background; otherwise their open output would keep the recording going.
-    child.on("exit", () => setTimeout(killGroup, 100).unref());
+    child.on("exit", () => setTimeout(killGroup, 100)); // kept alive: record mustn't exit first and leave them running
     child.on("close", (code) => {
       clearTimeout(timer);
       unregister();
