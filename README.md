@@ -245,11 +245,11 @@ npx @reelscript/cli warmup browser   # once: the browser it drives
 | Tool | What the agent gets |
 | --- | --- |
 | `reelscript_docs` | This README. |
-| `inspect_page` | Visible buttons, links, and inputs on a URL, each with a suggested selector and position, plus a screenshot. Takes a `session` for pages behind a sign-in. |
+| `inspect_page` | Visible buttons, links, and inputs on a URL or a local page, each with a suggested selector and position, plus a screenshot, as a demo's browser sees them. Takes a `session` for pages behind a sign-in, and a `clock` (`"now"` or an ISO date) and `timezone` like a demo's. |
 | `record_script` | Runs scripts' real terminal commands and saves recordings; with `prune`, also removes recordings none of the listed scripts uses. |
-| `check_script` | Runs the timeline without rendering; passes, or names the script line that failed. |
+| `check_script` | Runs the timeline without rendering; passes, or names the script line that failed. Strict by default, as `check --strict` in CI: warnings fail too. |
 | `preview_frame` | The frame at a given second, as an image the agent can look at. |
-| `render_script` | The final `.mp4` or `.gif`. |
+| `render_script` | The final `.mp4` or `.gif`. With `strict`, warnings fail and the previous video stays. |
 
 `check_script`, `preview_frame`, and `render_script` click through your real app and run the script's `call()` code, and `record_script` runs shell commands, so none of them is marked read-only.
 

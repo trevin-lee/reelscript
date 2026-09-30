@@ -40,6 +40,10 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- Content that reacts to scrolling (a reveal-on-scroll, an IntersectionObserver) renders the same every time: after a page loads and after each scroll step, the page renders on its own frames, which is when Chromium delivers those callbacks, before its clock moves on. Renders of such pages differed visibly.
+- An action missing what it can't do without fails where it's queued: `wait()` with no time hung the render, and `scroll()` needs a selector or exactly one of `{ by }` and `{ to }`.
+- `login` without a terminal (an agent's shell, stdin from /dev/null) waits for the window to close instead of saving at once, and never writes an empty session, least of all over one that works.
+- MCP: `check_script` is strict by default, as `check --strict` in CI, and `render_script` takes `strict`; `inspect_page` takes a `clock` and `timezone` like a demo's, so a session for an app that checks its token's expiry works there too.
 - A target counts as visible only when a viewer could see it: an element inside something faded all the way out (a closed modal at `opacity: 0`) isn't, for targets, `waitFor`, the caret and MCP's `inspect_page` alike. The repo's own example let a script aim at its closed dialog and pass.
 - `demo.type()` fails on a field that can't take the keyboard (disabled, read-only, not a text field), instead of typing into whatever had it before.
 - A cookie the page sets to expire in a month, by its pinned date, is kept; Chromium judged it by the real date and dropped it at once (a consent banner that came back).

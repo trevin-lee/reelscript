@@ -103,6 +103,11 @@ const CLOCK_SHIM_SOURCE = String.raw`
 
   const g = window;
   const realSetTimeout = window.setTimeout.bind(window);
+  const realRAF = window.requestAnimationFrame.bind(window);
+  // Let Chromium render the page on its own (real) frames, which is when it
+  // delivers scroll events and IntersectionObserver callbacks: after a scroll
+  // step, so a reveal-on-scroll starts on the same frame in every render.
+  g.__reelscript_settle = () => new Promise((resolve) => realRAF(() => realRAF(() => resolve())));
   g.setTimeout = (fn, delay = 0, ...args) => {
     const id = nextId++;
     timers.set(id, { at: now + Math.max(0, Number(delay) || 0), fn, args, every: 0 });

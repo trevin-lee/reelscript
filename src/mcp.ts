@@ -22,11 +22,11 @@ Workflow for making a demo:
 2. Call inspect_page on the app's URL to get selectors for the elements you'll click and type into.
 3. Write a script file (see the docs' example) that ends with await demo.render("out/demo.mp4").
 4. If the script runs real terminal commands (terminal.run without output), call record_script to capture them.
-5. Call check_script: it runs the whole timeline without rendering and reports the script line of any failing step. Fix and repeat until it passes.
+5. Call check_script: it runs the whole timeline without rendering and reports the script line of any failing step, and by default fails on warnings too, as CI's \`reelscript check --strict\` does. Fix and repeat until it passes.
 6. Call preview_frame at the key moments and look at the images; adjust timing, zoom, and camera until it reads well.
 7. Call render_script for the final video.
 
-If the app needs a login, ask the user to run \`npx @reelscript/cli login <url> --out <path>\` once, then pass createDemo({ session }) with that file's path relative to the script (paths in a script are relative to the script's folder; CLI paths to the working directory). inspect_page takes the same file as its session argument, relative to the working directory.
+If the app needs a login, ask the user to run \`npx @reelscript/cli login <url> --out <path>\` once, then pass createDemo({ session }) with that file's path relative to the script (paths in a script are relative to the script's folder; CLI paths to the working directory). inspect_page takes the same file as its session argument, relative to the working directory. The demo's date is pinned; if the app checks its sign-in token's expiry (Supabase and Firebase do), give the demo createDemo({ clock: new Date() }) and inspect_page clock: "now".
 
 Targets are Playwright selectors, so CSS, text= and role= forms all work. Prefer ids and data-testid attributes; they survive UI changes.`;
 
@@ -126,7 +126,7 @@ export async function serve(): Promise<void> {
     {
       title: "Inspect a page for selectors",
       description:
-        "Open a page as a demo's browser shows it (Chrome on a Mac, the default clock and timezone) and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
+        "Open a page as a demo's browser shows it (Chrome on a Mac, the demo's clock and timezone) and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
       inputSchema: {
         url: z.string().describe("Page URL, e.g. http://localhost:3000, or a path to a local page relative to the working directory, e.g. demos/app.html"),
         width: z.number().int().optional().describe("Viewport width. Default 1280"),
@@ -136,10 +136,15 @@ export async function serve(): Promise<void> {
           .string()
           .optional()
           .describe("Saved login from `reelscript login`, relative to the working directory, to inspect a page behind a sign-in"),
+        clock: z
+          .string()
+          .optional()
+          .describe('The page\'s date, as a demo\'s clock option: an ISO date, or "now" for the real one (with a session, when the app checks its token\'s expiry). Default: the demo default, 2025-09-23 9:41 AM'),
+        timezone: z.string().optional().describe('IANA timezone, as a demo\'s timezone option. Default "UTC"'),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
+    async ({ url, width = 1280, height = 800, screenshot = true, session, clock, timezone }) => {
       const { launchChromium } = await import("./browser.js");
       const { resolveSession } = await import("./session.js");
       const { macChrome } = await import("./browser.js");
@@ -148,19 +153,21 @@ export async function serve(): Promise<void> {
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
       const browser = await launchChromium();
       try {
-        // The page as a demo's browser shows it: Chrome on a Mac, on the demo's default date and timezone.
+        // The page as a demo's browser shows it: Chrome on a Mac, on the demo's date and timezone.
+        const zone = timezone ?? DEFAULT_TIMEZONE;
+        const epoch = clock === "now" ? Date.now() : clockEpoch(clock ?? DEFAULT_CLOCK, zone);
         const mac = macChrome(browser);
         const context = await browser.newContext({
           viewport: { width, height },
           deviceScaleFactor: 1,
           colorScheme: "light",
           storageState,
-          timezoneId: DEFAULT_TIMEZONE,
+          timezoneId: zone,
           userAgent: mac.userAgent,
           extraHTTPHeaders: mac.headers,
         });
         await context.addInitScript(mac.script);
-        await context.addInitScript(dateShim(clockEpoch(DEFAULT_CLOCK, DEFAULT_TIMEZONE)));
+        await context.addInitScript(dateShim(epoch));
         const page = await context.newPage();
         // A path is a local page, relative to the working directory like every path given to a tool.
         await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : pathToFileURL(resolve(url)).href, { waitUntil: "load" });
@@ -186,12 +193,18 @@ export async function serve(): Promise<void> {
       title: "Check a demo script",
       description:
         "Run a script's whole timeline against the real app without rendering. Passes in seconds, or fails with the script line of the first step whose selector, command, or recording is missing.",
-      inputSchema: { script: z.string().describe("Path to the demo script, relative to the working directory") },
+      inputSchema: {
+        script: z.string().describe("Path to the demo script, relative to the working directory"),
+        strict: z
+          .boolean()
+          .optional()
+          .describe("Fail on warnings too (a page that answered 404, a mock no request used, an ambiguous target), as `reelscript check --strict` does in CI. Default true"),
+      },
       // Not read-only: it clicks through the real app and runs the script's demo.call() code.
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ script }) => {
-      const { code, output } = await runCli(["check", resolve(script)]);
+    async ({ script, strict = true }) => {
+      const { code, output } = await runCli(["check", resolve(script), ...(strict ? ["--strict"] : [])]);
       return { content: [text(output || (code === 0 ? "check passed" : "check failed"))], isError: code !== 0 };
     },
   );
@@ -231,10 +244,11 @@ export async function serve(): Promise<void> {
       inputSchema: {
         script: z.string().describe("Path to the demo script"),
         out: z.string().optional().describe("Output path (.mp4 or .gif). Default: whatever the script passes to render()"),
+        strict: z.boolean().optional().describe("Fail on warnings, keeping the previous video, as `reelscript render --strict` does. Default false"),
       },
     },
-    async ({ script, out }) => {
-      const args = ["render", resolve(script)];
+    async ({ script, out, strict = false }) => {
+      const args = ["render", resolve(script), ...(strict ? ["--strict"] : [])];
       if (out) args.push("--out", resolve(out));
       const { code, output } = await runCli(args);
       return { content: [text(output || (code === 0 ? "rendered" : "render failed"))], isError: code !== 0 };

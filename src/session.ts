@@ -63,15 +63,23 @@ export async function login(url: string, out: string, log: (m: string) => void =
       context.storageState({ indexedDB: true }).then((s) => (latest = s), () => {});
     }, 1000);
 
-    log(`reelscript: sign in in the browser window, then press Enter here (or close the window) to save the session.`);
-    const rl = createInterface({ input: process.stdin });
+    // Enter works from a terminal. Without one (an agent's shell, a CI step, stdin
+    // from /dev/null) stdin ends at once, which isn't the user being done: wait
+    // for the window to close instead.
+    const terminal = process.stdin.isTTY || headless;
+    log(
+      terminal
+        ? `reelscript: sign in in the browser window, then press Enter here (or close the window) to save the session.`
+        : `reelscript: sign in in the browser window, then close it to save the session.`,
+    );
+    const rl = terminal ? createInterface({ input: process.stdin }) : null;
     await new Promise<void>((done) => {
-      rl.once("line", () => done());
-      rl.once("close", () => done());
+      rl?.once("line", () => done());
+      rl?.once("close", () => done());
       page.once("close", () => done());
       browser!.once("disconnected", () => done());
     });
-    rl.close();
+    rl?.close();
     clearInterval(poll);
     try {
       latest = await context.storageState({ indexedDB: true });
@@ -80,6 +88,13 @@ export async function login(url: string, out: string, log: (m: string) => void =
     }
 
     const path = resolve(out);
+    // Nothing signed in: don't write an empty session, least of all over one that works.
+    if (!latest.cookies.length && !latest.origins.length) {
+      throw new Error(
+        `reelscript: nothing to save: the browser has no cookies or storage for any site, so the sign-in didn't finish. ` +
+          (existsSync(path) ? `${path} is unchanged.` : `Nothing was written.`),
+      );
+    }
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(latest, null, 2) + "\n", { mode: 0o600 });
     chmodSync(path, 0o600);

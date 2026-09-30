@@ -719,6 +719,8 @@ class Engine {
           url = new URL(action.url, site).href;
         } else url = new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
         const response = await w.page.goto(url, { waitUntil: "load" });
+        // The page's first render, and what it sets off (observers revealing what's on screen), before its clock moves.
+        await w.page.evaluate(() => (window as unknown as { __reelscript_settle?: () => Promise<void> }).__reelscript_settle?.()).catch(() => {});
         // A page that's gone still loads (the site's error page), and a demo ending there would be filmed.
         if (response && response.status() >= 400) {
           warn(`goto("${action.url}") got HTTP ${response.status()} from ${url}; the page shown may be an error page\n  at ${this.at}`);
@@ -901,9 +903,11 @@ class Engine {
         const setTo = (p: number) =>
           w.page.evaluate(
             ([y, x]) => {
-              const g = window as unknown as { __reelscript_scroller: Element; __reelscript_scroller_x?: Element };
+              const g = window as unknown as { __reelscript_scroller: Element; __reelscript_scroller_x?: Element; __reelscript_settle?: () => Promise<void> };
               g.__reelscript_scroller.scrollTo({ top: y, behavior: "instant" });
               if (x !== null && g.__reelscript_scroller_x) g.__reelscript_scroller_x.scrollTo({ left: x, behavior: "instant" });
+              // What the page does about the scroll (observers, listeners) lands before the clock moves on.
+              return g.__reelscript_settle?.();
             },
             [lerp(range.from, range.to, p), across ? lerp(across.from, across.to, p) : null] as [number, number | null],
           );

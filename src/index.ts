@@ -192,6 +192,34 @@ type OptionsFitTheirActions = [
   Assert<Fits<WindowGeometry, "window.place">>,
 ];
 
+/** What each action can't do without: missing, a wait never ends and a scroll goes nowhere. */
+const REQUIRED: Partial<Record<Action["kind"], string[]>> = {
+  "browser.goto": ["url"],
+  "browser.mockAPI": ["pattern"],
+  "cursor.moveTo": ["target"],
+  "zoom.to": ["target"],
+  type: ["text"],
+  press: ["key"],
+  wait: ["ms"],
+  waitFor: ["target"],
+  say: ["text"],
+  "editor.openFile": ["path"],
+  "editor.command": ["command"],
+  "terminal.run": ["command"],
+  call: ["fn"],
+};
+
+function missingField(action: Action): string | null {
+  const a = action as Record<string, unknown>;
+  const gone = (REQUIRED[action.kind] ?? []).find((k) => a[k] === undefined || a[k] === null);
+  if (gone) return `${action.kind} needs ${gone === "ms" ? "a time in ms" : `its ${gone}`}`;
+  if (action.kind === "scroll") {
+    const given = ["target", "by", "to"].filter((k) => a[k] !== undefined);
+    if (given.length !== 1) return `scroll takes a selector, or one of { by } and { to }, not ${given.length ? given.join(" and ") : "nothing"}`;
+  }
+  return null;
+}
+
 /** Every createDemo() option, for the same reason. */
 const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   session: true, clock: true, timezone: true, theme: true, viewport: true, desktop: true, fps: true, camera: true, deterministic: true,
@@ -677,7 +705,7 @@ export class Demo {
   _push(action: Action): void {
     const source = callerLocation();
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
-    const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? invalidChoice(action) ?? invalidNumber(action);
+    const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
     this.actions.push(action);
     this.sources.push(source);
