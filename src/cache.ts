@@ -81,7 +81,7 @@ export function partPaths(p: CachePart): string[] {
 
 /** Where the narration model is stored. */
 export function modelsDir(): string {
-  return process.env.REELSCRIPT_MODELS ?? join(cacheDir(), "models");
+  return process.env.REELSCRIPT_MODELS || join(cacheDir(), "models"); // empty is unset
 }
 
 export function sizeOf(path: string): number {

@@ -824,14 +824,14 @@ export class Demo {
       if (rec.timedOut) {
         warn(
           a.until
-            ? `"${a.command}" never printed "${a.until}" in ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then`
-            : `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then. For a command that keeps running (a server), give the run { until: "text it prints once it's up" }`,
+            ? `"${a.command}" never printed "${a.until}" in ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then\n  at ${this.sources[i]} (terminal.run)`
+            : `"${a.command}" ran past ${RECORD_TIMEOUT_MS / 1000}s and was stopped; the recording has its output up to then. For a command that keeps running (a server), give the run { until: "text it prints once it's up" }\n  at ${this.sources[i]} (terminal.run)`,
         );
       } else if (rec.exitCode !== (a.exitCode ?? 0)) {
         warn(
           a.exitCode === undefined
-            ? `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is (give the run { exitCode: ${rec.exitCode} } if that's meant)`
-            : `"${a.command}" exited with code ${rec.exitCode}, not the ${a.exitCode} the script expects; the recording shows its output as it is`,
+            ? `"${a.command}" exited with code ${rec.exitCode}; the recording shows its output as it is (give the run { exitCode: ${rec.exitCode} } if that's meant)\n  at ${this.sources[i]} (terminal.run)`
+            : `"${a.command}" exited with code ${rec.exitCode}, not the ${a.exitCode} the script expects; the recording shows its output as it is\n  at ${this.sources[i]} (terminal.run)`,
         );
       }
       recorded.push([rec, key]);

@@ -776,7 +776,17 @@ class Engine {
           }
           url = new URL(action.url, site).href;
         } else url = await this.local.url(new URL(action.url, pathToFileURL(this.baseDir + "/")).href); // keeps ?query and #hash; see LocalPages
-        const response = await w.page.goto(url, { waitUntil: "load" });
+        const response = await w.page.goto(url, { waitUntil: "load" }).catch((err: unknown) => {
+          if (!(err instanceof Error) || !/ERR_CONNECTION_REFUSED/.test(err.message)) throw err;
+          // Nothing listening: most often the app isn't running, or (in the container) localhost isn't your machine.
+          const inContainer = !!process.env.REELSCRIPT_BUILTIN && /\/\/(localhost|127\.0\.0\.1)[:/]/.test(url);
+          throw new Error(
+            `reelscript: goto("${action.url}"): nothing is answering at ${new URL(url).host}` +
+              (inContainer
+                ? `. In the container, localhost is the container itself: reach an app on your machine at host.docker.internal (Docker Desktop), or run the container with --network host (Linux)`
+                : `. Is the app running?`),
+          );
+        });
         // The page's first render, and what it sets off (observers revealing what's on screen), before its clock moves.
         await w.page.evaluate(() => (window as unknown as { __reelscript_settle?: () => Promise<void> }).__reelscript_settle?.()).catch(() => {});
         // A page that's gone still loads (the site's error page), and a demo ending there would be filmed.
@@ -843,7 +853,9 @@ class Engine {
       case "type": {
         const w = action.window ? this.window(action.window) : this.focused();
         if (w.kind === "terminal") {
-          throw new Error(`reelscript: typing into the terminal window isn't shown; use demo.terminal.run() or terminal.print()`);
+          throw new Error(
+            `reelscript: typing into the terminal window isn't shown; use demo.terminal.run() or terminal.print(), or name the window the field is in: demo.type(target, text, { window: "browser" })`,
+          );
         }
         if (action.window) this.focus(w);
         if (action.target) {

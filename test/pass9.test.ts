@@ -112,7 +112,8 @@ test("cache clear narration clears every voice model in reelscript's own folder"
   const models = join(dir, "cache", "models");
   mkdirSync(join(models, "someone", "other-voice"), { recursive: true });
   writeFileSync(join(models, "someone", "other-voice", "model.onnx"), "x");
-  const r = await run(["cache", "clear", "narration"], dir, { REELSCRIPT_CACHE: join(dir, "cache") });
+  // REELSCRIPT_MODELS empty (unset): reelscript's own folder, and never a contributor's real one.
+  const r = await run(["cache", "clear", "narration"], dir, { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_MODELS: "" });
   assert.equal(r.code, 0, r.output);
   assert.ok(!existsSync(models));
 });

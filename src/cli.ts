@@ -12,6 +12,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire, register } from "node:module";
 
+// Node 26 deprecates module.register() (DEP0205), which reelscript and tsx use to load
+// scripts. There's nothing a user can do about it, and it printed on every command and
+// into MCP results: pass every other warning on as Node would, but not that one.
+{
+  const print = process.listeners("warning");
+  process.removeAllListeners("warning");
+  process.on("warning", (warning: Error & { code?: string }) => {
+    if (warning.code !== "DEP0205") for (const listener of print) listener.call(process, warning);
+  });
+}
+
 // Let scripts import "@reelscript/cli" without a local install (global, npx,
 // the container): resolve it to the copy of the library running this CLI.
 // Registered as an inline module so there's no hook file to resolve, which

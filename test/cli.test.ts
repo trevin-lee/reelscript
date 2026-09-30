@@ -120,7 +120,8 @@ test("record runs commands in the script's folder, or a run's cwd", { timeout: 6
 
 test("cache: names match warmup, and a custom code-server binary doesn't break the listing", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
-  const env = { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_CODE_SERVER: "/usr/bin/true" };
+  // Every folder in /tmp: a contributor's own REELSCRIPT_MODELS mustn't be what "clear narration" clears.
+  const env = { REELSCRIPT_CACHE: join(dir, "cache"), REELSCRIPT_MODELS: join(dir, "models"), REELSCRIPT_CODE_SERVER: "/usr/bin/true" };
   const list = await cli(["cache"], dir, env);
   assert.equal(list.code, 0, list.output);
   assert.match(list.output, /editor .*REELSCRIPT_CODE_SERVER: \/usr\/bin\/true/);

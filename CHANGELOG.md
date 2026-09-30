@@ -40,6 +40,10 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- The test suite never clears a contributor's own `REELSCRIPT_MODELS` folder, and an empty `REELSCRIPT_MODELS` counts as unset.
+- No `module.register()` deprecation warning on every command under Node 26 (the Node Homebrew installs), nor in MCP results.
+- A `goto()` nothing answers says so (is the app running?), and in the container explains that `localhost` is the container and how to reach your machine; the README says so too.
+- The README states the one exception to the path rule (Playwright's own calls in `demo.call()`), with a recipe for choosing a file to upload. `record`'s warnings name the script line, and typing while the terminal has focus says how to name the field's window.
 - `demo.press("Meta+K")` sends the key a Mac does, `k`, so a command palette listening for it opens (it sent `K`).
 - A function a script passes to `page.evaluate()` in `demo.call()` can use named helpers; tsx's `__name` wasn't defined in the page.
 - Ctrl-C during `login` saves nothing and leaves any session already there as it was.
