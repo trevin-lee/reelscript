@@ -17,8 +17,6 @@ import { interrupted, onInterrupt } from "./cleanup.js";
 
 export const CODE_SERVER_VERSION = "4.138.0";
 
-export const LINUX_UA =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
 /** Settings that make VS Code behave like a demo stage: no welcome, no AI panel, no surprises when typing code. */
 export const EDITOR_DEFAULT_SETTINGS: Record<string, unknown> = {

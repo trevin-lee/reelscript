@@ -163,7 +163,7 @@ html, body { width: ${w}px; height: ${h}px; }
 .menubar b { font-weight: 600; }
 </style></head><body>
 <div class="wall"></div><div class="glow"></div>
-${this.menubar === false ? "" : `<div class="menubar"><b>${escapeHtml(this.menubar.app ?? "reelscript")}</b><span>${escapeHtml(this.menubar.clock ?? "Tue Sep 23  9:41 AM").replace(/ {2}/g, "&nbsp;&nbsp;")}</span></div>`}
+${this.menubar === false ? "" : `<div class="menubar"><b>${escapeHtml(this.menubar.app ?? "reelscript")}</b><span>${escapeHtml(this.menubar.clockText ?? "Tue Sep 23  9:41 AM").replace(/ {2}/g, "&nbsp;&nbsp;")}</span></div>`}
 </body></html>`;
       p = this.rasterize(html, w, h, false).then(toRaw);
       this.bgCache.set(key, p);
@@ -258,8 +258,11 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** The macOS theme's menu bar: its app name and clock, or none at all. */
-export type Menubar = false | { app?: string; clock?: string };
+/**
+ * The macOS theme's menu bar: its app name and the text its clock shows, or
+ * none at all. The clock shows the demo's `clock` unless `clockText` says otherwise.
+ */
+export type Menubar = false | { app?: string; clockText?: string; /** @deprecated Renamed to clockText, since `clock` elsewhere is a moment, not text. Still works; removed in 1.0. */ clock?: string };
 
 export function createTheme(name: ThemeName, rasterize: HtmlRasterizer, menubar: Menubar = {}): Theme {
   switch (name) {

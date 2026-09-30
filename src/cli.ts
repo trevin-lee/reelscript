@@ -125,12 +125,13 @@ async function importScript(path: string): Promise<void> {
     // gets that far ("No exports main" when installed, "Cannot find module" when run without a local install).
     const asCommonJs = /Top-level await|Cannot use import statement outside a module|No "exports" main defined in \S*@reelscript[\\/]cli|Cannot find module '@reelscript\/cli'|ERR_REQUIRE_ESM/;
     if (!(err instanceof Error) || !asCommonJs.test(err.message)) throw err;
-    const { copyFileSync, unlinkSync } = await import("node:fs");
+    const { copyFileSync, rmSync } = await import("node:fs");
     const { dirname, basename, join } = await import("node:path");
     const tmp = join(dirname(script), `.${basename(script).replace(/\.[cm]?[jt]sx?$/, "")}.reelscript.mts`);
+    removeCopiesOnceRead();
     copyFileSync(script, tmp);
     const { onInterrupt } = await import("./cleanup.js");
-    const unregister = onInterrupt(() => unlinkSync(tmp));
+    const unregister = onInterrupt(() => rmSync(tmp, { force: true }));
     try {
       await tsImport(pathToFileURL(tmp).href, import.meta.url);
     } catch (err) {
@@ -139,9 +140,33 @@ async function importScript(path: string): Promise<void> {
       throw err;
     } finally {
       unregister();
-      unlinkSync(tmp);
+      rmSync(tmp, { force: true });
     }
   }
+}
+
+/**
+ * The temporary copy is gone the moment Node has read it, before the script
+ * runs a single step: it would otherwise show in a demo's own terminal
+ * (`ls`, `git status`) and in the editor's Explorer for a workspace of ".".
+ */
+let copiesRemoved = false;
+function removeCopiesOnceRead(): void {
+  if (copiesRemoved) return;
+  copiesRemoved = true;
+  const hook = `
+import { rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+export async function load(url, context, nextLoad) {
+  const loaded = await nextLoad(url, context);
+  if (/\\.reelscript\\.mts(\\?|$)/.test(url)) {
+    const file = new URL(url);
+    file.search = "";
+    rmSync(fileURLToPath(file), { force: true });
+  }
+  return loaded;
+}`;
+  register(`data:text/javascript,${encodeURIComponent(hook)}`);
 }
 
 /** The options each command takes; anything else is an error rather than silently ignored. */

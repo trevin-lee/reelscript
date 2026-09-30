@@ -122,7 +122,7 @@ export async function serve(): Promise<void> {
     {
       title: "Inspect a page for selectors",
       description:
-        "Open a URL in headless Chromium and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
+        "Open a page as a demo's browser shows it (Chrome on a Mac, the default clock and timezone) and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
       inputSchema: {
         url: z.string().describe("Page URL, e.g. http://localhost:3000, or a path to a local page relative to the working directory, e.g. demos/app.html"),
         width: z.number().int().optional().describe("Viewport width. Default 1280"),
@@ -138,10 +138,26 @@ export async function serve(): Promise<void> {
     async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
       const { launchChromium } = await import("./browser.js");
       const { resolveSession } = await import("./session.js");
+      const { macChrome } = await import("./renderer.js");
+      const { dateShim } = await import("./clock.js");
+      const { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch } = await import("./time.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
       const browser = await launchChromium();
       try {
-        const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, storageState })).newPage();
+        // The page as a demo's browser shows it: Chrome on a Mac, on the demo's default date and timezone.
+        const mac = macChrome(browser);
+        const context = await browser.newContext({
+          viewport: { width, height },
+          deviceScaleFactor: 1,
+          colorScheme: "light",
+          storageState,
+          timezoneId: DEFAULT_TIMEZONE,
+          userAgent: mac.userAgent,
+          extraHTTPHeaders: mac.headers,
+        });
+        await context.addInitScript(mac.script);
+        await context.addInitScript(dateShim(clockEpoch(DEFAULT_CLOCK, DEFAULT_TIMEZONE)));
+        const page = await context.newPage();
         // A path is a local page, relative to the working directory like every path given to a tool.
         await page.goto(/^[a-z][a-z0-9+.-]*:/i.test(url) ? url : pathToFileURL(resolve(url)).href, { waitUntil: "load" });
         const elements = (await page.evaluate(INSPECT_ELEMENTS)) as { tag: string; selector: string; label: string; box: string }[];

@@ -8,6 +8,8 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 
 - **Paths in a script are relative to the script's folder**, including `demo.render(path)` and the `recordingsDir` option, which were relative to the working directory. Paths on the command line are still relative to the working directory. A script run from its own folder is unaffected; otherwise its output moves next to it.
 - **The page's date is pinned** to Tuesday, September 23, 2025, 9:41 AM UTC by default, matching the menu bar, instead of the real time at render. Pass `clock: new Date()` for the real time, or set `clock` and `timezone`.
+- **VS Code has the macOS keybindings**, like the browser and the desktop around it: press `Meta+…` in the editor where scripts pressed `Control+…` (`Meta+ArrowDown` for the end of a file). Its menus show ⌘.
+- **`menubar: { clock }` is now `menubar: { clockText }`**, since `clock` elsewhere is a moment, not text. `clock` still works there until 1.0.
 - **`goto({ settle })` is now `goto({ hold })`**, because `settle` elsewhere means time off camera. `settle` still works on `goto` until 1.0.
 - **Clicks and `moveTo` are checked.** A script that moved to an element off screen, or clicked one covered by a window or an overlay, used to pass and film the wrong thing; now it fails at that line. Add `demo.scroll()` or `focus()` where needed.
 - `render`, `recordCommand`, `scriptedEvents`, and `playbackEvents` are no longer exported; they were internal.
@@ -36,8 +38,13 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
 - `editor.type()` after clicking a file in the Explorer types into the file; the keys went to the Explorer (and selected files) while `check` passed. With no file open, it fails at its line.
-- The browser window is Chrome on a Mac on every host, like the desktop: pages show the same shortcut hints in a local preview as in the container, and sites that turn away headless browsers see an ordinary one. The README says which keys follow the host.
+- The browser window is Chrome on a Mac on every host, like the desktop: pages show the same shortcut hints in a local preview as in the container, and a site that checks the user agent or client hints for a headless browser sees an ordinary one. The README says which keys follow the host.
 - Opening a terminal that's open applies a new `fontSize` or `lineHeight` too, as the README's rule for `open()` now says.
+- A page's `alert()`, `confirm()` or `prompt()`, which isn't drawn in the video, is answered OK with a warning at the line, rather than cancelled silently (a confirmed delete stayed undeleted). The README lists what else Chromium draws outside the page: a `<select>`'s list, pickers, context menus, tooltips.
+- A `goto()` that gets an HTTP error is a warning at its line: a renamed page would otherwise be filmed as the site's error page.
+- In a project without `"type": "module"`, the script's temporary copy is gone before the script runs, so it no longer shows in a demo's terminal (`ls`, `git status`) or the editor's Explorer.
+- The browser's request headers match what its scripts see (Chrome on macOS, not HeadlessChrome), and `navigator.webdriver` is false. MCP `inspect_page` shows the page as a demo's browser does: Chrome on a Mac, on the demo's default date and timezone.
+- `CHANGELOG.md` ships in the package and the README links it.
 - A voice engine of your own has its own default voice (`defaultVoice`, or the first of its `voices`), not Kokoro's `af_heart`; the README documents `defaultVoice` and `ready()`.
 - `goto("/pricing")` is a page on the site the browser is showing, as a path is in `mockAPI`, not a file at the root of the disk; with no site showing it says so. MCP `inspect_page` takes a local page's path.
 - `reelscript cache` counts the browser at its real size, and output piped into `head` ends quietly.

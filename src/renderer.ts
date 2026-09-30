@@ -22,7 +22,7 @@ import {
   terminalPageHtml,
   type TermEvent,
 } from "./terminal.js";
-import { EditorServer, LINUX_UA, editorStyles, editorTitle } from "./editor.js";
+import { EditorServer, editorStyles, editorTitle } from "./editor.js";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -283,24 +283,42 @@ class Engine {
     // lazily at the first captured frame, it raced a heavy page for the GPU.
     await this.theme.background(this.desktop);
     // The browser is Chrome on a Mac on every host, like the desktop it sits
-    // on: pages show the same ⌘ shortcut hints in a local preview as in CI,
-    // and a site that turns away headless browsers sees an ordinary one.
-    const chrome = this.browser.version().split(".")[0];
+    // on: pages show the same ⌘ shortcut hints in a local preview as in CI.
+    const mac = macChrome(this.browser);
     this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
       colorScheme: "light",
       storageState: this.session,
       timezoneId: this.timezone,
-      userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
+      userAgent: mac.userAgent,
+      extraHTTPHeaders: mac.headers,
     });
-    await this.context.addInitScript(macPlatform(chrome));
+    await this.context.addInitScript(mac.script);
     // Headless Chromium denies clipboard writes by default, so a "Copy"
     // button in the page under demo would fail where a real browser succeeds.
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await this.context.addInitScript(this.deterministic ? clockShim(this.epoch) : dateShim(this.epoch));
     await this.context.addInitScript(ONE_TAB);
+    // alert(), confirm() and prompt() are Chromium's, not the page's, and are
+    // never drawn. Answer OK, as a demo clicking "Delete" means to, and say so
+    // at the line; leaving a page (beforeunload) is the script's own doing.
+    this.context.on("dialog", (dialog) => {
+      const type = dialog.type();
+      if (type !== "beforeunload") {
+        const key = `${type} ${dialog.message()}`;
+        if (!this.dialogs.has(key)) {
+          this.dialogs.add(key);
+          process.stderr.write(
+            `reelscript: warning: the page opened a ${type}("${dialog.message()}") dialog, which isn't drawn in the video; reelscript answered OK\n  at ${this.at}\n`,
+          );
+        }
+      }
+      dialog.accept(type === "prompt" ? dialog.defaultValue() : undefined).catch(() => {});
+    });
   }
+  /** Dialogs already warned about. */
+  private dialogs = new Set<string>();
 
   private unregisterBrowser: (() => void) | null = null;
 
@@ -370,8 +388,10 @@ class Engine {
         deviceScaleFactor: 1,
         colorScheme: "dark",
         timezoneId: this.timezone,
-        userAgent: LINUX_UA, // consistent Ctrl-based keybindings on every host
+        // A Mac, like the browser beside it: the same ⌘ keybindings on every host.
+        userAgent: macChrome(this.browser).userAgent,
       });
+      await ctx.addInitScript(macChrome(this.browser).script);
     }
     const page = await (ctx ?? this.context).newPage();
     const win: Win = {
@@ -695,7 +715,11 @@ class Engine {
           }
           url = new URL(action.url, site).href;
         } else url = new URL(action.url, pathToFileURL(this.baseDir + "/")).href; // keeps ?query and #hash
-        await w.page.goto(url, { waitUntil: "load" });
+        const response = await w.page.goto(url, { waitUntil: "load" });
+        // A page that's gone still loads (the site's error page), and a demo ending there would be filmed.
+        if (response && response.status() >= 400) {
+          process.stderr.write(`reelscript: warning: goto("${action.url}") got HTTP ${response.status()} from ${url}; the page shown may be an error page\n  at ${this.at}\n`);
+        }
         w.url = url;
         return { end: start + (action.hold ?? action.settle ?? DEFAULTS.gotoSettle) };
       }
@@ -795,7 +819,7 @@ class Engine {
         if (w.kind !== "browser") {
           throw new Error(
             w.kind === "editor"
-              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys (demo.press("Control+End")) or demo.editor.command("Go to Line")`
+              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys (demo.press("Meta+ArrowDown")) or demo.editor.command("Go to Line")`
               : `reelscript: demo.scroll() scrolls web pages; a terminal scrolls as its output grows`,
           );
         }
@@ -934,7 +958,7 @@ class Engine {
         const typeStart = start + 350;
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
-        await w.page.keyboard.press(action.kind === "editor.openFile" ? "Control+P" : "F1");
+        await w.page.keyboard.press(action.kind === "editor.openFile" ? "Meta+P" : "F1");
         let next = 0;
         let entered = false;
         const isFile = action.kind === "editor.openFile";
@@ -1097,7 +1121,7 @@ class Engine {
       if (Date.now() > deadline) break;
       if (Date.now() - asked > 1200) {
         await w.page.keyboard.press("Escape");
-        await w.page.keyboard.press(isFile ? "Control+P" : "F1");
+        await w.page.keyboard.press(isFile ? "Meta+P" : "F1");
         await w.page.keyboard.type(text);
         asked = Date.now();
       }
@@ -1116,7 +1140,7 @@ class Engine {
   /**
    * editor.type() types at the caret. If keyboard focus is somewhere that
    * isn't text (the Explorer after clicking a file, say), the keys would
-   * select files instead of typing; move it to the open file (Ctrl+1, "focus
+   * select files instead of typing; move it to the open file (⌘1, "focus
    * the first editor group"), or fail if there's none. VS Code may still be
    * opening the file it was just asked for and take focus back, so it must
    * stay in the editor a moment before typing starts. Quick Open and a
@@ -1133,7 +1157,7 @@ class Engine {
     for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
       if (!(await typable())) {
         steadySince = 0;
-        await w.page.keyboard.press("Control+1");
+        await w.page.keyboard.press("Meta+1");
       } else if (!steadySince) steadySince = Date.now();
       else if (Date.now() - steadySince >= 300) return;
       await new Promise((r) => setTimeout(r, 50));
@@ -1394,11 +1418,27 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
   return clamp(c, lo + size / 2, hi - size / 2);
 }
 
-/** What a page asks about its platform, answered as Chrome on macOS (see Engine.open). */
+/**
+ * Chrome on macOS, as pages see it: the user agent, the client hint headers
+ * (which otherwise name HeadlessChrome and the host's platform), and what
+ * their scripts ask. Shared by the browser window, the editor, and MCP's
+ * inspect_page, so what an agent inspects is what gets filmed.
+ */
+export function macChrome(browser: Browser): { userAgent: string; headers: Record<string, string>; script: string } {
+  const chrome = browser.version().split(".")[0];
+  return {
+    userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
+    headers: { "sec-ch-ua": `"Google Chrome";v="${chrome}", "Chromium";v="${chrome}", "Not_A Brand";v="8"`, "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"macOS"' },
+    script: macPlatform(chrome),
+  };
+}
+
+/** What a page's scripts ask about their platform, answered as Chrome on macOS. */
 function macPlatform(chrome: string): string {
   return `
 (() => {
   Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
+  Object.defineProperty(Navigator.prototype, "webdriver", { configurable: true, get: () => false });
   if (typeof NavigatorUAData === "undefined") return;
   const brands = () => [{ brand: "Google Chrome", version: "${chrome}" }, { brand: "Chromium", version: "${chrome}" }, { brand: "Not_A Brand", version: "8" }];
   const ua = NavigatorUAData.prototype;
@@ -1540,7 +1580,10 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   const menubar: Menubar =
     options.menubar === false
       ? false
-      : { ...options.menubar, clock: options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone) };
+      : {
+          app: options.menubar?.app,
+          clockText: options.menubar?.clockText ?? options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone),
+        };
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
   engine.sources = options.sources ?? [];

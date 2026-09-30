@@ -24,7 +24,7 @@ demo.say("Add a health check route.");
 // keyboard focus in the tree, exactly as it does for a person.
 await demo.cursor.moveTo(".monaco-editor .view-lines");
 await demo.cursor.click();
-await demo.press("Control+End");
+await demo.press("Meta+ArrowDown");
 await demo.press("Enter");
 demo.zoom.to(".monaco-editor .view-overlays .current-line", { scale: 1.4 });
 await demo.editor.type('server.get("/health", () => ({ ok: true }));', { wpm: 350 });
