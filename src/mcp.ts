@@ -62,12 +62,20 @@ const text = (t: string) => ({ type: "text" as const, text: t });
  * Collects visible interactive elements with a suggested selector. Kept as a
  * string so no transpiler helper (e.g. esbuild's __name) leaks into the page.
  */
-const INSPECT_ELEMENTS = `(() => {
+/** Lists a page's visible interactive elements with a selector for each (inspect_page). */
+export const INSPECT_ELEMENTS = `(() => {
   const q = 'a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[contenteditable=true],[data-testid]';
   const out = [];
   const esc = (v) => v.replace(/"/g, '\\"');
-  for (const el of Array.from(document.querySelectorAll(q))) {
-    const r = el.getBoundingClientRect();
+  // Web components' open shadow roots too: Playwright's selectors reach into them.
+  const scopes = [document];
+  for (let i = 0; i < scopes.length; i++) {
+    const walker = document.createTreeWalker(scopes[i] === document ? document.documentElement : scopes[i], NodeFilter.SHOW_ELEMENT);
+    for (let n = walker.currentNode; n; n = walker.nextNode()) if (n.shadowRoot) scopes.push(n.shadowRoot);
+  }
+  const found = scopes.flatMap((s) => Array.from(s.querySelectorAll(q)).map((el) => ({ el, r: el.getBoundingClientRect() })));
+  found.sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left); // reading order, wherever each lives
+  for (const { el, r } of found) {
     const st = getComputedStyle(el);
     if (r.width < 1 || r.height < 1 || st.visibility === "hidden" || st.display === "none" || Number(st.opacity) === 0) continue;
     const tag = el.tagName.toLowerCase();
@@ -118,10 +126,10 @@ export async function serve(): Promise<void> {
       annotations: { readOnlyHint: true },
     },
     async ({ url, width = 1280, height = 800, screenshot = true, session }) => {
-      const { chromium } = await import("playwright");
+      const { launchChromium } = await import("./browser.js");
       const { resolveSession } = await import("./session.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
-      const browser = await chromium.launch();
+      const browser = await launchChromium();
       try {
         const page = await (await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, storageState })).newPage();
         await page.goto(url, { waitUntil: "load" });

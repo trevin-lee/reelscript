@@ -95,10 +95,12 @@ export function withCarriageReturns(text: string): string {
 /** Turn declared output into evenly paced line events. */
 export function scriptedEvents(output: string, durationMs?: number): TermEvent[] {
   const lines = output.replace(/\r\n/g, "\n").split("\n");
+  // Output ending in a newline ends with its last line, not an empty one after it.
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   const n = lines.length;
   const total = durationMs ?? Math.min(2500, 150 + 60 * n);
   const step = n > 1 ? total / (n - 1) : 0;
-  return lines.map((line, i) => [Math.round(80 + i * step), i < n - 1 ? `${line}\n` : line]);
+  return lines.map((line, i) => [Math.round(80 + i * step), i < n - 1 || /\n$/.test(output) ? `${line}\n` : line]);
 }
 
 /**

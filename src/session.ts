@@ -5,6 +5,7 @@
  * signed in with it.
  */
 import { chromium, type BrowserContext } from "playwright";
+import { INSTALL_BROWSER, browserMissing } from "./browser.js";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -37,13 +38,14 @@ export async function login(url: string, out: string, log: (m: string) => void =
     browser = await chromium.launch({ headless });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (/Executable doesn't exist|install/i.test(msg)) {
+    // The container has only the headless browser, and a server has no screen to show one on.
+    if (process.env.REELSCRIPT_BUILTIN || /XServer|\$DISPLAY/i.test(msg)) {
       throw new Error(
-        "reelscript: login opens a visible browser, which this environment doesn't have.\n" +
-          "  On your own machine, run:  npx playwright install chromium\n" +
-          "  In the container or CI, sign in on your own machine instead and pass the session file in.",
+        "reelscript: login opens a visible browser, which this environment can't show.\n" +
+          "  Sign in on your own machine instead, and pass the session file in.",
       );
     }
+    if (browserMissing(err)) throw new Error(`reelscript: login opens Chromium, which isn't installed. Run:  ${INSTALL_BROWSER}`);
     throw err;
   }
   try {

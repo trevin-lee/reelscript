@@ -71,10 +71,14 @@ test("check fails when Quick Open or the Command Palette can't find what the scr
   assert.equal(goodFile.code, 0, goodFile.output);
   const badFile = await run(`openFile("no-such-file.ts")`);
   assert.equal(badFile.code, 1);
-  assert.match(badFile.output, /Quick Open found no file matching "no-such-file\.ts"[\s\S]*s\.ts:4/);
+  assert.match(badFile.output, /Quick Open found no file named "no-such-file\.ts"[\s\S]*s\.ts:4/);
+  // VS Code's fuzzy search offers src/app.ts for "pp.ts"; that isn't the file asked for.
+  const nearFile = await run(`openFile("pp.ts")`);
+  assert.equal(nearFile.code, 1);
+  assert.match(nearFile.output, /Quick Open found no file named "pp\.ts" \(VS Code offered "src\/app\.ts" instead\)/);
   const badCommand = await run(`command("Acme: A Command That Was Renamed")`);
   assert.equal(badCommand.code, 1);
-  assert.match(badCommand.output, /Command Palette has no command matching/);
+  assert.match(badCommand.output, /Command Palette has no command named/);
 });
 
 test("an unsupported output format fails up front instead of hanging", { timeout: 60_000 }, async () => {

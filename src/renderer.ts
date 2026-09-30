@@ -1,4 +1,5 @@
-import { chromium, type Page, type Browser, type BrowserContext, type CDPSession } from "playwright";
+import type { Page, Browser, BrowserContext, CDPSession } from "playwright";
+import { launchChromium } from "./browser.js";
 import sharp, { type OverlayOptions } from "sharp";
 import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
@@ -6,7 +7,7 @@ import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
-import { Encoder, checkOutputFormat, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
+import { Encoder, checkOutputFormat, gifSize, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
 import { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch, menubarClock } from "./time.js";
 import { DEFAULT_VOICE, applyPronunciations, cachedClip, kokoro, synthesizeClip, type Clip, type TtsEngine } from "./tts.js";
@@ -267,7 +268,7 @@ class Engine {
   async open(): Promise<void> {
     // Smooth scrolling runs on Chromium's own clock, not the frame-stepped one,
     // so it's off: keyboard and page scrolls jump, and demo.scroll() animates.
-    this.browser = await chromium.launch({
+    this.browser = await launchChromium({
       headless: true,
       args: ["--disable-smooth-scrolling"],
       // Playwright's own signal handlers exit the process straight away; reelscript's
@@ -291,6 +292,7 @@ class Engine {
     // button in the page under demo would fail where a real browser succeeds.
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await this.context.addInitScript(this.deterministic ? clockShim(this.epoch) : dateShim(this.epoch));
+    await this.context.addInitScript(ONE_TAB);
   }
 
   private unregisterBrowser: (() => void) | null = null;
@@ -513,6 +515,7 @@ class Engine {
     try {
       hits = await w.page
         .locator(aimed.selector)
+        .filter({ visible: true }) // the element visible() aimed at
         .first()
         .evaluate(
           (el, [x, y]) => {
@@ -539,13 +542,34 @@ class Engine {
     }
   }
 
-  /** A selector's first match once it's visible, or a reelscript error after 3s. */
+  /** Where in the script the current action came from, for warnings. */
+  private at = "";
+  /** Script lines, by action, from renderTimeline's options. */
+  sources: string[] = [];
+  /** Targets already warned about as ambiguous, by script line. */
+  private ambiguous = new Set<string>();
+
+  /**
+   * A selector's first visible match, or a reelscript error after 3s. (A
+   * hidden copy, such as a collapsed mobile menu, doesn't count.) Several
+   * visible matches are a warning: the first may not be the one meant.
+   */
   private async visible(w: Win, target: string) {
-    const loc = w.page.locator(target).first();
+    const matches = w.page.locator(target).filter({ visible: true });
+    const loc = matches.first();
     const deadline = Date.now() + 3000;
     while (!(await loc.isVisible())) {
       if (Date.now() > deadline) throw new Error(`reelscript: target "${target}" was not found or never became visible in the ${w.id} window`);
       await new Promise((r) => setTimeout(r, 25));
+    }
+    const count = await matches.count();
+    const key = `${this.at} ${target}`;
+    if (count > 1 && !this.ambiguous.has(key)) {
+      this.ambiguous.add(key);
+      process.stderr.write(
+        `reelscript: warning: "${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
+          `An id, a data-testid, or role=button[name="…"] picks the one you mean\n  at ${this.at}\n`,
+      );
     }
     return loc;
   }
@@ -614,6 +638,7 @@ class Engine {
   // ------------------------------------------------------------ steps
 
   async begin(action: Action, index: number, start: number): Promise<Step | null> {
+    this.at = this.sources[index] ? `${this.sources[index]} (${action.kind})` : action.kind;
     switch (action.kind) {
       case "browser.goto": {
         const w = await this.ensureWindow("browser", "browser");
@@ -760,7 +785,7 @@ class Engine {
         // time between steps for the page to lay out and paint, until the
         // target shows. No frame is filmed and no video time passes.
         const w = action.window ? this.window(action.window) : this.focused();
-        const loc = w.page.locator(action.target).first();
+        const loc = w.page.locator(action.target).filter({ visible: true }).first();
         const deadline = Date.now() + (action.timeout ?? 15_000);
         while (!(await loc.isVisible())) {
           if (Date.now() > deadline) throw new Error(`reelscript: waitFor "${action.target}" timed out in the ${w.id} window`);
@@ -927,7 +952,8 @@ class Engine {
         const typeEnd = typeStart + chars.length * msPerChar;
         const outStart = typeEnd + 60;
         const lastOut = events.length ? outStart + events[events.length - 1][0] : outStart;
-        const endsWithNewline = !events.length || /\n$/.test(events[events.length - 1][1]);
+        const text = events.map((e) => e[1]).join("");
+        const endsWithNewline = !text || /\n$/.test(text);
         const promptAt = lastOut + 150;
         let nextChar = 0;
         let nextEvent = 0;
@@ -946,6 +972,7 @@ class Engine {
           await this.termWrite(w, out, !!action.events);
           if (!prompted && t >= promptAt) {
             prompted = true;
+            if (typeof action.prompt === "string") w.termPrompt = action.prompt; // a new prompt from here on
             if (action.prompt !== false) await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
           }
         };
@@ -957,7 +984,8 @@ class Engine {
         const events = this.termEvents.get(index);
         if (!events) throw new Error("reelscript: terminal events missing (internal)");
         const lastOut = events.length ? start + events[events.length - 1][0] : start;
-        const endsWithNewline = !events.length || /\n$/.test(events[events.length - 1][1]);
+        const text = events.map((e) => e[1]).join("");
+        const endsWithNewline = !text || /\n$/.test(text);
         let nextEvent = 0;
         let prompted = false;
         const flush = async (t: number) => {
@@ -966,6 +994,7 @@ class Engine {
           await this.termWrite(w, out, !!action.events);
           if (action.prompt && !prompted && t >= lastOut + 150) {
             prompted = true;
+            if (typeof action.prompt === "string") w.termPrompt = action.prompt;
             await this.termWrite(w, (endsWithNewline ? "" : "\r\n") + w.termPrompt);
           }
         };
@@ -1003,8 +1032,7 @@ class Engine {
         const row = document.querySelector(".quick-input-list .monaco-list-row.focused") ?? document.querySelector(".quick-input-list .monaco-list-row");
         return row?.getAttribute("aria-label") ?? null;
       });
-      const bad = !label || /^No matching (results|commands)|similar commands$/i.test(label);
-      if (!bad) return;
+      if (label && quickInputMatches(label, text, isFile)) return;
       if (Date.now() > deadline) break;
       if (Date.now() - asked > 1200) {
         await w.page.keyboard.press("Escape");
@@ -1014,8 +1042,13 @@ class Engine {
       }
       await new Promise((r) => setTimeout(r, 100));
     }
-    const what = isFile ? `Quick Open found no file matching "${text}"` : `the Command Palette has no command matching "${text}"`;
-    const offered = label && !/^No matching/i.test(label) ? ` (VS Code offered "${label.replace(/, similar commands$/i, "")}" instead)` : "";
+    const what = isFile ? `Quick Open found no file named "${text}"` : `the Command Palette has no command named "${text}"`;
+    let offered = "";
+    if (label && !/^No matching/i.test(label)) {
+      const row = label.split(", ")[0]; // "app.ts src" (a file and its folder) or "Format Document"
+      const space = row.indexOf(" ");
+      offered = ` (VS Code offered "${isFile && space > 0 ? `${row.slice(space + 1)}/${row.slice(0, space)}` : row}" instead)`;
+    }
     throw new Error(`reelscript: ${what}${offered}`);
   }
 
@@ -1260,6 +1293,64 @@ export function centreWithin(c: number, size: number, lo: number, hi: number): n
 }
 
 /**
+ * The browser window has no tabs, and a page Chromium opened in a new one
+ * would never be seen: a link or window.open() that would open a new tab
+ * or window opens in this one instead, as if the demo had switched to it.
+ * Links are retargeted before the click's own navigation, so it happens on
+ * the frame clock like any other.
+ */
+const ONE_TAB = String.raw`
+(() => {
+  const here = (t) => /^_(self|parent|top)$/i.test(t || "");
+  // _top: from an iframe, the page takes the whole window, as a new tab would.
+  const retarget = (el, attr) => {
+    const t = el.getAttribute(attr) ?? document.querySelector("base[target]")?.getAttribute("target");
+    if (t && !here(t)) el.setAttribute(attr, "_top");
+  };
+  document.addEventListener("click", (e) => {
+    const link = e.composedPath().find((n) => n instanceof Element && n.matches("a[href], area[href]"));
+    if (link) retarget(link, "target");
+  }, true);
+  document.addEventListener("submit", (e) => {
+    if (e.target instanceof HTMLFormElement) retarget(e.target, "target");
+    if (e.submitter && e.submitter.hasAttribute("formtarget")) retarget(e.submitter, "formtarget");
+  }, true);
+  const realOpen = window.open;
+  window.open = function (url, target, features) {
+    if (!url || here(target)) return realOpen.apply(this, arguments);
+    const href = new URL(url, document.baseURI).href;
+    try { window.top.location.assign(href); } catch { location.assign(href); }
+    return window.top;
+  };
+})();
+`;
+
+/**
+ * Whether a Quick Open or Command Palette row is what the script asked for.
+ * VS Code's fuzzy search offers something for almost anything typed
+ * ("app.ts" finds webapp.ts), so a file must match by name, and by folder
+ * when one is given, and a command by its whole name, with or without its
+ * category. Rows read "app.ts src, recently opened" and "View: Toggle Word Wrap, Alt+Z".
+ */
+export function quickInputMatches(label: string, text: string, isFile: boolean): boolean {
+  if (/^No matching (results|commands)|similar commands$/i.test(label)) return false;
+  const row = label.split(", ")[0];
+  if (!isFile) {
+    const name = row.toLowerCase();
+    const want = text.trim().toLowerCase();
+    return name === want || name.endsWith(`: ${want}`);
+  }
+  const path = text.trim().replace(/^\.\//, "");
+  const slash = path.lastIndexOf("/");
+  const base = path.slice(slash + 1);
+  if (row !== base && !row.startsWith(`${base} `)) return false;
+  if (slash < 0) return true;
+  const dir = path.slice(0, slash);
+  const folder = row.slice(base.length + 1);
+  return folder === dir || folder.endsWith(`/${dir}`);
+}
+
+/**
  * Chromium sometimes refuses a screenshot while a heavy page is busy
  * ("Unable to capture screenshot"); a moment later it succeeds. Retry a few
  * times, then fail with a message that says what couldn't be captured.
@@ -1332,6 +1423,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       : { ...options.menubar, clock: options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone) };
   const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs);
   if (options.onStatus) engine.onStatus = options.onStatus;
+  engine.sources = options.sources ?? [];
   engine.timezone = options.timezone ?? DEFAULT_TIMEZONE;
   engine.epoch = clockEpoch(options.clock ?? DEFAULT_CLOCK, engine.timezone);
   engine.session = options.session;
@@ -1539,5 +1631,10 @@ export async function render(actions: Action[], options: RenderOptions): Promise
     if (!finished) await removePartials();
   }
 
+  if (isGif && snapshot === undefined && !check) {
+    // What the GIF holds, not the frames captured for it.
+    const gif = gifSize(width, height, options.gif);
+    return { out: options.out, frames: Math.round((t / 1000) * gif.fps), durationMs: Math.round(t), width: gif.width, height: gif.height };
+  }
   return { out: options.out, frames, durationMs: Math.round(t), width, height };
 }

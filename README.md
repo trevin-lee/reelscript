@@ -42,10 +42,10 @@ await demo.render("out/demo.mp4");
 
 ```sh
 npm install -D @reelscript/cli
-npx playwright install chromium
+npx reelscript warmup browser
 ```
 
-The package installs a `reelscript` command. Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
+The package installs a `reelscript` command, and `warmup browser` downloads the Chromium build it drives. (Use it rather than `npx playwright install`, which installs the build for your project's own Playwright if it has one.) Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
 Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
 
@@ -65,9 +65,9 @@ The example drives a small dashboard app that ships with the repo, so it's fully
 A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. A few rules hold everywhere:
 
 - **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, an editor's `workspace` and `extensions`, and a local page in `browser.goto("./app.html")` (anything with a scheme, like `https://` or `file://`, is a URL as is). Paths you pass on the command line are relative to your working directory.
-- **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target can also be a point, `{ x, y }`, in the window's own coordinates.
+- **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates.
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
-- **Windows.** There is at most one browser, one terminal, and one editor window. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
+- **Windows.** There is at most one browser, one terminal, and one editor window. The browser has no tabs: a link or `window.open()` that would open a new tab opens in the browser window, as if the demo had switched to it. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Selectors resolve in the focused window unless you name one with `window`.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
 - **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page, stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
 - **What the clock can't reach.** Animated GIF, APNG and WebP images play on their own and differ between renders; use a `<video>` or CSS animation for motion that must match. Timers in a Web Worker run on real time, and so does a closed shadow root written into the HTML (`<template shadowrootmode="closed">`); other shadow roots are covered. A `<video>` served over HTTP follows the clock only if the server answers Range requests (`python -m http.server` doesn't; reelscript warns when a video stands still), or open the page from a file. VS Code runs on real time (see Editor demos).
@@ -112,6 +112,8 @@ await demo.editor.open({
   extensions: ["esbenp.prettier-vscode@12.4.0"],
   settings: { "editor.defaultFormatter": "esbenp.prettier-vscode" }, // or VS Code asks which formatter to use
 });
+await demo.cursor.moveTo(demo.editor.file("src")); // expand the folder
+await demo.cursor.click();
 await demo.cursor.moveTo(demo.editor.file("app.ts"));
 await demo.cursor.click();
 await demo.cursor.moveTo(".monaco-editor .view-lines"); // click into the editor to move keyboard focus
@@ -121,7 +123,7 @@ await demo.editor.type('server.get("/health", () => ({ ok: true }));');
 await demo.editor.command("Format Document");
 ```
 
-`openFile()` and `command()` type into Quick Open and the Command Palette the way a person would. If VS Code can't find the file or command, the render and `check` fail at that line instead of pressing Enter on whatever VS Code offered, so a renamed command breaks the build rather than the demo.
+`openFile()` and `command()` type into Quick Open and the Command Palette the way a person would. The file must match by name (and by folder, if you give one) and the command by its whole name, with or without its category (`View: Toggle Word Wrap` or `Toggle Word Wrap`). If VS Code can't find it, the render and `check` fail at that line instead of pressing Enter on the near match VS Code offered, so a renamed file or command breaks the build rather than the demo.
 
 The editor is [code-server](https://github.com/coder/code-server), a standalone build of Code - OSS. It's downloaded on first use, about 200 MB, and built into the container image. Each render starts it on a random local port with its own settings and a copy of the workspace, so your files are never edited, and stops it afterwards. Keybindings are always the Linux ones (Ctrl, not Cmd) so scripts behave the same on every host. VS Code runs on real time, not reelscript's frame-stepped clock, and shows the real date rather than the demo's `clock`. Its own animations are off by default, but anything VS Code or an extension does on a timer (a build, a deploy, a toast) happens in real time, so how far along it is at a given second can differ between `preview`, `check` and `render`, and between machines. Follow it with `waitFor()` on what it shows rather than a fixed `wait()`, as [examples/extension.ts](examples/extension.ts) does. See [examples/editor.ts](examples/editor.ts).
 
@@ -238,7 +240,8 @@ reelscript preview <script> --at <seconds> [--out frame.png]
 reelscript check   <script> [more scripts...]    run the timeline without rendering
 reelscript record  <script> [more...] [--prune]  run terminal commands for real and save recordings
 reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
-reelscript warmup  [narration] [editor]          download the voice model and VS Code ahead of time
+reelscript warmup  [browser] [narration] [editor]
+                                                   download the browser, voice model and VS Code
 reelscript cache   [clear <part|all>]            show or clear what's cached on disk
 reelscript mcp                                   MCP server (stdio) for coding agents
 reelscript --version
@@ -291,12 +294,12 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.browser.goto(url, { hold })` | Navigate to a URL, or to a local page by its path relative to the script (a `?query` or `#hash` is kept), then hold on the loaded page for `hold` ms (default 400). `settle` is the old name and still works. |
 | `demo.browser.mockAPI(pattern, json, { status })` | Answer matching requests from the browser window with canned JSON. Opens no window. (The editor is VS Code's own page and isn't mocked.) |
 | `demo.terminal.open({ title, prompt, fontSize, lineHeight, cols, rows, x, y, width, height })` | Open a terminal window. `cols` and `rows` fix its size in characters; `lineHeight: 1` (default 1.3) joins block characters, as full-screen programs expect. |
-| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGap, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`. `cwd`, relative to the script, is where `reelscript record` runs it. |
+| `demo.terminal.run(cmd, { output, events, duration, wpm, speed, maxGap, prompt, cwd })` | Type `cmd`. With `output`, stream that text; with `events`, play those timed chunks; with neither, replay its recording. `prompt: false` leaves the command running for `print()`, and a string changes the prompt from then on (after a `cd`, say), as `open({ prompt })` sets it. `cwd`, relative to the script, is where `reelscript record` runs it. |
 | `demo.terminal.print(text, { duration, events, speed, maxGap, prompt })` | More output with no command typed, after a `run` with `prompt: false`. |
 | `demo.editor.open({ workspace, extensions, settings, notifications, x, y, width, height })` | Open VS Code on a copy of a folder. `extensions` are Open VSX ids, `.vsix` files, or extension folders. `settings` merge over demo-friendly defaults; `notifications: true` shows VS Code's toasts. Reopening with a different workspace, extensions, or settings starts a fresh VS Code. |
 | `demo.editor.openFile(path, { wpm })`, `demo.editor.command(name, { wpm })` | Quick Open (Ctrl+P) or the Command Palette (F1), typed visibly. Fails if VS Code finds no match. |
 | `demo.editor.type(text, { wpm })` | Bring the editor forward and type at its caret. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
-| `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab. |
+| `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab, by the file's exact name. A row is on screen only once its folder is expanded. |
 | `.focus()`, `.place({ x, y, width, height })`, `.close()` on `browser`, `terminal`, `editor` | Bring forward, move or resize (`x, y` is the frame's corner on the desktop; `width, height` the content size), or take off the desktop; a closed window can be opened again. |
 
 `createDemo` options:
@@ -316,7 +319,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `voice` | `"af_heart"` | Narration voice. |
 | `tts` | Kokoro | Voice engine; see Narration. |
 | `pronunciations` | none | Respellings for the voice, e.g. `{ Reelscript: "Reel script" }`. |
-| `gif` | `{ width: 960, fps: 20 }` | Size and frame rate for `.gif` output. |
+| `gif` | `{ width: 960, fps: 20 }` | Size and frame rate for `.gif` output. The default width never scales a narrower video up. |
 | `recordingsDir` | `"recordings"` | Where terminal recordings live, relative to the script. |
 | `deterministic` | `true` | Step the page's clock one frame at a time. `false` lets the page run in real time (the date is still pinned). |
 | `verbose` | `true` | Print progress and the output summary. |

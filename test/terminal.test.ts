@@ -13,6 +13,9 @@ test("scriptedEvents paces lines evenly and keeps newlines", () => {
   const ev = scriptedEvents("one\ntwo\nthree", 1000);
   assert.deepEqual(ev.map(([, t]) => t), ["one\n", "two\n", "three"]);
   assert.deepEqual(ev.map(([at]) => at), [80, 580, 1080]);
+  // A trailing newline ends the last line; there's no empty line after it.
+  assert.deepEqual(scriptedEvents("one\ntwo\n", 1000).map(([, t]) => t), ["one\n", "two\n"]);
+  assert.deepEqual(scriptedEvents("one\r\n", 1000).map(([, t]) => t), ["one\n"]);
 });
 
 test("playbackEvents caps silences and scales speed", () => {

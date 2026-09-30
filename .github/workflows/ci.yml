@@ -95,13 +95,14 @@ jobs:
           fi
           # Chromium's text rasterizing varies pixel values invisibly between
           # runs; only commit a re-render that differs visibly (PSNR under
-          # 40 dB) or has a different number of frames.
+          # 40 dB) or has a different size or number of frames.
           git show HEAD:docs/demo.gif > /tmp/old.gif
           cp docs/demo.gif /tmp/new.gif
           ff() { docker run --rm -v /tmp:/tmp --entrypoint /opt/reelscript/node_modules/ffmpeg-static/ffmpeg "$IMAGE:sha-${{ github.sha }}" "$@"; }
           old_frames=$(ff -v error -i /tmp/old.gif -f framemd5 - | grep -vc "^#")
           new_frames=$(ff -v error -i /tmp/new.gif -f framemd5 - | grep -vc "^#")
-          if [ "$old_frames" = "$new_frames" ]; then
+          size() { od -An -tu2 -j6 -N4 "$1" | tr -s ' '; } # the GIF header's width and height
+          if [ "$old_frames" = "$new_frames" ] && [ "$(size /tmp/old.gif)" = "$(size /tmp/new.gif)" ]; then
             ff -v error -i /tmp/old.gif -i /tmp/new.gif -lavfi "[0:v][1:v]psnr=stats_file=/tmp/psnr.log" -f null -
             worst=$(awk '{for(i=1;i<=NF;i++) if($i ~ /^psnr_avg:/){split($i,a,":"); if(a[2]!="inf" && (m=="" || a[2]+0<m+0)) m=a[2]}} END{print (m=="" ? 999 : m)}' /tmp/psnr.log)
             echo "frames: $new_frames, worst PSNR: $worst dB"

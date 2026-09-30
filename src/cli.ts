@@ -42,7 +42,8 @@ usage:
   reelscript record  <script> [more...] [--prune]  run terminal commands for real and save
                                                    recordings; --prune deletes unused ones
   reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
-  reelscript warmup  [narration] [editor]          download the voice model and VS Code ahead of time
+  reelscript warmup  [browser] [narration] [editor]
+                                                   download the browser, voice model and VS Code
   reelscript cache   [clear <part|all>]            show or clear what's cached on disk
   reelscript mcp                                   MCP server (stdio) for coding agents
   reelscript --version
@@ -224,10 +225,18 @@ async function main(): Promise<void> {
       break;
     }
     case "warmup": {
-      const parts = positional.length ? positional : ["narration", "editor"];
+      const parts = positional.length ? positional : ["browser", "narration", "editor"];
       for (const part of parts) {
         const t = Date.now();
-        if (part === "narration") {
+        if (part === "browser") {
+          if (process.env.REELSCRIPT_BUILTIN) {
+            console.error("reelscript: browser built into the image");
+            continue;
+          }
+          const { installBrowser } = await import("./browser.js");
+          await installBrowser();
+          console.error(`reelscript: browser ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
+        } else if (part === "narration") {
           const { kokoro } = await import("./tts.js");
           await kokoro().synthesize("Ready.", {});
           console.error(`reelscript: narration model ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
@@ -236,7 +245,7 @@ async function main(): Promise<void> {
           await ensureCodeServer((m) => console.error(`reelscript: ${m}`));
           console.error(`reelscript: editor ready (${((Date.now() - t) / 1000).toFixed(1)}s)`);
         } else {
-          throw new Error(`reelscript: unknown warmup part "${part}" (narration, editor)`);
+          throw new Error(`reelscript: unknown warmup part "${part}" (browser, narration, editor)`);
         }
       }
       break;
@@ -267,6 +276,7 @@ async function main(): Promise<void> {
       console.log(version);
       break;
     default:
+      if (command !== undefined) console.error(`reelscript: unknown command "${command}"\n`);
       usage();
   }
 }

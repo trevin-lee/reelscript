@@ -17,23 +17,28 @@ export interface EncoderOptions {
 }
 
 export interface GifOptions {
-  /** Output width in px; height keeps the aspect ratio. Default: 960 */
+  /** Output width in px; height keeps the aspect ratio. Default: 960, or the video's width if narrower */
   width?: number;
   /** GIF frame rate. Default: 20 */
   fps?: number;
+}
+
+/** A GIF's size and frame rate for a video `width` x `height`: 960 wide by default, never scaled up. */
+export function gifSize(width: number, height: number, gif: GifOptions = {}): { width: number; height: number; fps: number } {
+  const w = gif.width ?? Math.min(960, width);
+  return { width: w, height: Math.round((height * w) / width), fps: gif.fps ?? 20 };
 }
 
 /** Codec arguments chosen from the output extension. */
 function outputArgs(opts: EncoderOptions): string[] {
   const ext = extname(opts.out).toLowerCase();
   if (ext === ".gif") {
-    const width = opts.gif?.width ?? 960;
-    const fps = opts.gif?.fps ?? 20;
+    const { width, height, fps } = gifSize(opts.width, opts.height, opts.gif);
     // Two-pass palette in one graph: sample a palette from the scaled frames,
     // then dither against it. Gives far better colour than ffmpeg's default GIF path.
     const filter = [
       `fps=${fps}`,
-      `scale=${width}:-1:flags=lanczos`,
+      `scale=${width}:${height}:flags=lanczos`,
       "split[a][b]",
       "[a]palettegen=stats_mode=diff[p]",
       "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",

@@ -73,12 +73,12 @@ export type Action =
       maxGap?: number;
       /** @deprecated Renamed to maxGap. */
       maxGapMs?: number;
-      /** Show a new prompt after the output. Default: true */
-      prompt?: boolean;
+      /** The prompt after the output: true for the terminal's, a string for a new one from then on, false for none. Default: true */
+      prompt?: boolean | string;
       /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
       cwd?: string;
     }
-  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number; duration?: number; prompt?: boolean }
+  | { kind: "terminal.print"; text?: string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number; duration?: number; prompt?: boolean | string }
   | { kind: "call"; fn: (ctx: CallContext) => unknown };
 
 export type ActionKind = Action["kind"];

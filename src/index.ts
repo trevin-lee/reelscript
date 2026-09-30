@@ -16,6 +16,7 @@ import type { GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, saveRecording } from "./terminal.js";
+import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,7 +78,25 @@ function invalidOption(o: DemoOptions): string | null {
     v !== undefined && !(Array.isArray(v) && v.length === 2 && v.every((n) => Number.isInteger(n) && n > 0))
       ? `${name} must be [width, height] in whole pixels above 0, not ${shown(v)}`
       : null;
-  return above0("fps", o.fps) ?? size("viewport", o.viewport) ?? size("desktop", o.desktop) ?? above0("gif.fps", o.gif?.fps) ?? pixels("gif.width", o.gif?.width);
+  const numbers = above0("fps", o.fps) ?? size("viewport", o.viewport) ?? size("desktop", o.desktop) ?? above0("gif.fps", o.gif?.fps) ?? pixels("gif.width", o.gif?.width);
+  if (numbers) return numbers;
+  if (o.theme !== undefined && o.theme !== "macos" && o.theme !== "bare") return `unknown theme ${shown(o.theme)} (use "macos", "bare")`;
+  if (o.timezone !== undefined) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: o.timezone });
+    } catch {
+      return `unknown timezone ${shown(o.timezone)} (use an IANA name, like "America/New_York")`;
+    }
+  }
+  if (o.clock !== undefined) {
+    if (o.clock instanceof Date ? Number.isNaN(o.clock.getTime()) : typeof o.clock !== "string") return `clock must be a Date or an ISO date string, not ${shown(o.clock)}`;
+    try {
+      clockEpoch(o.clock, o.timezone ?? DEFAULT_TIMEZONE);
+    } catch (err) {
+      return (err as Error).message.replace(/^reelscript: /, "");
+    }
+  }
+  return null;
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
@@ -153,7 +172,7 @@ export interface DemoOptions {
   camera?: "manual" | "follow" | FollowCamera;
   /** Freeze the page clock and step it per frame for reproducible animations. Default: true. */
   deterministic?: boolean;
-  /** Applied when rendering to a .gif path. Default: 960px wide at 20fps. */
+  /** Applied when rendering to a .gif path. Default: 960px wide (or the video's width, if narrower) at 20fps. */
   gif?: GifOptions;
   /** Default narration voice for say(). Default: "af_heart" (Kokoro). */
   voice?: string;
@@ -293,11 +312,12 @@ export interface RunOptions {
   /** Folder `reelscript record` runs the command in, relative to the script. Default: the script's folder */
   cwd?: string;
   /**
-   * Show a new prompt once the output ends. Default: true. With false the
-   * command looks as if it is still running, and terminal.print() can go on
-   * with its output.
+   * The prompt once the output ends. Default: true, the terminal's prompt. A
+   * string shows that prompt instead, and keeps it from then on (after a
+   * `cd`, say). With false the command looks as if it is still running, and
+   * terminal.print() can go on with its output.
    */
-  prompt?: boolean;
+  prompt?: boolean | string;
 }
 
 export interface EditorOptions {
@@ -427,11 +447,11 @@ class TerminalWindow extends Win {
    * More output, with no command typed: the rest of a command run with
    * `prompt: false`. Spread over `duration` ms, or given as timed `events`
    * (played like `run`'s, and `text` is then ignored); `prompt: true` ends
-   * it with a new prompt.
+   * it with a new prompt, and a string with that prompt from then on.
    */
   async print(
     text: string,
-    opts: { duration?: number; prompt?: boolean; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number } = {},
+    opts: { duration?: number; prompt?: boolean | string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number } = {},
   ): Promise<void> {
     this.demo._push({ kind: "terminal.print", text, ...opts });
   }
@@ -462,14 +482,16 @@ class EditorWindow extends Win {
     this.demo._push({ kind: "type", text, ...opts, window: "editor" });
   }
 
-  /** Selector for a file or folder row in the Explorer, for cursor.moveTo(). */
+  /** Selector for a file or folder row in the Explorer, by its name ("app.ts", or "src/app.ts" for the row app.ts), for cursor.moveTo(). */
   file(name: string): string {
-    return `.explorer-folders-view .monaco-list-row[aria-label*="${name}"]`;
+    return `.explorer-folders-view .monaco-list-row[aria-label=${JSON.stringify(name.split("/").pop())}]`;
   }
 
-  /** Selector for an open editor tab. */
+  /** Selector for an open editor tab, by its file's name. */
   tab(name: string): string {
-    return `.tabs-container .tab[aria-label*="${name}"]`;
+    const base = name.split("/").pop()!;
+    // "app.ts", or "app.ts, …" in states where VS Code adds to the label.
+    return `.tabs-container .tab[aria-label=${JSON.stringify(base)}], .tabs-container .tab[aria-label^=${JSON.stringify(`${base}, `)}]`;
   }
 }
 
