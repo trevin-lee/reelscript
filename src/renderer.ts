@@ -547,8 +547,8 @@ class Engine {
         w.page.frames().map((f) =>
           f
             .evaluate((ms) => {
-              const g = window as unknown as { __reelscript_advance?: (ms: number) => Promise<(string | undefined)[]> | undefined };
-              return g.__reelscript_advance?.(ms); // resolves once any media seek has landed, with media that wouldn't move
+              const g = window as unknown as { __reelscript_advance?: (ms: number) => Promise<(string | undefined)[] | undefined> | undefined };
+              return g.__reelscript_advance?.(ms); // resolves once new animations are held and any media seek has landed, with media that wouldn't move
             }, ms)
             .catch((err: unknown) => this.clockFailed(this.local.file(f.url()), err)),
         ),

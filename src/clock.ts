@@ -394,13 +394,25 @@ __PIN_NOW__
     for (const cb of cbs) call(cb, [now]);
     const roots = scopes();
     const animations = () => roots.flatMap((r) => r.getAnimations());
+    // An animation that hasn't started yet (one a click or class change set off
+    // since the last frame) can't be held yet: Chromium may already be running
+    // its copy on the compositor, and pausing it now can leave that copy a real
+    // frame in, whatever time the page is set to. It's held once it has started,
+    // at the next real frame, when the change reaches the compositor's copy too.
+    const starting = [];
+    const holdAt = (a, ct) => {
+      if (a.pending) { starting.push(a); return; }
+      if (a.playState === "running") animPause.call(a);
+      timeOf.set.call(a, ct);
+    };
     // An animation the page replays after it finished (play() again) is
     // running once more: take it back onto the frame clock.
     for (const a of animations()) {
       if (finished.has(a) && a.playState === "running") {
         finished.delete(a);
-        tracked.set(a, timeOf.get.call(a) ?? 0);
-        animPause.call(a);
+        const ct = timeOf.get.call(a) ?? 0;
+        tracked.set(a, ct);
+        holdAt(a, ct);
       }
     }
     // Step every running CSS transition / animation by exactly ms.
@@ -425,18 +437,29 @@ __PIN_NOW__
         ct += ms * rate;
       }
       // play() or reverse() by the page resumes real-time playback; keep it paused.
-      if (a.playState === "running") animPause.call(a);
       if ((rate >= 0 && ct >= end) || (rate < 0 && ct <= 0)) {
+        if (a.playState === "running") animPause.call(a);
         tracked.delete(a);
         finished.add(a);
         animFinish.call(a); // to the end, or the start when reversed
       } else {
-        timeOf.set.call(a, ct);
         tracked.set(a, ct);
+        holdAt(a, ct);
       }
     }
     drawCaret(roots);
-    return stepMedia(ms, roots);
+    const media = stepMedia(ms, roots);
+    if (!starting.length) return media;
+    // Usually one real frame; never more than a quarter second.
+    const started = Promise.all(starting.map((a) => a.ready.catch(() => {}))).then(() => new Promise((resolve) => realRAF(resolve)));
+    return Promise.race([started, new Promise((resolve) => realSetTimeout(resolve, 250))]).then(() => {
+      for (const a of starting) {
+        if (a.playState === "idle" || finished.has(a) || held.has(a) || !tracked.has(a)) continue;
+        if (a.playState === "running") animPause.call(a);
+        timeOf.set.call(a, tracked.get(a));
+      }
+      return media;
+    });
   };
 })();
 `;
