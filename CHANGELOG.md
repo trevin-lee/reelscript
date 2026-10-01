@@ -2,7 +2,7 @@
 
 ## 0.4.0
 
-Closes the gaps a coherence review found in 0.3.1: places where the tool let a broken demo pass, promised more than it did, or behaved differently in two places.
+Closes the gaps in 0.3.1: places where the tool let a broken demo pass, promised more than it did, or behaved differently in two places. Renders of the same script are the same in more places, and a script that worked with 0.3.1 may need the changes listed first.
 
 **Changes that can affect existing scripts**
 
