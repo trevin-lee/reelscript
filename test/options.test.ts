@@ -91,3 +91,15 @@ test("a terminal can have a fixed size, and play timed output made elsewhere", a
   // Declared output gets its carriage returns; one that has them keeps them.
   assert.equal(withCarriageReturns("a\nb\r\nc"), "a\r\nb\r\nc");
 });
+
+test("maxGap: Infinity keeps every silence, as output paced by the script needs", async () => {
+  const demo = createDemo();
+  const events: [number, string][] = [[0, "a"], [5000, "b"]];
+  await demo.terminal.open();
+  await demo.terminal.print("", { events, maxGap: Infinity });
+  await demo.terminal.print("", { events, maxGapMs: Infinity });
+  assert.deepEqual(playbackEvents(events, { maxGap: Infinity }), events);
+  // Any other number that isn't one is still an error at its line.
+  await assert.rejects(() => demo.terminal.print("", { events, maxGap: -1 }), /maxGap must be a number, 0 or more, not -1/);
+  await assert.rejects(() => demo.wait(Infinity), /ms must be a number, 0 or more, not Infinity/);
+});

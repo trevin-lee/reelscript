@@ -68,6 +68,8 @@ function invalidChoice(action: Action): string | null {
 const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height"];
 const AT_LEAST_0 = ["ms", "duration", "hold", "holdMs", "settle", "maxGap", "maxGapMs", "timeout"];
 const ANY_NUMBER = ["x", "y", "by", "to"];
+// No cap at all: every silence in a recording kept as it was.
+const MAY_BE_INFINITE = ["maxGap", "maxGapMs"];
 
 /** What's wrong with a number option, if anything: a 0 rate or a string would hang a render, a negative time run it backwards. */
 function invalidNumber(options: object): string | null {
@@ -81,6 +83,7 @@ function invalidNumber(options: object): string | null {
   for (const [keys, ok, rule] of rules) {
     for (const k of keys) {
       const v = o[k];
+      if (v === Infinity && MAY_BE_INFINITE.includes(k)) continue;
       if (v !== undefined && !(typeof v === "number" && Number.isFinite(v) && ok(v))) return `${k} must be ${rule}, not ${shown(v)}`;
     }
   }
@@ -461,7 +464,7 @@ export interface RunOptions {
   wpm?: number;
   /** Playback speed for recorded output. Default: 1 */
   speed?: number;
-  /** Cap silences in recorded output, in ms. Default: 700 */
+  /** Cap silences in recorded output, in ms; Infinity keeps every silence. Default: 700 */
   maxGap?: number;
   /** @deprecated Renamed to maxGap. */
   maxGapMs?: number;
