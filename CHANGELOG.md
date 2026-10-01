@@ -40,6 +40,7 @@ Closes the gaps a coherence review found in 0.3.1: places where the tool let a b
 - Terminal output ending in a newline no longer leaves a blank line before the next prompt, and `prompt` on `run()` and `print()` can be a string: the prompt from then on, after a `cd`, say.
 - GIFs aren't scaled up past the video's width, and the summary gives the GIF's own size and frame count.
 - An unknown command is named before the usage.
+- The README's commands all run after its own install step (`npx reelscript login`, `record`, `warmup narration`), and its extension section says to build the extension first.
 - Ctrl-C during `record` saves nothing, so the recordings a render replays stay as they were (it overwrote them with partial and empty ones); `check` warns about a recording that never finished.
 - A click, or a page's own redirect, that lands on an HTTP error page is a warning at the line, as a `goto()` that does is.
 - A terminal whose `cols` and `rows` don't fit its window warns that the rest is cut off (the README's asciinema recipe says to give it room).

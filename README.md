@@ -100,7 +100,7 @@ A script creates a demo with `createDemo()`, queues actions, and ends with `awai
 Sign in once, by hand, in a real browser. reelscript saves the session (cookies and local storage) to a file:
 
 ```sh
-reelscript login https://app.example.com/login --out demos/session.json
+npx reelscript login https://app.example.com/login --out demos/session.json
 ```
 
 Then every browser window in a demo starts signed in. From a script in `demos/`:
@@ -151,7 +151,7 @@ The editor is [code-server](https://github.com/coder/code-server), a standalone 
 
 ### Demo the extension you're building
 
-Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied in and registered, so no packaging step is needed:
+Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied in and registered, so no packaging step is needed, but build the extension first: VS Code runs its `main` as it is, and a command it contributes is still listed (and runs nothing) when that file is missing.
 
 ```ts
 // demo/extension.ts in the extension's repo: ".." is the repo root, the extension itself
@@ -159,7 +159,7 @@ await demo.editor.open({ workspace: "fixtures/project", extensions: [".."], noti
 await demo.editor.command("Acme: Deploy to Production");
 ```
 
-Each demo gets only the extensions it asks for. Open VSX extensions and `.vsix` files are installed once and cached; an Open VSX id without a version is cached at the version first installed, so pin one with `publisher.name@1.2.3`, or clear the cache to update (`reelscript cache clear extensions`). The extension runs in a real extension host with its Node dependencies, so keep `node_modules` present (or bundle) as you would for `vsce package`. See [examples/extension.ts](examples/extension.ts) and the sample extension in [examples/acme-ext](examples/acme-ext).
+Each demo gets only the extensions it asks for. Open VSX extensions and `.vsix` files are installed once and cached; an Open VSX id without a version is cached at the version first installed, so pin one with `publisher.name@1.2.3`, or clear the cache to update (`npx reelscript cache clear extensions`). The extension runs in a real extension host with its Node dependencies, so keep `node_modules` present (or bundle) as you would for `vsce package`. See [examples/extension.ts](examples/extension.ts) and the sample extension in [examples/acme-ext](examples/acme-ext).
 
 ## Terminal demos
 
@@ -172,7 +172,7 @@ await demo.terminal.run("node --version"); // replayed from recordings/node-vers
 Declared output never executes anything, so it renders identically everywhere. For real commands, run
 
 ```sh
-reelscript record demos/terminal.ts
+npx reelscript record demos/terminal.ts
 ```
 
 once, or in CI whenever your CLI changes. It executes every `terminal.run` that has no `output`, in the script's folder unless the run gives a `cwd`, captures stdout and stderr with timestamps, and saves `recordings/<command-slug>.json` next to the script. A command that exits with an error is still saved, since a demo may mean to show a failure, and `record` warns about it. A command that appears twice (`ls`, `touch new.txt`, `ls`) or runs in two folders gets a recording for each run, so each replays what it showed at that point. When you change a command, its old recording stays until you run `record --prune` with every script that shares the folder. Commit the recordings; they're small JSON.
@@ -192,7 +192,7 @@ See [examples/terminal.ts](examples/terminal.ts).
 
 ## Narration
 
-`say()` uses [Kokoro-82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) through the optional `kokoro-js` dependency, loaded only when a script calls `say()`. The model, about 90 MB, downloads on first use; `reelscript warmup` fetches it ahead of time, and the container has it built in. Spoken lines are cached by text and voice, so re-renders don't re-synthesize unchanged lines. Voices include `af_heart` (the default), `af_bella`, `am_michael`, `bf_emma`, and `bm_george`. `pronunciations` respells words the voice gets wrong, e.g. `{ Reelscript: "Reel script" }`.
+`say()` uses [Kokoro-82M](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) through the optional `kokoro-js` dependency, loaded only when a script calls `say()`. The model, about 90 MB, downloads on first use; `npx reelscript warmup narration` fetches it ahead of time, and the container has it built in. Spoken lines are cached by text and voice, so re-renders don't re-synthesize unchanged lines. Voices include `af_heart` (the default), `af_bella`, `am_michael`, `bf_emma`, and `bm_george`. `pronunciations` respells words the voice gets wrong, e.g. `{ Reelscript: "Reel script" }`.
 
 GIF output has no audio track; narration still paces the timeline. Render to `.mp4` for sound.
 

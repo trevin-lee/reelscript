@@ -103,6 +103,8 @@ export async function ensureCodeServer(onStatus?: (m: string) => void): Promise<
  * by default), outside anything reelscript lists or clears; each run keeps
  * them in its own temporary folder instead.
  */
+// (Not its sockets: a socket path under the run's folder comes within a few characters of macOS's
+// 104-character limit, so they stay in the system temp folder, where VS Code puts them.)
 const logsIn = (dir: string) => ({ ...process.env, XDG_DATA_HOME: join(dir, "data") });
 
 function run(cmd: string, args: string[], logDir?: string): Promise<void> {
