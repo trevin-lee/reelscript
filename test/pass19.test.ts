@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -142,6 +142,26 @@ await demo.render("out.mp4");`);
   assert.equal(rec.code, 0, rec.output);
 });
 
+test("under render --out, the video is there when render() returns, for the script to cut or caption", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
+  writeFileSync(join(dir, "x.mp4"), "the previous video");
+  // As a script that post-processes its render does: use the file, then fail or not.
+  const script = (fail: boolean) =>
+    `import { statSync, writeFileSync } from "node:fs";\nconst demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\n` +
+    `await demo.browser.goto("data:text/html,hi");\nconst { out } = await demo.render("out.mp4");\n` +
+    `writeFileSync("size.txt", String(statSync(out).size));\n${fail ? 'throw new Error("captioning failed");' : ""}`;
+  demo(dir, script(true));
+  const failed = await run(["render", "s.ts", "--out", "x.mp4"], dir);
+  assert.equal(failed.code, 1);
+  assert.ok(Number(readFileSync(join(dir, "size.txt"), "utf8")) > 1000, "the script read its video");
+  assert.equal(readFileSync(join(dir, "x.mp4"), "utf8"), "the previous video", "and its failure put the previous one back");
+  demo(dir, script(false));
+  const ok = await run(["render", "s.ts", "--out", "x.mp4"], dir);
+  assert.equal(ok.code, 0, ok.output);
+  assert.equal(statSync(join(dir, "x.mp4")).size, Number(readFileSync(join(dir, "size.txt"), "utf8")));
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith(".")), [], "nothing left beside it");
+});
+
 test("a run that fails leaves earlier output alone: render --out with two renders, record --strict", { timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
   writeFileSync(join(dir, "x.mp4"), "the previous video");
@@ -149,7 +169,7 @@ test("a run that fails leaves earlier output alone: render --out with two render
   const out = await run(["render", "s.ts", "--out", "x.mp4"], dir);
   assert.equal(out.code, 1);
   assert.equal(readFileSync(join(dir, "x.mp4"), "utf8"), "the previous video");
-  assert.deepEqual(readdirSync(dir).filter((f) => f.includes("pending")), [], "and nothing left beside it");
+  assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith(".")), [], "and nothing left beside it");
   demo(dir, `const demo = createDemo();\nawait demo.terminal.open();\nawait demo.terminal.run("echo new");\nawait demo.terminal.run("ls /no-such-dir");\nawait demo.render("out.mp4");`);
   mkdirSync(join(dir, "recordings"), { recursive: true });
   const before = readdirSync(join(dir, "recordings"));

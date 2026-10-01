@@ -305,7 +305,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | Call | What it does |
 | --- | --- |
 | `createDemo(options)` | Start a demo. Options below. |
-| `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent); any other extension is an error. `path` is relative to the script. |
+| `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent); any other extension is an error. `path` is relative to the script. Resolves once the video is written, with `{ out, durationMs, frames, width, height }`; `out` is where it went (`--out`, when given), so the script can go on to cut or caption it. |
 | `demo.check()` | What `reelscript check` runs: the timeline against the real app, no rendering. |
 | `demo.getTimeline()` | The actions queued so far, for tests. |
 | `readAsciicast(path)` | An asciinema recording as `{ events, cols, rows }` for `terminal.run(cmd, { events })`. |

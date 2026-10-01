@@ -18,7 +18,7 @@ import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -927,9 +927,11 @@ export class Demo {
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
     const verbose = this.options.verbose ?? true;
     const started = Date.now();
-    // Under render --out, the video goes to a pending file the CLI moves into place once the
-    // whole script has run: a script that fails after rendering leaves the previous video as it was.
-    const pending = process.env.REELSCRIPT_OUT && snapshotAt === undefined ? join(dirname(out), `.${basename(out, extname(out))}.pending${extname(out)}`) : null;
+    // Under render --out, the video is rendered beside the output, then swapped in with the previous
+    // one set aside, which the CLI puts back if the script fails after this; the script can use its
+    // video as soon as render() returns (to cut or caption it, say).
+    const beside = (tag: string) => join(dirname(out), `.${basename(out, extname(out))}.${tag}${extname(out)}`);
+    const pending = process.env.REELSCRIPT_OUT && snapshotAt === undefined ? beside("pending") : null;
 
     const result = await unlessInterrupted(renderTimeline(this.actions, {
       out: pending ?? out,
@@ -963,7 +965,10 @@ export class Demo {
     }));
 
     if (pending) {
-      (globalThis as { __reelscript_pending_out?: { from: string; to: string } }).__reelscript_pending_out = { from: pending, to: out };
+      const previous = existsSync(out) ? beside("previous") : null;
+      if (previous) renameSync(out, previous);
+      renameSync(pending, out);
+      (globalThis as { __reelscript_replaced_out?: { out: string; previous: string | null } }).__reelscript_replaced_out = { out, previous };
       result.out = out;
     }
     if (verbose) {

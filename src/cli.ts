@@ -252,17 +252,29 @@ async function main(): Promise<void> {
       if (!positional.length) missing(`${command} needs a script`);
       if (flags.out !== undefined && positional.length > 1) fail("--out names one video; render several scripts without it");
       if (flags.out) process.env.REELSCRIPT_OUT = resolve(flags.out);
-      // With --out, the video waits beside it until the script has run to the end without failing.
-      const g = globalThis as { __reelscript_pending_out?: { from: string; to: string } };
+      // With --out, a run that fails after its render puts the previous video back (or none, if there wasn't one).
+      const g = globalThis as { __reelscript_replaced_out?: { out: string; previous: string | null } };
       const { rmSync, renameSync } = await import("node:fs");
       const { onInterrupt } = await import("./cleanup.js");
-      const unregister = onInterrupt(() => g.__reelscript_pending_out && rmSync(g.__reelscript_pending_out.from, { force: true }));
+      const settle = (ok: boolean) => {
+        const replaced = g.__reelscript_replaced_out;
+        g.__reelscript_replaced_out = undefined;
+        if (!replaced) return;
+        if (ok) {
+          if (replaced.previous) rmSync(replaced.previous, { force: true });
+          return;
+        }
+        rmSync(replaced.out, { force: true });
+        if (replaced.previous) renameSync(replaced.previous, replaced.out);
+      };
+      const unregister = onInterrupt(() => settle(false));
+      let ok = false;
       try {
         await runScripts(positional);
-        if (g.__reelscript_pending_out) renameSync(g.__reelscript_pending_out.from, g.__reelscript_pending_out.to);
+        ok = true;
       } finally {
         unregister();
-        if (g.__reelscript_pending_out) rmSync(g.__reelscript_pending_out.from, { force: true });
+        settle(ok);
       }
       break;
     }
