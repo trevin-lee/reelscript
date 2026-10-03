@@ -47,7 +47,7 @@ npx reelscript warmup browser
 
 The package installs a `reelscript` command, and `warmup browser` downloads the Chromium build it drives. (Use it rather than `npx playwright install`, which installs the build for your project's own Playwright if it has one.) On Linux, add `--with-deps` to install the system libraries Chromium needs too, with apt-get on Debian and Ubuntu; reelscript names the missing ones if a launch fails. Scripts are ES modules that use top-level `await`; set `"type": "module"` in your package.json, or the CLI will run them as modules for you. Commit your lockfile: it pins reelscript and the browser it drives, so renders don't change under you. (The unscoped name is blocked by npm's similarity rule against `rescript`, hence the scope.)
 
-Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled.
+Requires Node 20.11 or later, on macOS or Linux. ffmpeg is bundled; npm 12 blocks the install script that downloads it, so with npm 12 also run `npm install-scripts approve ffmpeg-static && npm rebuild ffmpeg-static` (without it, reelscript uses an `ffmpeg` on your PATH).
 
 ## Your first demo
 

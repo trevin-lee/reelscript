@@ -31,8 +31,6 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
-      - name: Use an npm that supports trusted publishing
-        run: npm install -g npm@latest && npm --version
       - name: Check release tag matches package.json version
         if: github.event_name == 'release'
         run: |
@@ -46,6 +44,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - id: version
         run: echo "v=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      # Only now: npm ci above ran with Node's own npm, like CI, because npm 12 blocks
+      # dependencies' install scripts (ffmpeg-static's download among them).
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest && npm --version
       # prepublishOnly builds dist and runs the tests before upload. Skipped
       # when this version is already on npm (e.g. first release published by
       # hand), so the image tags below still get published.

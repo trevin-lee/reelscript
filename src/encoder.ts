@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
-import { dirname, extname } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { delimiter, dirname, extname, join } from "node:path";
 import { once } from "node:events";
 
 export interface EncoderOptions {
@@ -54,17 +54,29 @@ function outputArgs(opts: EncoderOptions): string[] {
   ];
 }
 
-export function resolveFfmpeg(explicit?: string): string {
+/** Where ffmpeg-static puts its binary, whether or not it was downloaded. */
+function bundledFfmpeg(): string | null {
+  try {
+    return createRequire(import.meta.url)("ffmpeg-static") as string | null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveFfmpeg(explicit?: string, bundled: string | null = bundledFfmpeg()): string {
   if (explicit) return explicit;
   if (process.env.REELSCRIPT_FFMPEG) return process.env.REELSCRIPT_FFMPEG;
-  try {
-    const require = createRequire(import.meta.url);
-    const p = require("ffmpeg-static") as string | null;
-    if (p) return p;
-  } catch {
-    /* fall through to PATH */
-  }
-  return "ffmpeg";
+  if (bundled && existsSync(bundled)) return bundled;
+  if ((process.env.PATH ?? "").split(delimiter).some((dir) => dir && existsSync(join(dir, "ffmpeg")))) return "ffmpeg";
+  // npm 12 blocks dependencies' install scripts unless the project allows them, and
+  // ffmpeg-static downloads its binary in one.
+  throw new Error(
+    "reelscript: there's no ffmpeg to encode with. " +
+      (bundled
+        ? "The bundled one was never downloaded (npm 12 blocks install scripts): run `npm install-scripts approve ffmpeg-static` and `npm rebuild ffmpeg-static`"
+        : "Install @reelscript/cli's dependencies") +
+      ", or set REELSCRIPT_FFMPEG to an ffmpeg",
+  );
 }
 
 /** Streams raw RGB frames into ffmpeg and produces an H.264 mp4. */

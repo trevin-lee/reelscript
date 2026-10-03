@@ -103,3 +103,24 @@ test("maxGap: Infinity keeps every silence, as output paced by the script needs"
   await assert.rejects(() => demo.terminal.print("", { events, maxGap: -1 }), /maxGap must be a number, 0 or more, not -1/);
   await assert.rejects(() => demo.wait(Infinity), /ms must be a number, 0 or more, not Infinity/);
 });
+
+test("a bundled ffmpeg that was never downloaded gives way to one on PATH, or says how to get it", async () => {
+  const { resolveFfmpeg } = await import("../src/encoder.js");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const saved = { path: process.env.PATH, ffmpeg: process.env.REELSCRIPT_FFMPEG };
+  delete process.env.REELSCRIPT_FFMPEG;
+  try {
+    const dir = mkdtempSync(join(tmpdir(), "rs-ffmpeg-"));
+    writeFileSync(join(dir, "ffmpeg"), "");
+    assert.equal(resolveFfmpeg(undefined, join(dir, "ffmpeg")), join(dir, "ffmpeg"), "the bundled one, when it's there");
+    process.env.PATH = dir;
+    assert.equal(resolveFfmpeg(undefined, "/nowhere/ffmpeg"), "ffmpeg");
+    process.env.PATH = "/nowhere";
+    assert.throws(() => resolveFfmpeg(undefined, "/nowhere/ffmpeg"), /npm install-scripts approve ffmpeg-static/);
+  } finally {
+    process.env.PATH = saved.path;
+    if (saved.ffmpeg !== undefined) process.env.REELSCRIPT_FFMPEG = saved.ffmpeg;
+  }
+});
