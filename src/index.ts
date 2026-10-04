@@ -13,7 +13,7 @@ import { interrupted } from "./cleanup.js";
 import { warn, warningCount } from "./warnings.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
-import type { GifOptions } from "./encoder.js";
+import { checkOutputFormat, type GifOptions } from "./encoder.js";
 import type { TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
@@ -92,6 +92,26 @@ function invalidNumber(options: object): string | null {
   }
   if (o.status !== undefined && !(Number.isInteger(o.status) && (o.status as number) >= 100 && (o.status as number) <= 599)) {
     return `status must be an HTTP status code, not ${shown(o.status)}`;
+  }
+  return null;
+}
+
+/** Options that are text; a script run without type-checking can pass anything. */
+const TEXT = ["command", "output", "text", "url", "key", "path", "until", "cwd", "pattern"];
+
+/** What's wrong with an action's text or timed events, if anything: a wrong type crashed deep in a render, or hung it. */
+function invalidValue(options: object): string | null {
+  const o = options as Record<string, unknown>;
+  for (const k of TEXT) {
+    if (o[k] !== undefined && typeof o[k] !== "string") return `${k} must be text, not ${JSON.stringify(o[k])}`;
+  }
+  if (o.prompt !== undefined && typeof o.prompt !== "boolean" && typeof o.prompt !== "string") {
+    return `prompt must be true, false, or the prompt's text, not ${JSON.stringify(o.prompt)}`;
+  }
+  if (o.events !== undefined) {
+    if (!Array.isArray(o.events)) return `events must be a list of [ms, text] pairs, not ${JSON.stringify(o.events)}`;
+    const bad = o.events.findIndex((e) => !Array.isArray(e) || e.length !== 2 || typeof e[0] !== "number" || !Number.isFinite(e[0]) || e[0] < 0 || typeof e[1] !== "string");
+    if (bad >= 0) return `events[${bad}] must be [ms, text], with ms a number, 0 or more; not ${JSON.stringify(o.events[bad])}`;
   }
   return null;
 }
@@ -660,13 +680,13 @@ class EditorWindow extends Win {
 
   /** Selector for a file or folder row in the Explorer, by its name ("app.ts"), or its folder and name ("src/app.ts"), for cursor.moveTo(). */
   file(name: string): string {
-    const { base, inFolder } = fileName(name);
+    const { base, inFolder } = fileName(name, "editor.file");
     return `.explorer-folders-view .monaco-list-row[aria-label=${JSON.stringify(base)}]${inFolder}`;
   }
 
   /** Selector for an open editor tab, by its file's name ("app.ts"), or its folder and name ("src/app.ts"). */
   tab(name: string): string {
-    const { base, inFolder } = fileName(name);
+    const { base, inFolder } = fileName(name, "editor.tab");
     // "app.ts", or "app.ts, …" in states where VS Code adds to the label.
     return `.tabs-container .tab[aria-label=${JSON.stringify(base)}]${inFolder}, .tabs-container .tab[aria-label^=${JSON.stringify(`${base}, `)}]${inFolder}`;
   }
@@ -678,8 +698,14 @@ class EditorWindow extends Win {
  * with that folder's name ("src-name-dir-icon"), split into classes at any
  * space ("My Folder" gives "my" and "folder-name-dir-icon").
  */
-function fileName(name: string): { base: string; inFolder: string } {
+function fileName(name: string, call: string): { base: string; inFolder: string } {
   const parts = name.replace(/^\.\//, "").split("/");
+  // VS Code marks only the folder a file is directly in, so a longer path can't be told apart.
+  if (parts.length > 2) {
+    throw new Error(
+      `reelscript: ${call}("${name}") can name a file and the folder it's directly in ("${parts.slice(-2).join("/")}"), not a longer path\n  at ${callerLocation()} (${call})`,
+    );
+  }
   const base = parts.pop()!;
   const folder = parts.pop();
   if (!folder) return { base, inFolder: "" };
@@ -700,6 +726,9 @@ export class Demo {
 
   /** Where the script created the demo, for errors about its options found later. */
   private readonly createdAt: string;
+
+  /** Warnings before this demo, so check() can tell whether it raised any. */
+  private readonly warningsBefore = warningCount();
 
   constructor(readonly options: DemoOptions = {}) {
     this.createdAt = callerLocation();
@@ -722,7 +751,7 @@ export class Demo {
   _push(action: Action): void {
     const source = callerLocation();
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
-    const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action);
+    const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action) ?? invalidValue(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
     this.actions.push(action);
     this.sources.push(source);
@@ -824,6 +853,12 @@ export class Demo {
       // At the size of the terminal it runs in, when the script fixes one, so its lines wrap as they will on screen.
       const open = this.actions.slice(0, i).reverse().find((x): x is Extract<Action, { kind: "terminal.open" }> => x.kind === "terminal.open");
       const rec = await recordCommand(a.command, { cwd, cols: open?.cols, rows: open?.rows, until: a.until });
+      // Ctrl-C stopped it: no warning about how it ended, and nothing is saved. Said here, since
+      // after an interrupt the clean-up exits without printing the error.
+      if (interrupted()) {
+        process.stderr.write("reelscript: interrupted; the recordings are unchanged\n");
+        throw new Error("reelscript: interrupted; the recordings are unchanged");
+      }
       if (rec.timedOut) {
         warn(
           a.until
@@ -888,8 +923,11 @@ export class Demo {
       onStatus: verbose ? (m) => process.stderr.write(`reelscript: ${m}\n`) : undefined,
     }));
     const script = basename(scriptFile());
+    // With warnings it didn't pass outright, and under --strict the run then fails.
+    const warned = warningCount() - this.warningsBefore;
+    const outcome = warned ? `check finished with ${warned} warning${warned === 1 ? "" : "s"} for` : "check passed for";
     if (verbose) process.stderr.write(
-      `reelscript: check passed for ${script}: ${this.actions.length} action${this.actions.length === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
+      `reelscript: ${outcome} ${script}: ${this.actions.length} action${this.actions.length === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(1)}s timeline, checked in ${((Date.now() - started) / 1000).toFixed(1)}s\n`,
     );
     return result;
   }
@@ -927,6 +965,8 @@ export class Demo {
     }
     const out = process.env.REELSCRIPT_OUT || fromScript(outPath);
     const snapRaw = process.env.REELSCRIPT_SNAPSHOT_AT;
+    // Here, with the path as given: the render itself writes beside it, under a name of reelscript's own.
+    if (!snapRaw) checkOutputFormat(out);
     const snapshotAt = snapRaw ? Number(snapRaw) : undefined;
     const verbose = this.options.verbose ?? true;
     const started = Date.now();

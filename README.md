@@ -154,7 +154,8 @@ The editor is [code-server](https://github.com/coder/code-server), a standalone 
 Point `extensions` at the extension's folder (a directory with a `package.json`), a `.vsix`, or an Open VSX id. Folders are copied in and registered, so no packaging step is needed, but build the extension first: VS Code runs its `main` as it is, and a command it contributes is still listed (and runs nothing) when that file is missing.
 
 ```ts
-// demo/extension.ts in the extension's repo: ".." is the repo root, the extension itself
+// demo/extension.ts in the extension's repo. Paths are from this script's folder:
+// ".." is the repo root (the extension itself), and the workspace is demo/fixtures/project.
 await demo.editor.open({ workspace: "fixtures/project", extensions: [".."], notifications: true });
 await demo.editor.command("Acme: Deploy to Production");
 ```

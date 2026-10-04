@@ -275,6 +275,11 @@ export class EditorServer {
     const extensionsDir = join(this.root, "extensions");
     mkdirSync(extensionsDir, { recursive: true });
 
+    if (config.workspace) {
+      // A file would open as a broken, empty VS Code; a missing folder failed with Node's ENOENT.
+      if (!existsSync(config.workspace)) throw new Error(`reelscript: there's no workspace folder at ${config.workspace} (a workspace is relative to the script)`);
+      if (!statSync(config.workspace).isDirectory()) throw new Error(`reelscript: the workspace ${config.workspace} is a file; give the folder VS Code should open`);
+    }
     const name = config.workspace ? basename(config.workspace) : "workspace";
     this.workspace = join(this.root, name);
     if (config.workspace) cpSync(config.workspace, this.workspace, { recursive: true });

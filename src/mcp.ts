@@ -86,6 +86,7 @@ export const INSPECT_ELEMENTS = `(() => {
   for (const { el, r } of found) {
     const st = getComputedStyle(el);
     if (r.width < 1 || r.height < 1 || st.visibility !== "visible" || st.display === "none") continue;
+    if (r.right + scrollX <= 0 || r.bottom + scrollY <= 0 || st.clip === "rect(0px, 0px, 0px, 0px)" || st.clipPath.startsWith("inset(50%")) continue;
     // Not inside anything faded all the way out (a closed modal): a script couldn't target it either.
     let faded = false;
     for (let n = el; n && !faded; n = n.parentElement || (n.getRootNode().host || null)) faded = getComputedStyle(n).opacity === "0";
@@ -146,8 +147,8 @@ export async function serve(): Promise<void> {
         "Open a page as a demo's browser shows it (Chrome on a Mac, the demo's clock and timezone) and list its visible interactive elements (buttons, links, inputs) with a suggested selector, text, and position. Optionally returns a screenshot.",
       inputSchema: {
         url: z.string().describe("Page URL, e.g. http://localhost:3000, or a path to a local page relative to the working directory, e.g. demos/app.html"),
-        width: z.number().int().optional().describe("Viewport width. Default 1280"),
-        height: z.number().int().optional().describe("Viewport height. Default 800"),
+        width: z.number().int().positive().optional().describe("Viewport width. Default 1280"),
+        height: z.number().int().positive().optional().describe("Viewport height. Default 800"),
         screenshot: z.boolean().optional().describe("Include a screenshot. Default true"),
         session: z
           .string()
@@ -168,6 +169,14 @@ export async function serve(): Promise<void> {
       const { dateShim } = await import("./clock.js");
       const { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch } = await import("./time.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
+      // As createDemo() says it, rather than Chromium's error.
+      if (timezone !== undefined) {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+        } catch {
+          return { content: [text(`unknown timezone ${JSON.stringify(timezone)} (use an IANA name, like "America/New_York")`)], isError: true };
+        }
+      }
       const browser = await launchChromium();
       const { LocalPages } = await import("./localPages.js");
       const local = new LocalPages();
@@ -191,7 +200,11 @@ export async function serve(): Promise<void> {
         // A path is a local page, relative to the working directory like every path given to a tool,
         // served over http as a demo serves it.
         const target = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : await local.url(pathToFileURL(resolve(url)).href);
-        const response = await page.goto(target, { waitUntil: "load" });
+        const response = await page.goto(target, { waitUntil: "load" }).catch((err: unknown) => {
+          if (err instanceof Error && /ERR_CONNECTION_REFUSED/.test(err.message)) return "refused" as const;
+          throw err;
+        });
+        if (response === "refused") return { content: [text(`nothing is answering at ${new URL(target).host}. Is the app running?`)], isError: true };
         const status = response?.status() ?? 200;
         // As in a demo: a local page that isn't there is an error, and a site's error page says so.
         if (status >= 400 && local.isLocal(target)) return { content: [text(`there's no page at ${resolve(url)}`)], isError: true };

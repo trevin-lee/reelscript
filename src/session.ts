@@ -7,7 +7,7 @@
 import { chromium, type BrowserContext } from "playwright";
 import { INSTALL_BROWSER, browserMissing, macChrome } from "./browser.js";
 import { interrupted } from "./cleanup.js";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -27,6 +27,19 @@ export function resolveSession(path: string, baseDir: string, relativeTo: "scrip
       `reelscript: session file not found: ${full}\n` +
         (relativeTo === "script" ? `  Paths in a script are relative to the script's folder.\n` : `  This path is relative to the working directory.\n`) +
         `  Create it by signing in once:  npx @reelscript/cli login <url of your app> --out ${full}`,
+    );
+  }
+  // Something else at that path (a log, a typo'd file) failed in Playwright, without reelscript's hint.
+  let saved: unknown;
+  try {
+    saved = JSON.parse(readFileSync(full, "utf8"));
+  } catch {
+    saved = null;
+  }
+  if (!saved || typeof saved !== "object" || !Array.isArray((saved as { cookies?: unknown }).cookies)) {
+    throw new Error(
+      `reelscript: ${full} isn't a saved session (reelscript login writes one)\n` +
+        `  Make it by signing in once:  npx @reelscript/cli login <url of your app> --out ${full}`,
     );
   }
   return full;

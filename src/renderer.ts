@@ -4,7 +4,7 @@ import { macShortcut, pressMacShortcut } from "./macKeys.js";
 import { LocalPages } from "./localPages.js";
 import sharp, { type OverlayOptions } from "sharp";
 import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join, relative } from "node:path";
 import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
 import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
@@ -659,7 +659,7 @@ class Engine {
     warn(
       `"${target}" matches ${count} visible elements in the ${w.id} window; using the first. ` +
         (w.kind === "editor"
-          ? `For a file, name its folder too, like editor.file("src/app.ts")`
+          ? `For a file, name its folder too, like ${target.startsWith(".tabs-container") ? "editor.tab" : "editor.file"}("src/app.ts")`
           : `An id, a data-testid, or role=button[name="…"] picks the one you mean`) +
         `\n  at ${this.at}`,
     );
@@ -1607,7 +1607,11 @@ async function shownMatches(all: Locator): Promise<number[]> {
     for (let i = 0; i < els.length; i++) {
       const el = els[i];
       const r = el.getBoundingClientRect();
-      if (!el.isConnected || r.width <= 0 || r.height <= 0 || getComputedStyle(el).visibility !== "visible") continue;
+      const st = getComputedStyle(el);
+      if (!el.isConnected || r.width <= 0 || r.height <= 0 || st.visibility !== "visible") continue;
+      // Parked before the page's start, or clipped to nothing: text for screen readers
+      // (VS Code's copy of a notification), which no scrolling brings into view.
+      if (r.right + scrollX <= 0 || r.bottom + scrollY <= 0 || st.clip === "rect(0px, 0px, 0px, 0px)" || st.clipPath.startsWith("inset(50%")) continue;
       let clear = true;
       for (let n: Element | null = el; n && clear; n = n.parentElement ?? ((n.getRootNode() as ShadowRoot).host || null)) {
         if (getComputedStyle(n).opacity === "0") clear = false;
@@ -1860,7 +1864,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           new Error(
             `reelscript: no recording for terminal command "${a.command}" in ${options.recordingsDir}.\n` +
               `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
-              `  npx @reelscript/cli record <script>`,
+              `  npx @reelscript/cli record ${process.env.REELSCRIPT_SCRIPT ? relative(process.cwd(), process.env.REELSCRIPT_SCRIPT) || "<script>" : "<script>"}`,
           ),
         );
       }

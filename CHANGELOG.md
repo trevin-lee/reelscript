@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.1
+
+Fixes from using 0.4.0 the way the README says to.
+
+- A `terminal.run()` or `print()` whose `events` has a time that isn't a number (`[["a", "x"]]`) fails at its line; `check` used to spin at full CPU forever. `events`, `output`, `prompt` and the other text options of the wrong type fail there too, instead of with a JavaScript error and no line.
+- `waitFor()` no longer passes on text only a screen reader gets. With `notifications` off, VS Code still puts a toast's message in a hidden alert, parked off the page's left edge, and `waitFor("text=Deployed")` matched it while nothing showed; the README recommends that pattern. A box before the page's start, or clipped to nothing, isn't visible for any target or for MCP's `inspect_page`.
+- `editor.file()` and `editor.tab()` fail on a path longer than a file and its folder (`"bogus/src/app.ts"`), which they quietly trimmed to `src/app.ts`.
+- An editor `workspace` that doesn't exist, or is a file, is named at its line; one failed with Node's `ENOENT`, and the other opened a broken, empty VS Code.
+- A `session` file that isn't a saved session (a log, say) says so and how to make one, instead of with Playwright's JSON error.
+- MCP's `inspect_page` answers a misspelt `timezone`, an app that isn't running and a size that isn't positive the way a script is answered, instead of with Chromium's errors.
+- Messages that named the wrong thing: `render --out x.webm` names `x.webm`, not the hidden file it renders beside it; a missing recording's hint names the script instead of `<script>`; `check` with warnings says so rather than "check passed" just before `--strict` fails it; and Ctrl-C during `record` says the recordings are unchanged, without first warning about the recording it stopped.
+- The README's snippet for demoing an extension says its paths are from the script's folder (`demo/fixtures/project`), as they are.
+
 ## 0.4.0
 
 Closes the gaps in 0.3.1: places where the tool let a broken demo pass, promised more than it did, or behaved differently in two places. Renders of the same script are the same in more places, and a script that worked with 0.3.1 may need the changes listed first.

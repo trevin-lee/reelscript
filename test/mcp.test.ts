@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";
+import { createServer, type AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -37,6 +38,19 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     // The new-project dialog is closed (faded out), so its field isn't something a script could target yet.
     assert.doesNotMatch(inspected[0].text ?? "", /#project-name/);
     assert.equal(inspected[1].type, "image");
+    // The same mistakes a script makes get the same clear answers, not Chromium's.
+    const zone = await client.callTool({ name: "inspect_page", arguments: { url: app, timezone: "Mars/Base", screenshot: false } });
+    assert.equal(zone.isError, true);
+    assert.match((zone.content as Content)[0].text ?? "", /unknown timezone "Mars\/Base" \(use an IANA name/);
+    const closed = await new Promise<number>((resolve) => {
+      const server = createServer().listen(0, "127.0.0.1", () => {
+        const { port } = server.address() as AddressInfo;
+        server.close(() => resolve(port));
+      });
+    });
+    const nobody = await client.callTool({ name: "inspect_page", arguments: { url: `http://127.0.0.1:${closed}`, screenshot: false } });
+    assert.equal(nobody.isError, true);
+    assert.match((nobody.content as Content)[0].text ?? "", new RegExp(`nothing is answering at 127\\.0\\.0\\.1:${closed}\\. Is the app running\\?`));
 
     const ok = await client.callTool({ name: "check_script", arguments: { script: "examples/basic.ts" } });
     assert.equal(ok.isError, false);
