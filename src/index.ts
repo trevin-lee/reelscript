@@ -14,7 +14,7 @@ import { warn, warningCount } from "./warnings.js";
 import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import { checkOutputFormat, type GifOptions } from "./encoder.js";
-import type { TtsEngine } from "./tts.js";
+import { KOKORO_VOICES, type TtsEngine } from "./tts.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
@@ -120,6 +120,12 @@ function invalidValue(options: object): string | null {
 function invalidOption(o: DemoOptions): string | null {
   const unknown = unknownField(o, DEMO_FIELDS);
   if (unknown) return unknown;
+  // The demo's voice, here like every other option rather than at the first say() (or never, with none).
+  if (o.voice !== undefined) {
+    const voices = o.tts ? o.tts.voices : KOKORO_VOICES;
+    if (typeof o.voice !== "string") return `voice must be a voice's name, not ${JSON.stringify(o.voice)}`;
+    if (voices && !voices.includes(o.voice)) return `unknown voice "${o.voice}". Voices: ${voices.join(", ")}`;
+  }
   // And inside the options that are objects themselves.
   const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS]];
   for (const [name, value, fields] of inside) {
@@ -882,7 +888,7 @@ export class Demo {
     }
     // Ctrl-C part way: nothing is saved, so the recordings a render replays stay as they were.
     if (interrupted()) throw new Error("reelscript: interrupted; the recordings are unchanged");
-    for (const [rec, key] of recorded) files.push(saveRecording(dir, rec, key));
+    for (const [rec, key] of recorded) files.push(saveRecording(dir, { ...rec, script: relative(dir, scriptFile()) }, key));
     // Let `reelscript record --prune` know which recordings are still in use.
     for (const f of files) done.add(f);
     g.__reelscript_recorded.set(dir, done);
@@ -949,13 +955,13 @@ export class Demo {
           ? `reelscript: saved ${files.length} recording${files.length === 1 ? "" : "s"} in ${this.recordingsDir()}\n`
           : "reelscript: nothing to record (no terminal.run without output)\n",
       );
-      return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
+      return { command: "record", out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
     }
     // --out and preview name one output; a second render() would overwrite it with something else.
     if (process.env.REELSCRIPT_OUT) {
       const g = globalThis as { __reelscript_out_taken?: boolean };
       // preview shows the first render (a script that renders an MP4 and a GIF has the same frames in each).
-      if (g.__reelscript_out_taken && process.env.REELSCRIPT_SNAPSHOT_AT) return { out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
+      if (g.__reelscript_out_taken && process.env.REELSCRIPT_SNAPSHOT_AT) return { command: "preview", out: "", frames: 0, durationMs: 0, width: 0, height: 0 };
       if (g.__reelscript_out_taken) {
         throw new Error(
           `reelscript: this script calls render() more than once, and --out names one video; run it without --out\n  at ${callerLocation()} (render)`,

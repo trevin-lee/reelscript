@@ -75,13 +75,13 @@ env:
 
 const BOOLEAN_FLAGS = new Set(["prune", "help", "with-deps", "strict"]);
 
-/** Whether a file is a terminal recording `reelscript record` wrote, and so safe to prune. */
-function isRecording(file: string): boolean {
+/** A terminal recording `reelscript record` wrote, with the script it names (from 0.4.2), or null for any other file. */
+function readRecording(file: string): { script?: string } | null {
   try {
     const r = JSON.parse(readFileSync(file, "utf8"));
-    return r?.version === 1 && typeof r.command === "string" && Array.isArray(r.events);
+    return r?.version === 1 && typeof r.command === "string" && Array.isArray(r.events) ? r : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -300,23 +300,38 @@ async function main(): Promise<void> {
       process.env.REELSCRIPT_RECORD = "1";
       await runScripts(positional);
       if ("prune" in flags) {
-        // Remove recordings no given script uses. Scripts in one folder share
-        // its recordings/, so pass every script that uses it.
+        // Remove recordings the given scripts made and no longer use. Scripts in one folder share
+        // its recordings/, and another script's recordings there are left alone.
         const { readdirSync, rmSync } = await import("node:fs");
         const { join, relative } = await import("node:path");
         const used = (globalThis as { __reelscript_recorded?: Map<string, Set<string>> }).__reelscript_recorded ?? new Map();
+        const given = new Set(positional.map((p) => resolve(p)));
         let removed = 0;
+        const unnamed: string[] = [];
         for (const [dir, files] of used) {
           if (!existsSync(dir)) continue; // a script with no terminal commands has no recordings to prune
           for (const name of readdirSync(dir)) {
             const file = join(dir, name);
-            if (!name.endsWith(".json") || files.has(file) || !isRecording(file)) continue;
+            if (!name.endsWith(".json") || files.has(file)) continue;
+            const rec = readRecording(file);
+            if (!rec) continue;
+            if (rec.script === undefined) {
+              unnamed.push(relative(process.cwd(), file)); // recorded before recordings named their script: whose it is can't be told
+              continue;
+            }
+            if (!given.has(resolve(dir, rec.script))) continue;
             rmSync(file);
             removed++;
             console.error(`reelscript: pruned ${relative(process.cwd(), file)}`);
           }
         }
         console.error(`reelscript: pruned ${removed} unused recording${removed === 1 ? "" : "s"}`);
+        if (unnamed.length) {
+          console.error(
+            `reelscript: left ${unnamed.length} recording${unnamed.length === 1 ? "" : "s"} no given script uses, made before 0.4.2 and so not saying which script made ${unnamed.length === 1 ? "it" : "them"}; ` +
+              `delete any no other script uses:\n${unnamed.map((f) => `  ${f}`).join("\n")}`,
+          );
+        }
       }
       break;
     }

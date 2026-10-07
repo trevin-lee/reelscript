@@ -1,5 +1,5 @@
 import type { Page, Browser, BrowserContext, CDPSession, Locator } from "playwright";
-import { launchChromium, macChrome } from "./browser.js";
+import { cli, launchChromium, macChrome } from "./browser.js";
 import { macShortcut, pressMacShortcut } from "./macKeys.js";
 import { LocalPages } from "./localPages.js";
 import sharp, { type OverlayOptions } from "sharp";
@@ -87,6 +87,12 @@ export interface RenderOptions {
 }
 
 export interface RenderResult {
+  /**
+   * What ran the script, and so what was written: a video at `out` only for "render";
+   * a frame (a PNG) for "preview"; nothing for "check" and "record", where `out` is "".
+   * A script that cuts or captions its video does so when this is "render".
+   */
+  command: "render" | "check" | "preview" | "record";
   out: string;
   frames: number;
   durationMs: number;
@@ -1864,7 +1870,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           new Error(
             `reelscript: no recording for terminal command "${a.command}" in ${options.recordingsDir}.\n` +
               `  Declare its output with terminal.run(cmd, { output }), or record it:\n` +
-              `  npx @reelscript/cli record ${process.env.REELSCRIPT_SCRIPT ? relative(process.cwd(), process.env.REELSCRIPT_SCRIPT) || "<script>" : "<script>"}`,
+              `  ${cli()} record ${process.env.REELSCRIPT_SCRIPT ? relative(process.cwd(), process.env.REELSCRIPT_SCRIPT) || "<script>" : "<script>"}`,
           ),
         );
       }
@@ -2009,7 +2015,8 @@ export async function render(actions: Action[], options: RenderOptions): Promise
   if (isGif && snapshot === undefined && !check) {
     // What the GIF holds, not the frames captured for it.
     const gif = gifSize(width, height, options.gif);
-    return { out: options.out, frames: Math.round((t / 1000) * gif.fps), durationMs: Math.round(t), width: gif.width, height: gif.height };
+    return { command: "render", out: options.out, frames: Math.round((t / 1000) * gif.fps), durationMs: Math.round(t), width: gif.width, height: gif.height };
   }
-  return { out: options.out, frames, durationMs: Math.round(t), width, height };
+  const command = check ? "check" : snapshot !== undefined ? "preview" : "render";
+  return { command, out: check ? "" : options.out, frames, durationMs: Math.round(t), width, height };
 }

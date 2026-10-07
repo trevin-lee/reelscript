@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- `demo.render()` resolves with `command`: what ran the script. The script also runs under `check`, `preview` and `record`, which write no video, so a script that cuts or captions its video should do it when `command` is `"render"`; under `check`, `out` named a file that was never written, and the script's own next step failed there (in CI, too). Under `check` and `record`, `out` is now `""`.
+- `record --prune` removes only recordings the scripts it's given made. It removed every recording in the folder that those scripts didn't use, including other scripts' in a shared `recordings/`, the layout the README teaches. Each recording now names the script that made it; one from before 0.4.2 is left alone, and listed.
+- A misspelt `voice` fails at its `createDemo()` line, like every other option; it failed at the first `say()`, or not at all in a demo with none.
+- Hints name the CLI as the project runs it: `npx reelscript` where reelscript is installed, as the README writes it, and `npx @reelscript/cli` where it isn't.
+
 ## 0.4.1
 
 Fixes from using 0.4.0 the way the README says to.

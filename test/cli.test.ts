@@ -195,7 +195,7 @@ test("a failed render leaves the previous output in place", { timeout: 120_000 }
 test("record --prune only removes recordings", { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
   writeFileSync(join(dir, "tsconfig.json"), "{}\n");
-  writeFileSync(join(dir, "old-recording-123abc.json"), JSON.stringify({ version: 1, command: "echo old", events: [] }));
+  writeFileSync(join(dir, "old-recording-123abc.json"), JSON.stringify({ version: 1, command: "echo old", script: "s.ts", events: [] }));
   script(dir, "s.ts", `const demo = createDemo({ recordingsDir: "." });\nawait demo.terminal.open();\nawait demo.terminal.run("echo new");\nawait demo.render("out.mp4");`);
   const r = await cli(["record", "s.ts", "--prune"], dir);
   assert.equal(r.code, 0, r.output);

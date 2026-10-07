@@ -25,6 +25,8 @@ export interface TermRecording {
   stoppedAtUntil?: boolean;
   durationMs: number;
   recordedAt: string;
+  /** The script that recorded it, relative to the recordings folder, so `record --prune` touches only the scripts it's given. */
+  script?: string;
   events: TermEvent[];
 }
 

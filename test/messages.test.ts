@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,4 +79,67 @@ test("render --out names the output given, and check with warnings doesn't say i
   assert.equal(strict.code, 1);
   assert.match(strict.output, /check finished with 1 warning for s\.ts/);
   assert.doesNotMatch(strict.output, /check passed/);
+});
+
+test("render() says which command ran the script, so a script cuts or captions only a video that was written", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  demo(
+    dir,
+    `import { writeFileSync } from "node:fs";\nconst demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\nawait demo.browser.goto("data:text/html,hi");\nconst r = await demo.render("out.mp4");\nwriteFileSync("result.json", JSON.stringify({ command: r.command, out: r.out }));`,
+  );
+  const result = () => JSON.parse(readFileSync(join(dir, "result.json"), "utf8")) as { command: string; out: string };
+  assert.equal((await run(["check", "s.ts"], dir)).code, 0);
+  assert.deepEqual(result(), { command: "check", out: "" });
+  assert.equal((await run(["preview", "s.ts", "--out", "f.png"], dir)).code, 0);
+  assert.equal(result().command, "preview");
+  assert.match(result().out, /f\.png$/);
+  assert.equal((await run(["render", "s.ts"], dir)).code, 0);
+  assert.deepEqual(result(), { command: "render", out: join(realpathSync(dir), "out.mp4") });
+});
+
+test("record --prune removes only the recordings the scripts it's given made", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  const script = (name: string, say: string) =>
+    writeFileSync(join(dir, name), `import { createDemo } from "@reelscript/cli";\nconst demo = createDemo();\nawait demo.terminal.open();\nawait demo.terminal.run("echo ${say}");\nawait demo.render("out.mp4");\n`);
+  script("a.ts", "one");
+  script("b.ts", "other");
+  assert.equal((await run(["record", "a.ts", "b.ts"], dir)).code, 0);
+  // From before recordings named their script: left, and listed.
+  writeFileSync(join(dir, "recordings", "echo-old-000000.json"), JSON.stringify({ version: 1, command: "echo old", cols: 80, rows: 24, exitCode: 0, durationMs: 1, recordedAt: "", events: [] }));
+  script("a.ts", "two");
+  const pruned = await run(["record", "a.ts", "--prune"], dir);
+  assert.equal(pruned.code, 0, pruned.output);
+  const left = readdirSync(join(dir, "recordings")).sort();
+  assert.ok(left.some((f) => f.startsWith("echo-two-")), "a.ts's new recording");
+  assert.ok(left.some((f) => f.startsWith("echo-other-")), "b.ts's recording, which a.ts doesn't use, is left alone");
+  assert.ok(!left.some((f) => f.startsWith("echo-one-")), "a.ts's old recording is pruned");
+  assert.ok(left.includes("echo-old-000000.json"));
+  assert.match(pruned.output, /left 1 recording[\s\S]*echo-old-000000\.json/);
+  assert.equal((await run(["check", "b.ts"], dir)).code, 0);
+});
+
+test("a misspelt voice fails at createDemo(), like every other option", async () => {
+  assert.throws(() => createDemo({ voice: "af_hart" }), /unknown voice "af_hart"[\s\S]*\(createDemo\)/);
+  createDemo({ voice: "af_heart" });
+  const engine = { id: "x", voices: ["low", "high"], synthesize: async () => ({ samples: new Float32Array(0), sampleRate: 24000 }) };
+  assert.throws(() => createDemo({ tts: engine as never, voice: "mid" }), /unknown voice "mid". Voices: low, high/);
+  createDemo({ tts: engine as never, voice: "high" });
+});
+
+test("hints name the CLI as the project runs it: npx reelscript when installed, npx @reelscript/cli when not", async () => {
+  const { cli } = await import("../src/browser.js");
+  const here = process.cwd();
+  const bare = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  const installed = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  mkdirSync(join(installed, "node_modules", ".bin"), { recursive: true });
+  writeFileSync(join(installed, "node_modules", ".bin", "reelscript"), "");
+  mkdirSync(join(installed, "demos"));
+  try {
+    process.chdir(bare);
+    assert.equal(cli(), "npx @reelscript/cli");
+    process.chdir(join(installed, "demos"));
+    assert.equal(cli(), "npx reelscript");
+  } finally {
+    process.chdir(here);
+  }
 });

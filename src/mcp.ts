@@ -303,11 +303,11 @@ export async function serve(): Promise<void> {
       description:
         "Run, for real, every terminal.run command in the script that has no declared output, and save the recordings beside the script so renders can replay them. Runs shell commands on this machine.",
       inputSchema: {
-        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts. With prune, list every script that shares the recordings folder"),
+        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts"),
         prune: z
           .boolean()
           .optional()
-          .describe("Also delete recordings in those scripts' folders that none of the listed scripts uses. Default false"),
+          .describe("Also delete recordings the listed scripts made and no longer use; other scripts' recordings are left alone. Default false"),
         strict: z
           .boolean()
           .optional()

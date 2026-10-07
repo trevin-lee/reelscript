@@ -5,7 +5,7 @@
  * signed in with it.
  */
 import { chromium, type BrowserContext } from "playwright";
-import { INSTALL_BROWSER, browserMissing, macChrome } from "./browser.js";
+import { browserMissing, cli, installBrowserHint, macChrome } from "./browser.js";
 import { interrupted } from "./cleanup.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -26,7 +26,7 @@ export function resolveSession(path: string, baseDir: string, relativeTo: "scrip
     throw new Error(
       `reelscript: session file not found: ${full}\n` +
         (relativeTo === "script" ? `  Paths in a script are relative to the script's folder.\n` : `  This path is relative to the working directory.\n`) +
-        `  Create it by signing in once:  npx @reelscript/cli login <url of your app> --out ${full}`,
+        `  Create it by signing in once:  ${cli()} login <url of your app> --out ${full}`,
     );
   }
   // Something else at that path (a log, a typo'd file) failed in Playwright, without reelscript's hint.
@@ -39,7 +39,7 @@ export function resolveSession(path: string, baseDir: string, relativeTo: "scrip
   if (!saved || typeof saved !== "object" || !Array.isArray((saved as { cookies?: unknown }).cookies)) {
     throw new Error(
       `reelscript: ${full} isn't a saved session (reelscript login writes one)\n` +
-        `  Make it by signing in once:  npx @reelscript/cli login <url of your app> --out ${full}`,
+        `  Make it by signing in once:  ${cli()} login <url of your app> --out ${full}`,
     );
   }
   return full;
@@ -60,7 +60,7 @@ export async function login(url: string, out: string, log: (m: string) => void =
           "  Sign in on your own machine instead, and pass the session file in.",
       );
     }
-    if (browserMissing(err)) throw new Error(`reelscript: login opens Chromium, which isn't installed. Run:  ${INSTALL_BROWSER}`);
+    if (browserMissing(err)) throw new Error(`reelscript: login opens Chromium, which isn't installed. Run:  ${installBrowserHint()}`);
     throw err;
   }
   try {

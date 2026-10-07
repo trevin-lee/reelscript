@@ -7,11 +7,23 @@
  */
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, type Browser, type LaunchOptions } from "playwright";
 
-/** The command that installs the browser reelscript drives: this form works with or without a local install. */
-export const INSTALL_BROWSER = "npx @reelscript/cli warmup browser";
+/**
+ * How to run reelscript's CLI from here, for hints: `npx reelscript` where the project has it
+ * installed, as the README writes it, and `npx @reelscript/cli`, which fetches it, where it hasn't.
+ */
+export function cli(): string {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, "node_modules", ".bin", "reelscript"))) return "npx reelscript";
+    if (dirname(dir) === dir) return "npx @reelscript/cli";
+  }
+}
+
+/** The command that installs the browser reelscript drives. */
+export const installBrowserHint = () => `${cli()} warmup browser`;
 
 /** Whether a launch failed because the browser isn't installed. */
 export function browserMissing(err: unknown): boolean {
@@ -39,7 +51,7 @@ export async function launchChromium(options: LaunchOptions = {}): Promise<Brows
   } catch (err) {
     if (browserMissing(err)) {
       throw new Error(
-        `reelscript: the browser reelscript drives isn't installed. Run:  ${INSTALL_BROWSER}\n` +
+        `reelscript: the browser reelscript drives isn't installed. Run:  ${installBrowserHint()}\n` +
           "  (npx playwright install fetches a different build when your project has its own Playwright.)",
       );
     }
@@ -47,7 +59,7 @@ export async function launchChromium(options: LaunchOptions = {}): Promise<Brows
     if (libs) {
       throw new Error(
         `reelscript: Chromium is installed but can't start: this system lacks libraries it needs${libs.length ? ` (${libs.join(", ")})` : ""}. ` +
-          `Install them with:  ${INSTALL_BROWSER} --with-deps\n` +
+          `Install them with:  ${installBrowserHint()} --with-deps\n` +
           "  (That uses apt-get, with sudo unless you're root, on Debian and Ubuntu. Elsewhere, install Chromium's libraries with the system's package manager.)",
       );
     }
