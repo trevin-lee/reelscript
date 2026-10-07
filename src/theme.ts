@@ -42,6 +42,8 @@ export type HtmlRasterizer = (html: string, width: number, height: number, trans
 export interface Theme {
   /** Height of a window's title bar (0 when windows have no chrome). */
   readonly titleHeight: number;
+  /** What the desktop keeps clear at its top (a menu bar), which windows stay below. */
+  readonly topInset: number;
   /** Desktop size when the script doesn't set one, given the main window's content size. */
   defaultDesktop(viewport: [number, number]): [number, number];
   /** Frame origin for the first window opened. */
@@ -80,6 +82,7 @@ export function bundledFontFace(): string {
 
 class BareTheme implements Theme {
   readonly titleHeight = 0;
+  readonly topInset = 0;
   private bg: RawImage | null = null;
 
   defaultDesktop(viewport: [number, number]): [number, number] {
@@ -129,6 +132,10 @@ class MacosTheme implements Theme {
     private rasterize: HtmlRasterizer,
     private menubar: Menubar = {},
   ) {}
+
+  get topInset(): number {
+    return this.menubarH;
+  }
 
   /** The menu bar's height, or 0 without one: the window moves up into its place. */
   private get menubarH(): number {

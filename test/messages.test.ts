@@ -143,3 +143,26 @@ test("hints name the CLI as the project runs it: npx reelscript when installed, 
     process.chdir(here);
   }
 });
+
+test("a strict render with warnings names the output given; a window that doesn't fit, and an old option name, are warnings at their line", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  writeFileSync(join(dir, "w.mp4"), "the previous video");
+  demo(dir, `const demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\nawait demo.browser.mockAPI("/api/never", {});\nawait demo.browser.goto("data:text/html,hi");\nawait demo.render("out.mp4");`);
+  const strict = await run(["render", "s.ts", "--strict", "--out", "w.mp4"], dir);
+  assert.equal(strict.code, 1);
+  assert.match(strict.output, /--strict makes a render with warnings fail; [^\n]*\/w\.mp4 is unchanged/);
+  assert.doesNotMatch(strict.output, /pending/);
+  assert.equal(readFileSync(join(dir, "w.mp4"), "utf8"), "the previous video");
+
+  demo(dir, `const demo = createDemo({ viewport: [800, 500] });\nawait demo.browser.goto("data:text/html,hi", { settle: 100 });\nawait demo.terminal.open({ x: 700, y: 400, width: 1200, height: 900 });\nawait demo.render("out.mp4");`);
+  const checked = await run(["check", "--strict", "s.ts"], dir);
+  assert.equal(checked.code, 1);
+  assert.match(checked.output, /goto\(\{ settle \}\) is now goto\(\{ hold \}\); the old name works until 1\.0\n  at [^\n]*s\.ts:3/);
+  assert.match(checked.output, /the terminal window doesn't fit on the \d+x\d+ desktop as asked, so its x, y, width, height became x: 0, y: \d+[^\n]*\n  at [^\n]*s\.ts:4/);
+});
+
+test("menubar on the bare theme, which has none, fails at createDemo()", () => {
+  assert.throws(() => createDemo({ theme: "bare", menubar: { app: "Acme" } }), /the bare theme has no menu bar[\s\S]*\(createDemo\)/);
+  createDemo({ theme: "bare", menubar: false });
+  createDemo({ menubar: { app: "Acme" } });
+});

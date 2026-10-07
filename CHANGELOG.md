@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- A window that doesn't fit on the desktop as asked (`terminal.open({ x: 700, width: 1200 })` on a smaller one) is a warning at its line, naming what changed; it was moved and resized without a word. Windows also stay below the macOS menu bar instead of covering it.
+- The old names that still work until 1.0 (`goto({ settle })`, `maxGapMs`, camera `holdMs`, `menubar.clock`) are a warning at their line, so `--strict` finds them before 1.0 removes them. Only the type definitions said so.
+- `menubar` with the `bare` theme, which has no menu bar, fails at `createDemo()` instead of doing nothing.
+- `render --strict --out x.mp4` with warnings says `x.mp4` is unchanged, not the hidden file it renders beside it.
+- Documented: nothing runs until `render()` plays the queue, so awaiting a step only queues it and a `try`/`catch` around one catches nothing (use `call()` for work that depends on the page); `mockAPI()` answers every method, and a later one on the same pattern replaces it; `preview` writes `preview-<seconds>s.png` in the working directory by default.
+- The repo's example recording names its script, as recordings have since 0.4.2.
+
 ## 0.4.2
 
 - `demo.render()` resolves with `command`: what ran the script. The script also runs under `check`, `preview` and `record`, which write no video, so a script that cuts or captions its video should do it when `command` is `"render"`; under `check`, `out` named a file that was never written, and the script's own next step failed there (in CI, too). Under `check` and `record`, `out` is now `""`.

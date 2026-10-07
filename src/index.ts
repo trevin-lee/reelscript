@@ -96,6 +96,20 @@ function invalidNumber(options: object): string | null {
   return null;
 }
 
+/** Old names that still work until 1.0, with what replaced them: said at the line, so --strict finds them before 1.0 does. */
+function noteRenamed(options: object, where: string, at: string): void {
+  const o = options as Record<string, unknown>;
+  const renamed: [string, string, string][] = [
+    ["settle", "hold", "goto({ settle }) is now goto({ hold })"],
+    ["maxGapMs", "maxGap", "maxGapMs is now maxGap"],
+    ["holdMs", "hold", "camera { holdMs } is now camera { hold }"],
+    ["clock", "clockText", "menubar { clock } is now menubar { clockText }"],
+  ];
+  for (const [old, , says] of renamed) {
+    if (o[old] !== undefined) warn(`${says}; the old name works until 1.0\n  at ${at} (${where})`);
+  }
+}
+
 /** Options that are text; a script run without type-checking can pass anything. */
 const TEXT = ["command", "output", "text", "url", "key", "path", "until", "cwd", "pattern"];
 
@@ -120,6 +134,8 @@ function invalidValue(options: object): string | null {
 function invalidOption(o: DemoOptions): string | null {
   const unknown = unknownField(o, DEMO_FIELDS);
   if (unknown) return unknown;
+  // An option the theme can't apply fails, like any other that can't.
+  if (o.theme === "bare" && o.menubar !== undefined && o.menubar !== false) return `the bare theme has no menu bar, so menubar does nothing there (it's the macos theme's)`;
   // The demo's voice, here like every other option rather than at the first say() (or never, with none).
   if (o.voice !== undefined) {
     const voices = o.tts ? o.tts.voices : KOKORO_VOICES;
@@ -740,6 +756,8 @@ export class Demo {
     this.createdAt = callerLocation();
     const problem = invalidOption(options);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${this.createdAt} (createDemo)`);
+    if (options.camera && typeof options.camera === "object") noteRenamed(options.camera, "createDemo", this.createdAt);
+    if (options.menubar) noteRenamed(options.menubar, "createDemo", this.createdAt);
   }
 
   /** The session file to start signed in with, or an error at the createDemo line. */
@@ -759,6 +777,8 @@ export class Demo {
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
     const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action) ?? invalidValue(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
+    // waitFor's settle is its own option (time off camera), not goto's old name.
+    if (action.kind === "browser.goto" || action.kind === "terminal.run" || action.kind === "terminal.print") noteRenamed(action, action.kind, source);
     this.actions.push(action);
     this.sources.push(source);
   }
@@ -984,6 +1004,7 @@ export class Demo {
 
     const result = await unlessInterrupted(renderTimeline(this.actions, {
       out: pending ?? out,
+      shownOut: out,
       fps: this.options.fps,
       viewport: this.options.viewport,
       desktop: this.options.desktop,

@@ -47,7 +47,8 @@ usage:
   reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                    render scripts to .mp4 or .gif
   reelscript preview <script> [--at <seconds>] [--out frame.png]
-                                                   render one frame as a PNG
+                                                   render one frame as a PNG (default:
+                                                   preview-<seconds>s.png here)
   reelscript check   <script> [more...] [--strict]  run the timeline without rendering; fail on
                                                    anything missing, with the script line;
                                                    --strict fails on warnings too (for CI)

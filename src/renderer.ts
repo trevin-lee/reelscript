@@ -31,6 +31,8 @@ import { resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export interface RenderOptions {
+  /** The output as the user named it, for messages, when \`out\` is a file rendered beside it. */
+  shownOut?: string;
   out: string;
   fps?: number;
   /** Content size of the first window. */
@@ -372,12 +374,22 @@ class Engine {
     return this.theme.titleHeight;
   }
 
-  private clampGeometry(w: Win): void {
+  /** Fit a window on the desktop, below its menu bar, and say so at the line when that changed what the script asked for. */
+  private clampGeometry(w: Win, asked?: Geometry): void {
     const [W, H] = this.desktop;
+    const top = this.theme.topInset;
+    const before = { x: w.x, y: w.y, width: w.width, height: w.height };
     w.width = Math.max(200, Math.min(w.width, W));
-    w.height = Math.max(120, Math.min(w.height, H - this.titleH));
+    w.height = Math.max(120, Math.min(w.height, H - top - this.titleH));
     w.x = Math.round(clamp(w.x, 0, W - w.width));
-    w.y = Math.round(clamp(w.y, 0, H - w.height - this.titleH));
+    w.y = Math.round(clamp(w.y, top, H - w.height - this.titleH));
+    const changed = (["x", "y", "width", "height"] as const).filter((k) => asked?.[k] !== undefined && w[k] !== before[k]);
+    if (changed.length) {
+      warn(
+        `the ${w.id} window doesn't fit on the ${W}x${H} desktop as asked, so its ${changed.join(", ")} became ` +
+          `${changed.map((k) => `${k}: ${w[k]}`).join(", ")} (the desktop option sets the desktop's size)\n  at ${this.at}`,
+      );
+    }
   }
 
   /** Get a window, creating its page if this is the first time it's used. */
@@ -444,7 +456,7 @@ class Engine {
       termRouted: null,
       frameOverlay: null,
     };
-    this.clampGeometry(win);
+    this.clampGeometry(win, geometry);
     await page.setViewportSize({ width: win.width, height: win.height });
     this.windows.set(id, win);
     this.focusedId = id;
@@ -494,7 +506,7 @@ class Engine {
     if (g.y !== undefined) w.y = g.y;
     if (g.width !== undefined) w.width = g.width;
     if (g.height !== undefined) w.height = g.height;
-    this.clampGeometry(w);
+    this.clampGeometry(w, g);
     if (resized) {
       await w.page.setViewportSize({ width: w.width, height: w.height });
       if (w.kind === "terminal") await this.refitTerminal(w);
@@ -2001,7 +2013,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
       // Under --strict, a render with warnings fails, and like any failed render leaves the previous output in place.
       const warned = warningCount() - warningsAtStart;
       if (process.env.REELSCRIPT_STRICT && warned) {
-        throw new Error(`reelscript: ${warned} warning${warned === 1 ? "" : "s"} above, and --strict makes a render with warnings fail; ${options.out} is unchanged`);
+        throw new Error(`reelscript: ${warned} warning${warned === 1 ? "" : "s"} above, and --strict makes a render with warnings fail; ${options.shownOut ?? options.out} is unchanged`);
       }
       renameSync(partial, options.out);
     }
