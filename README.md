@@ -215,7 +215,7 @@ The container is the canonical render environment, for amd64 and arm64. Chromium
 
 ```sh
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -v reelscript-cache:/cache \
-  ghcr.io/trevin-lee/reelscript:0.4.3 render demos/signup.ts
+  ghcr.io/trevin-lee/reelscript:0.5.0 render demos/signup.ts
 ```
 
 Inside the container, `localhost` is the container itself, not your machine: reach an app running on your machine at `http://host.docker.internal:3000` (Docker Desktop), or run the container with `--network host` (Linux), or point the demo at a preview deployment. Use the tag that matches your npm version (`latest` is the newest release). Ctrl-C or a stopped CI job cleans up after itself: VS Code is stopped and no partial video is left beside the output. `--user` makes the files it writes yours; without it, on Linux they belong to root. What a render adds, editor extensions and spoken lines, goes in `/cache`; mount a volume there, as above, to keep it between runs. In GitHub Actions:
@@ -224,7 +224,7 @@ Inside the container, `localhost` is the container itself, not your machine: rea
 jobs:
   demo:
     runs-on: ubuntu-latest
-    container: ghcr.io/trevin-lee/reelscript:0.4.3
+    container: ghcr.io/trevin-lee/reelscript:0.5.0
     steps:
       - uses: actions/checkout@v5
       # Start the app the demos drive (or point them at a preview deployment instead).
