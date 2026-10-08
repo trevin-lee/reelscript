@@ -30,10 +30,10 @@ test("timed events and text options of the wrong type fail where they're queued,
   const demo = createDemo();
   await demo.terminal.open();
   const bad = (opts: object) => demo.terminal.run("echo hi", opts as never);
-  await assert.rejects(() => bad({ events: [["a", "x\n"]] }), /events\[0\] must be \[ms, text\], with ms a number, 0 or more; not \["a","x\\n"\]/);
-  await assert.rejects(() => bad({ events: "x" }), /events must be a list of \[ms, text\] pairs/);
-  await assert.rejects(() => bad({ output: 5 }), /output must be text, not 5/);
-  await assert.rejects(() => bad({ prompt: 3 }), /prompt must be true, false, or the prompt's text/);
+  assert.throws(() => bad({ events: [["a", "x\n"]] }), /events\[0\] must be \[ms, text\], with ms a number, 0 or more; not \["a","x\\n"\]/);
+  assert.throws(() => bad({ events: "x" }), /events must be a list of \[ms, text\] pairs/);
+  assert.throws(() => bad({ output: 5 }), /output must be text, not 5/);
+  assert.throws(() => bad({ prompt: 3 }), /prompt must be true, false, or the prompt's text/);
   await demo.terminal.run("echo hi", { events: [[0, "hi\n"]], prompt: "acme % " });
 });
 
@@ -158,11 +158,57 @@ test("a strict render with warnings names the output given; a window that doesn'
   const checked = await run(["check", "--strict", "s.ts"], dir);
   assert.equal(checked.code, 1);
   assert.match(checked.output, /goto\(\{ settle \}\) is now goto\(\{ hold \}\); the old name works until 1\.0\n  at [^\n]*s\.ts:3/);
-  assert.match(checked.output, /the terminal window doesn't fit on the \d+x\d+ desktop as asked, so its x, y, width, height became x: 0, y: \d+[^\n]*\n  at [^\n]*s\.ts:4/);
+  assert.match(checked.output, /the terminal window was refitted: width 1200 became \d+, as much as the \d+x\d+ desktop has room for[^\n]*\n  at [^\n]*s\.ts:4/);
 });
 
 test("menubar on the bare theme, which has none, fails at createDemo()", () => {
   assert.throws(() => createDemo({ theme: "bare", menubar: { app: "Acme" } }), /the bare theme has no menu bar[\s\S]*\(createDemo\)/);
   createDemo({ theme: "bare", menubar: false });
   createDemo({ menubar: { app: "Acme" } });
+});
+
+test("a point target follows the rules a selector does: a click or zoom must be on its window, and a click must land on it; the cursor may still leave the shot", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  const body = (steps: string) => `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("data:text/html,<button id=b>go</button>");\n${steps}\nawait demo.render("out.mp4");`;
+  const cases: [string, RegExp | null][] = [
+    [`demo.cursor.moveTo({ x: 5000, y: -300 });\ndemo.cursor.click();`, /the click at the point \{ x: 5000, y: -300 \} would land outside the browser window, whose content is 400x300/],
+    [`demo.zoom.to({ x: 900, y: 10 }, { scale: 2 });`, /the point \{ x: 900, y: 10 \} is outside the browser window, whose content is 400x300/],
+    [`demo.terminal.open({ x: 0, y: 30, width: 700, height: 500 });\ndemo.cursor.moveTo({ x: 30, y: 90 }, { window: "browser" });\ndemo.cursor.click();`, /the click on the point \{ x: 30, y: 90 \} would land on the terminal window/],
+    [`demo.cursor.moveTo({ x: 5000, y: 5000 });\ndemo.wait(100);`, null],
+  ];
+  for (const [steps, expected] of cases) {
+    demo(dir, body(steps));
+    const r = await run(["check", "s.ts"], dir);
+    if (expected) {
+      assert.equal(r.code, 1, `${steps}\n${r.output}`);
+      assert.match(r.output, expected);
+    } else assert.equal(r.code, 0, `parking the cursor out of the shot: ${r.output}`);
+  }
+});
+
+test("a refitted window says why: the smallest size, or the menu bar", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  demo(dir, `const demo = createDemo({ viewport: [600, 400] });\ndemo.browser.goto("data:text/html,hi");\ndemo.terminal.open({ x: 0, y: 0, width: 100, height: 300 });\nawait demo.render("out.mp4");`);
+  const r = await run(["check", "s.ts"], dir);
+  assert.match(r.output, /width 100 became 200, the smallest a window can be \(200x120\)/);
+  assert.match(r.output, /y 0 became \d+, below the menu bar \(menubar: false removes it\)/);
+});
+
+test("an option a step can't use fails at its line instead of doing nothing", () => {
+  const demo = createDemo();
+  demo.terminal.open();
+  const events: [number, string][] = [[0, "b\n"]];
+  assert.throws(() => demo.terminal.run("x", { output: "a\n", events }), /output and events are two ways/);
+  assert.throws(() => demo.terminal.run("x", { output: "a\n", cwd: "nowhere", exitCode: 1 }), /cwd, exitCode are for reelscript record/);
+  assert.throws(() => demo.terminal.print("IGNORED", { events }), /text isn't shown when events are given/);
+  assert.throws(() => demo.terminal.print("more"), /print\(\) would write after the prompt "~ % "/);
+  demo.terminal.run("build", { output: "...", prompt: false });
+  demo.terminal.print("done\n", { prompt: true });
+  assert.throws(() => demo.terminal.print("again"), /print\(\) would write after the prompt/);
+  const bare = createDemo({ theme: "bare" });
+  assert.throws(() => bare.terminal.open({ title: "acme" }), /the bare theme draws no title bar/);
+  assert.throws(() => createDemo({ theme: "bare", address: "https://acme.test" }), /the bare theme draws no address bar/);
+  const quiet = createDemo();
+  quiet.terminal.open({ prompt: "" });
+  quiet.terminal.print("", { events });
 });

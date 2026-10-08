@@ -270,7 +270,9 @@ export async function serve(): Promise<void> {
         const { code, output } = await runCli(["preview", resolve(script), "--at", String(at), "--out", out], signal);
         if (code !== 0 || !existsSync(out)) return { content: [text(output || "preview failed")], isError: true };
         const png = await sharp(out).resize({ width, withoutEnlargement: true }).png().toBuffer();
-        return { content: [text(output), { type: "image", data: png.toString("base64"), mimeType: "image/png" }] };
+        // The frame comes back as the image; the file the CLI wrote it to is deleted below, so don't name it.
+        const said = output.split("\n").filter((line) => !line.startsWith("reelscript: wrote ")).join("\n").trim();
+        return { content: [text(said || `the frame at ${at}s`), { type: "image", data: png.toString("base64"), mimeType: "image/png" }] };
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

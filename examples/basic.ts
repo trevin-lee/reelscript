@@ -11,26 +11,26 @@ const demo = createDemo({
 
 // The sample app ships with the repo, so the demo is fully self-contained.
 // Local pages are paths relative to this script.
-await demo.browser.goto("./app.html");
+demo.browser.goto("./app.html");
 
 demo.say("Reelscript turns product demos into code.");
-await demo.wait(600);
+demo.wait(600);
 
 demo.say("Open the dashboard, and click New project.");
-await demo.cursor.moveTo("#new-project", { ease: "smooth" });
-await demo.cursor.click();
-await demo.waitForNarration();
+demo.cursor.moveTo("#new-project", { ease: "smooth" });
+demo.cursor.click();
+demo.waitForNarration();
 
 demo.say("Give it a name, and hit Create.");
-await demo.cursor.moveTo("#project-name");
-await demo.cursor.click();
-await demo.type("#project-name", "Acme Q3 Launch", { wpm: 400 });
-await demo.wait(300);
-await demo.cursor.moveTo("#create");
-await demo.cursor.click();
-await demo.waitForNarration();
+demo.cursor.moveTo("#project-name");
+demo.cursor.click();
+demo.type("#project-name", "Acme Q3 Launch", { wpm: 400 });
+demo.wait(300);
+demo.cursor.moveTo("#create");
+demo.cursor.click();
+demo.waitForNarration();
 
 demo.say("When the UI changes, you don't re-record anything. You just re-run the script.");
-await demo.waitForNarration();
+demo.waitForNarration();
 
 await demo.render("out/basic.mp4");

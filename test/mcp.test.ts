@@ -72,6 +72,7 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     const frame = (await client.callTool({ name: "preview_frame", arguments: { script: "examples/terminal.ts", at: 2, width: 640 } })).content as Content;
     const image = frame.find((c) => c.type === "image");
     assert.ok(image?.data && image.data.length > 1000, "preview returns a PNG");
+    assert.doesNotMatch(frame.find((c) => c.type === "text")?.text ?? "", /wrote /, "and doesn't name the file it deleted");
   } catch (err) {
     if (err instanceof Error) err.message += `\n--- server stderr ---\n${serverLog.slice(-4000)}`;
     throw err;

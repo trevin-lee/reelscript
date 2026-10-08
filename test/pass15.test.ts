@@ -32,7 +32,7 @@ test("demo.check() is a run for reelscript check only; render, preview and recor
   for (const args of [["render", "s.ts", "--out", "o.mp4"], ["preview", "s.ts", "--out", "o.png"], ["record", "s.ts"]]) {
     const r = await run(args, dir);
     assert.equal(r.code, 1, `${args[0]}: ${r.output}`);
-    assert.match(r.output, /finished without calling demo\.render\(\).*\(it calls demo\.check\(\), which only reelscript check runs\)/);
+    assert.match(r.output, /demo\.check\(\) only checks, and this isn't reelscript check; end the script with demo\.render\(path\)[\s\S]*s\.ts:4/);
   }
   assert.ok(!existsSync(join(dir, "o.mp4")) && !existsSync(join(dir, "o.png")));
 });

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+
+**Changes that can affect existing scripts**
+
+- **Steps return nothing.** They only ever queued, and `say()`, `zoom.to()`, `zoom.out()` and `mockAPI()` already returned nothing while every other step returned a promise; now none does, and `render()` is the one call to await. `await` on a step still works, so scripts don't need changing; a step's own mistake, like a misspelt option, now throws at its line rather than rejecting. The README and examples drop the awaits.
+- **An option a step can't use fails at its line**, as `menubar` on the `bare` theme has since 0.4.3: `output` with `events` (`output` was dropped); `cwd`, `until` or `exitCode` on a run given its output (they're for `record`); text passed to `print()` with `events` (it wasn't shown); `print()` where the terminal shows a prompt, which wrote after it as if typed (end the run before with `prompt: false`, or open the terminal with `prompt: ""`); and `address` or a terminal `title` on the `bare` theme, which draws neither.
+- **A point target follows the rules a selector does.** A click at `{ x, y }` fails when the point is outside its window, or behind another window, where it clicked the desktop or that window; `zoom.to()` a point outside its window fails too. The cursor may still go anywhere, out of the shot, say.
+- **`demo.check()` gives way to `demo.render()`**, which `reelscript check` already checks. It still works under `reelscript check` until 1.0, with a warning at its line; under `render`, `preview` or `record` it fails at once, where it ran the whole check before failing.
+
+**Fixes**
+
+- A refitted window's warning says why: the smallest size a window can be (200x120, now in the README), the menu bar (`menubar: false` removes it), or the desktop's size. It blamed the desktop's size for all three.
+- MCP's `preview_frame` no longer names the temporary file it wrote the frame to, which it deletes before answering; the frame is the image it returns.
+
 ## 0.4.3
 
 - A window that doesn't fit on the desktop as asked (`terminal.open({ x: 700, width: 1200 })` on a smaller one) is a warning at its line, naming what changed; it was moved and resized without a word. Windows also stay below the macOS menu bar instead of covering it.

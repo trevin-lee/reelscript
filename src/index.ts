@@ -7,7 +7,7 @@
  */
 
 import { render as renderTimeline, type RenderResult } from "./renderer.js";
-import type { Action, CallContext, Target } from "./timeline.js";
+import { DEFAULTS, type Action, type CallContext, type Target } from "./timeline.js";
 import { resolveSession } from "./session.js";
 import { interrupted } from "./cleanup.js";
 import { warn, warningCount } from "./warnings.js";
@@ -136,6 +136,7 @@ function invalidOption(o: DemoOptions): string | null {
   if (unknown) return unknown;
   // An option the theme can't apply fails, like any other that can't.
   if (o.theme === "bare" && o.menubar !== undefined && o.menubar !== false) return `the bare theme has no menu bar, so menubar does nothing there (it's the macos theme's)`;
+  if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
   // The demo's voice, here like every other option rather than at the first say() (or never, with none).
   if (o.voice !== undefined) {
     const voices = o.tts ? o.tts.voices : KOKORO_VOICES;
@@ -562,7 +563,7 @@ class Cursor {
   constructor(private demo: Demo) {}
 
   /** Glide the cursor to a selector or point. */
-  async moveTo(target: Target, opts: MoveOptions = {}): Promise<void> {
+  moveTo(target: Target, opts: MoveOptions = {}): void {
     this.demo._push({ kind: "cursor.moveTo", target, ...opts });
   }
 
@@ -570,10 +571,10 @@ class Cursor {
    * Click at the cursor. The click takes `duration` ms of video (default
    * 180), while its ripple plays. With 0, the next action starts at once:
    * follow it with waitFor() and the frame after the click is the page the
-   * click led to, not the page on its way there.
+   * click led to, not the page on its way there. `dialog` answers an alert,
+   * confirm or prompt the click opens, and says it's meant (no warning).
    */
-  /** Click where the cursor is. `dialog` answers an alert, confirm or prompt the click opens, and says it's meant (no warning). */
-  async click(opts: { button?: "left" | "right"; duration?: number; dialog?: "accept" | "dismiss" } = {}): Promise<void> {
+  click(opts: { button?: "left" | "right"; duration?: number; dialog?: "accept" | "dismiss" } = {}): void {
     this.demo._push({ kind: "cursor.click", ...opts });
   }
 }
@@ -599,17 +600,17 @@ class Win {
   ) {}
 
   /** Bring this window to the front and direct typing to it. */
-  async focus(): Promise<void> {
+  focus(): void {
     this.demo._push({ kind: "window.focus", window: this.id });
   }
 
   /** Take this window off the desktop. Focus passes to the topmost window left. It can be opened again later. */
-  async close(): Promise<void> {
+  close(): void {
     this.demo._push({ kind: "window.close", window: this.id });
   }
 
   /** Move or resize this window. */
-  async place(geometry: WindowGeometry): Promise<void> {
+  place(geometry: WindowGeometry): void {
     this.demo._push({ kind: "window.place", window: this.id, ...geometry });
   }
 }
@@ -623,12 +624,12 @@ class Browser extends Win {
    * Open the browser window at a position and size without navigating.
    * Optional: goto() opens it if it isn't open yet.
    */
-  async open(geometry: WindowGeometry = {}): Promise<void> {
+  open(geometry: WindowGeometry = {}): void {
     this.demo._push({ kind: "browser.open", ...geometry });
   }
 
   /** Navigate the browser window (opening it if needed) and bring it to the front. */
-  async goto(url: string, opts: GotoOptions = {}): Promise<void> {
+  goto(url: string, opts: GotoOptions = {}): void {
     this.demo._push({ kind: "browser.goto", url, ...opts });
   }
 
@@ -649,7 +650,7 @@ class TerminalWindow extends Win {
   }
 
   /** Open a terminal window on the desktop (beside or over the browser) and focus it. */
-  async open(opts: TerminalOptions & WindowGeometry = {}): Promise<void> {
+  open(opts: TerminalOptions & WindowGeometry = {}): void {
     this.demo._push({ kind: "terminal.open", ...opts });
   }
 
@@ -657,7 +658,7 @@ class TerminalWindow extends Win {
    * Type a command and show its output. With `output`, nothing executes;
    * without it, the output is replayed from a recording (see `reelscript record`).
    */
-  async run(command: string, opts: RunOptions = {}): Promise<void> {
+  run(command: string, opts: RunOptions = {}): void {
     this.demo._push({ kind: "terminal.run", command, ...opts });
   }
 
@@ -667,10 +668,10 @@ class TerminalWindow extends Win {
    * (played like `run`'s, and `text` is then ignored); `prompt: true` ends
    * it with a new prompt, and a string with that prompt from then on.
    */
-  async print(
+  print(
     text: string,
     opts: { duration?: number; prompt?: boolean | string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number } = {},
-  ): Promise<void> {
+  ): void {
     this.demo._push({ kind: "terminal.print", text, ...opts });
   }
 }
@@ -681,22 +682,22 @@ class EditorWindow extends Win {
   }
 
   /** Open a real VS Code (code-server) window on a workspace folder and focus it. */
-  async open(opts: EditorOptions & WindowGeometry = {}): Promise<void> {
+  open(opts: EditorOptions & WindowGeometry = {}): void {
     this.demo._push({ kind: "editor.open", ...opts });
   }
 
   /** Open a file through Quick Open (⌘P), typing its name. */
-  async openFile(path: string, opts: TypeOptions = {}): Promise<void> {
+  openFile(path: string, opts: TypeOptions = {}): void {
     this.demo._push({ kind: "editor.openFile", path, ...opts });
   }
 
   /** Run a command through the Command Palette, typing its name. */
-  async command(command: string, opts: TypeOptions = {}): Promise<void> {
+  command(command: string, opts: TypeOptions = {}): void {
     this.demo._push({ kind: "editor.command", command, ...opts });
   }
 
   /** Type into the editor at the caret. */
-  async type(text: string, opts: TypeOptions = {}): Promise<void> {
+  type(text: string, opts: TypeOptions = {}): void {
     this.demo._push({ kind: "type", text, ...opts, window: "editor" });
   }
 
@@ -777,23 +778,75 @@ export class Demo {
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
     const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action) ?? invalidValue(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
+    const misused = this.cantApply(action);
+    if (misused) throw new Error(`reelscript: ${misused}\n  at ${source} (${action.kind})`);
     // waitFor's settle is its own option (time off camera), not goto's old name.
     if (action.kind === "browser.goto" || action.kind === "terminal.run" || action.kind === "terminal.print") noteRenamed(action, action.kind, source);
     this.actions.push(action);
     this.sources.push(source);
   }
 
+  /** The terminal's prompt as the script has left it, and whether a run is waiting on print() for the rest of its output. */
+  private term: { prompt: string; awaiting: boolean } | null = null;
+  private termOpened: string | undefined;
+
+  /** An option the step can't use, which would otherwise do nothing: an error, like menubar on the bare theme. */
+  private cantApply(a: Action): string | null {
+    const o = a as Record<string, unknown>;
+    const bare = this.options.theme === "bare";
+    if (a.kind === "terminal.open") {
+      if (bare && a.title !== undefined) return `the bare theme draws no title bar, so title does nothing there`;
+      const prompt = typeof a.prompt === "string" ? a.prompt : this.term ? this.termOpened : undefined;
+      this.termOpened = prompt;
+      this.term = { prompt: prompt ?? DEFAULTS.terminalPrompt, awaiting: false };
+      return null;
+    }
+    if (a.kind === "window.close" && a.window === "terminal") {
+      this.term = null;
+      this.termOpened = undefined;
+      return null;
+    }
+    if (a.kind === "terminal.run") {
+      const given = o.output !== undefined || o.events !== undefined;
+      if (o.output !== undefined && o.events !== undefined) return `output and events are two ways to give the command's output; give one`;
+      const forRecord = ["cwd", "until", "exitCode"].filter((k) => o[k] !== undefined);
+      if (given && forRecord.length) {
+        return `${forRecord.join(", ")} ${forRecord.length === 1 ? "is" : "are"} for reelscript record, which runs only a command given neither output nor events`;
+      }
+      if (this.term) {
+        if (typeof a.prompt === "string") this.term.prompt = a.prompt;
+        this.term.awaiting = a.prompt === false;
+      }
+      return null;
+    }
+    if (a.kind === "terminal.print") {
+      if (o.events !== undefined && a.text !== "") return `text isn't shown when events are given; pass "" as the text`;
+      if (this.term && !this.term.awaiting && this.term.prompt !== "") {
+        return (
+          `print() would write after the prompt ${JSON.stringify(this.term.prompt)}, as if typed there; ` +
+          `end the run before it with { prompt: false }, or open the terminal with prompt: "" to show only printed output`
+        );
+      }
+      if (this.term && a.prompt !== undefined && a.prompt !== false) {
+        if (typeof a.prompt === "string") this.term.prompt = a.prompt;
+        this.term.awaiting = false;
+      }
+      return null;
+    }
+    return null;
+  }
+
   /** Type into a field with accelerated, evenly paced keystrokes. */
-  async type(target: string, text: string, opts: DemoTypeOptions = {}): Promise<void> {
+  type(target: string, text: string, opts: DemoTypeOptions = {}): void {
     this._push({ kind: "type", target, text, ...opts });
   }
 
   /** Press a key or chord, e.g. "Enter" or "Meta+K", in the focused window or the one named by `window` (it comes to the front). */
-  async press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): Promise<void> {
+  press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): void {
     this._push({ kind: "press", key, ...opts });
   }
 
-  async wait(ms: number): Promise<void> {
+  wait(ms: number): void {
     this._push({ kind: "wait", ms });
   }
 
@@ -802,7 +855,7 @@ export class Demo {
    * view (centered, scrolling its nearest scrollable container), or by / to a
    * position on the page, e.g. `scroll({ by: 600 })` or `scroll({ to: 0 })`.
    */
-  async scroll(target: string | { by?: number; to?: number }, opts: ScrollOptions = {}): Promise<void> {
+  scroll(target: string | { by?: number; to?: number }, opts: ScrollOptions = {}): void {
     if (typeof target === "string") this._push({ kind: "scroll", target, ...opts });
     else this._push({ kind: "scroll", ...target, ...opts });
   }
@@ -815,7 +868,7 @@ export class Demo {
    * focused window's Playwright page and the browser context, e.g. to set a
    * cookie or local storage.
    */
-  async call(fn: (ctx: CallContext) => unknown): Promise<void> {
+  call(fn: (ctx: CallContext) => unknown): void {
     this._push({ kind: "call", fn });
   }
 
@@ -824,7 +877,7 @@ export class Demo {
    * passes, but the page's clock keeps running, so a page that needs time
    * to load, fetch or animate gets it without its loading being filmed.
    */
-  async waitFor(selector: string, opts: WaitForOptions = {}): Promise<void> {
+  waitFor(selector: string, opts: WaitForOptions = {}): void {
     this._push({ kind: "waitFor", target: selector, ...opts });
   }
 
@@ -838,7 +891,7 @@ export class Demo {
   }
 
   /** Hold until all narration queued so far has finished. */
-  async waitForNarration(): Promise<void> {
+  waitForNarration(): void {
     this._push({ kind: "waitForNarration" });
   }
 
@@ -923,7 +976,22 @@ export class Demo {
    * real length, and a new one's is estimated. Throws on the first failure
    * with the script location.
    */
+  /**
+   * @deprecated End the script with `demo.render(path)`, which `reelscript check` checks.
+   * This still works under `reelscript check`, with a warning; it's removed in 1.0.
+   */
   async check(outPath?: string): Promise<RenderResult> {
+    const at = callerLocation();
+    // Under render, preview or record it can't be the run, so say so before checking the whole timeline for nothing.
+    if (process.env.REELSCRIPT_SCRIPT && !process.env.REELSCRIPT_CHECK) {
+      throw new Error(`reelscript: demo.check() only checks, and this isn't reelscript check; end the script with demo.render(path), which every command runs\n  at ${at} (check)`);
+    }
+    warn(`demo.check() is going away in 1.0: end the script with demo.render(path), which reelscript check checks\n  at ${at} (check)`);
+    return this.checkTimeline(outPath);
+  }
+
+  /** Run the timeline against the real app without capturing or encoding: what reelscript check does with render(). */
+  private async checkTimeline(outPath?: string): Promise<RenderResult> {
     noteRun("check");
     const started = Date.now();
     const verbose = this.options.verbose ?? true;
@@ -966,7 +1034,7 @@ export class Demo {
    * REELSCRIPT_RECORD and REELSCRIPT_OUT.
    */
   async render(outPath: string): Promise<RenderResult> {
-    if (process.env.REELSCRIPT_CHECK) return this.check(outPath);
+    if (process.env.REELSCRIPT_CHECK) return this.checkTimeline(outPath);
     noteRun("render");
     if (process.env.REELSCRIPT_RECORD) {
       const files = await this.recordTerminals();

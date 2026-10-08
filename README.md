@@ -13,15 +13,15 @@ import { createDemo } from "@reelscript/cli";
 
 const demo = createDemo({ viewport: [1280, 800], camera: "follow" });
 
-await demo.browser.goto("https://app.local");
-await demo.cursor.moveTo("#new-project");
-await demo.cursor.click();
+demo.browser.goto("https://app.local");
+demo.cursor.moveTo("#new-project");
+demo.cursor.click();
 
 demo.say("Give it a name, and hit Create.");
-await demo.type("#project-name", "Acme Q3 Launch", { wpm: 400 });
-await demo.cursor.moveTo("#create");
-await demo.cursor.click();
-await demo.waitForNarration();
+demo.type("#project-name", "Acme Q3 Launch", { wpm: 400 });
+demo.cursor.moveTo("#create");
+demo.cursor.click();
+demo.waitForNarration();
 
 await demo.render("out/demo.mp4");
 ```
@@ -57,9 +57,9 @@ A script is a TypeScript file. Save this as `demos/signup.ts`, pointed at your a
 import { createDemo } from "@reelscript/cli";
 
 const demo = createDemo();
-await demo.browser.goto("http://localhost:3000");
-await demo.cursor.moveTo("text=Sign up");
-await demo.cursor.click();
+demo.browser.goto("http://localhost:3000");
+demo.cursor.moveTo("text=Sign up");
+demo.cursor.click();
 await demo.render("out/signup.mp4");
 ```
 
@@ -82,13 +82,13 @@ The example drives a small dashboard app that ships with the repo, so it's fully
 
 ## Writing a demo
 
-A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. Nothing runs until `render()` (or `check`, `preview` or `record`) plays the queue: awaiting a step only queues it, so a `try`/`catch` around one catches nothing. For work that depends on what the page shows, use `call()`, which runs off camera at its point in the timeline. A few rules hold everywhere:
+A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. Steps return nothing and only queue: nothing runs until `render()` plays the queue (under `check`, `preview` and `record` too), so `render()` is the one call to await. A step's own mistake, like a misspelt option, throws at its line right away; what happens when it runs (a selector that matches nothing) fails at `render()` or `check`, so a `try`/`catch` around a step can't handle it. For work that depends on what the page shows, use `call()`, which runs off camera at its point in the timeline. A few rules hold everywhere:
 
-- **Renamed options.** `goto({ settle })`, `maxGapMs`, camera `holdMs` and `menubar.clock` are now `hold`, `maxGap`, `hold` and `clockText`. The old names work until 1.0, with a warning at the line, so `--strict` finds them.
+- **Renamed options.** `goto({ settle })`, `maxGapMs`, camera `holdMs` and `menubar.clock` are now `hold`, `maxGap`, `hold` and `clockText`, and `demo.check()` gives way to `demo.render()`, which `reelscript check` checks. The old forms work until 1.0, with a warning at the line, so `--strict` finds them.
 - **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, an editor's `workspace` and `extensions`, and a local page in `browser.goto("./app.html")`, which reelscript serves from this machine over http so it behaves as it would on a site (its `fetch("/api/...")` reaches `mockAPI`, its cookies stick, its modules load) (anything with a scheme, like `https://` or `file://`, is a URL as is, and a path from the root, `goto("/pricing")`, is a page on the site the browser is showing, as it is in `mockAPI`). Paths you pass on the command line are relative to your working directory. The exception is Playwright's own calls inside `demo.call()` (`page.setInputFiles`, `page.screenshot`), which take paths relative to the working directory; name a file beside the script with `fileURLToPath(new URL("data.csv", import.meta.url))`, for example to choose a file for an upload, which is Chromium's own dialog and isn't drawn: `demo.call(({ page }) => page!.setInputFiles("#file", fileURLToPath(new URL("data.csv", import.meta.url))))`.
 - **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates. A target is in the window's own page, not inside an iframe; fill a field in an iframe (a payment form) off camera with `demo.call(({ page }) => page!.frameLocator("iframe#pay").locator("#card").fill("4242 4242 4242 4242"))`. A target counts as visible when a viewer could see it: an element inside something faded all the way out (a closed modal at `opacity: 0`) isn't, and `demo.type()` fails on a field that can't take the keyboard (disabled, read-only, not a text field).
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
-- **Windows.** There is at most one browser, one terminal, and one editor window. The browser has no tabs: a link or `window.open()` that would open a new tab opens in the browser window, as if the demo had switched to it. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. A window is kept on the desktop and below the macOS menu bar; when that changes what a script asked for, it's a warning at the line (make `desktop` bigger instead). `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Calling `open()` on a window that's open applies what you pass and keeps the rest from its last `open()`: the browser moves, the terminal starts over with the new settings, and the editor reopens (a new VS Code if its workspace, extensions or settings changed). After `close()`, `open()` starts from the defaults. Selectors resolve in the focused window unless you name one with `window`.
+- **Windows.** There is at most one browser, one terminal, and one editor window. The browser has no tabs: a link or `window.open()` that would open a new tab opens in the browser window, as if the demo had switched to it. The first window opened takes the `viewport` size and the main position on the desktop; later ones open smaller, at the lower right, unless you give them `x`, `y`, `width`, `height`. A window is kept on the desktop, below the macOS menu bar, and at least 200x120; when that changes what a script asked for, it's a warning at the line saying why (a bigger `desktop`, or `menubar: false`, makes room). `browser.goto()` opens the browser window if it isn't open. Any window can be moved with `place()`, brought forward with `focus()`, and taken away with `close()`. Calling `open()` on a window that's open applies what you pass and keeps the rest from its last `open()`: the browser moves, the terminal starts over with the new settings, and the editor reopens (a new VS Code if its workspace, extensions or settings changed). After `close()`, `open()` starts from the defaults. Selectors resolve in the focused window unless you name one with `window`.
 - **The desktop is a Mac, on every host.** The browser is Chrome on macOS and VS Code has the macOS keybindings, like the desktop they sit on, so a local preview and a render in CI show the same ⌘ shortcut hints and take the same keys: press `Meta+K`, `Meta+P`, and in a web page's fields `Meta+A` or `Alt+ArrowLeft`, which do what they do on a Mac on every host. Fonts come from the machine, though: a page that asks for `system-ui` gets San Francisco on a Mac and a Linux font in the container, so text can look different between a local preview and a CI render. Give the page a web font, or judge the final look from CI.
 - **Time.** Actions run one after another. `zoom.to()` and `say()` start now and keep going while later actions run. `wait(ms)` and `waitForNarration()` hold on camera; `waitFor(selector)` holds off camera, so a slow load isn't filmed. Every duration is in milliseconds, and option names don't repeat the unit (`hold`, `maxGap`, `duration`).
 - **Scrolling** is `demo.scroll(selector)` to bring an element into view, or `demo.scroll({ by: 600 })` and `demo.scroll({ to: 0 })` for the page (the document, or in an app whose document doesn't scroll, its main scrolling area), stepped with the frame clock like everything else. It scrolls web pages; in the editor, use keys or an editor command. Chromium's smooth scrolling is off, so keys like PageDown jump rather than glide on their own clock.
@@ -108,7 +108,7 @@ Then every browser window in a demo starts signed in. From a script in `demos/`:
 
 ```ts
 const demo = createDemo({ session: "session.json" });
-await demo.browser.goto("https://app.example.com/dashboard");
+demo.browser.goto("https://app.example.com/dashboard");
 ```
 
 It keeps cookies, local storage and IndexedDB, where apps such as Firebase keep their sign-in. The file signs in as you, so add it to `.gitignore`. In CI, store it as a secret and write it out before rendering, for example `echo "$SESSION_JSON" > demos/session.json`. Sessions expire like any login; when a demo starts landing on the sign-in page, run `reelscript login` again. The page's date is pinned (see the clock, above), so an app that checks its sign-in token against the page's clock (Supabase and Firebase do) takes an expired token for a fresh one, doesn't refresh it, and the server turns it away: with a session, pass `clock: new Date()` so the page's date is the real one. For anything else a demo needs set up off camera, `demo.call(({ page, context }) => ...)` gets the Playwright page and browser context.
@@ -117,12 +117,12 @@ It keeps cookies, local storage and IndexedDB, where apps such as Firebase keep 
 
 ```ts
 const demo = createDemo({ viewport: [1180, 720], desktop: [1600, 1000] });
-await demo.browser.goto("https://app.local");
-await demo.terminal.open({ title: "acme", x: 700, y: 560, width: 840, height: 360 });
-await demo.terminal.run("npm run deploy", { output: "Live at https://acme.app\n" });
-await demo.terminal.close();
-await demo.cursor.moveTo("#new-project", { window: "browser" });
-await demo.cursor.click();
+demo.browser.goto("https://app.local");
+demo.terminal.open({ title: "acme", x: 700, y: 560, width: 840, height: 360 });
+demo.terminal.run("npm run deploy", { output: "Live at https://acme.app\n" });
+demo.terminal.close();
+demo.cursor.moveTo("#new-project", { window: "browser" });
+demo.cursor.click();
 ```
 
 Each window is its own Chromium page; the desktop composites them in z-order with the theme's frames and shadows. Clicking a window raises it, and typing into a named window (`demo.type(selector, text, { window })`, `editor.type()`, `terminal.run()`) brings it forward first. See [examples/desktop.ts](examples/desktop.ts).
@@ -130,20 +130,20 @@ Each window is its own Chromium page; the desktop composites them in z-order wit
 ## Editor demos
 
 ```ts
-await demo.editor.open({
+demo.editor.open({
   workspace: "acme",
   extensions: ["esbenp.prettier-vscode@12.4.0"],
   settings: { "editor.defaultFormatter": "esbenp.prettier-vscode" }, // or VS Code asks which formatter to use
 });
-await demo.cursor.moveTo(demo.editor.file("src")); // expand the folder
-await demo.cursor.click();
-await demo.cursor.moveTo(demo.editor.file("app.ts"));
-await demo.cursor.click();
-await demo.cursor.moveTo(".monaco-editor .view-lines"); // click into the editor to move keyboard focus
-await demo.cursor.click();
-await demo.press("Meta+ArrowDown"); // the end of the file
-await demo.editor.type('server.get("/health", () => ({ ok: true }));');
-await demo.editor.command("Format Document");
+demo.cursor.moveTo(demo.editor.file("src")); // expand the folder
+demo.cursor.click();
+demo.cursor.moveTo(demo.editor.file("app.ts"));
+demo.cursor.click();
+demo.cursor.moveTo(".monaco-editor .view-lines"); // click into the editor to move keyboard focus
+demo.cursor.click();
+demo.press("Meta+ArrowDown"); // the end of the file
+demo.editor.type('server.get("/health", () => ({ ok: true }));');
+demo.editor.command("Format Document");
 ```
 
 `openFile()` and `command()` type into Quick Open and the Command Palette the way a person would. The file must match by name (and by folder, if you give one) and the command by its whole name, with or without its category (`View: Toggle Word Wrap` or `Toggle Word Wrap`). If VS Code can't find it, the render and `check` fail at that line instead of pressing Enter on the near match VS Code offered, so a renamed file or command breaks the build rather than the demo.
@@ -157,8 +157,8 @@ Point `extensions` at the extension's folder (a directory with a `package.json`)
 ```ts
 // demo/extension.ts in the extension's repo. Paths are from this script's folder:
 // ".." is the repo root (the extension itself), and the workspace is demo/fixtures/project.
-await demo.editor.open({ workspace: "fixtures/project", extensions: [".."], notifications: true });
-await demo.editor.command("Acme: Deploy to Production");
+demo.editor.open({ workspace: "fixtures/project", extensions: [".."], notifications: true });
+demo.editor.command("Acme: Deploy to Production");
 ```
 
 Each demo gets only the extensions it asks for. Open VSX extensions and `.vsix` files are installed once and cached; an Open VSX id without a version is cached at the version first installed, so pin one with `publisher.name@1.2.3`, or clear the cache to update (`npx reelscript cache clear extensions`). The extension runs in a real extension host with its Node dependencies, so keep `node_modules` present (or bundle) as you would for `vsce package`. See [examples/extension.ts](examples/extension.ts) and the sample extension in [examples/acme-ext](examples/acme-ext).
@@ -166,9 +166,9 @@ Each demo gets only the extensions it asks for. Open VSX extensions and `.vsix` 
 ## Terminal demos
 
 ```ts
-await demo.terminal.open({ title: "acme", prompt: "acme % " });
-await demo.terminal.run("npm install -D @reelscript/cli", { output: "\nadded 38 packages in 2s\n" });
-await demo.terminal.run("node --version"); // replayed from recordings/node-version-<hash>.json
+demo.terminal.open({ title: "acme", prompt: "acme % " });
+demo.terminal.run("npm install -D @reelscript/cli", { output: "\nadded 38 packages in 2s\n" });
+demo.terminal.run("node --version"); // replayed from recordings/node-version-<hash>.json
 ```
 
 Declared output never executes anything, so it renders identically everywhere. For real commands, run
@@ -184,8 +184,8 @@ Rendering replays a recording with long silences capped (`maxGap`, 700 ms by def
 ```ts
 import { createDemo, readAsciicast } from "@reelscript/cli";
 const cast = readAsciicast("claude.cast"); // asciinema rec claude.cast, v2 or v3; relative to the script
-await demo.terminal.open({ cols: cast.cols, rows: cast.rows, lineHeight: 1 });
-await demo.terminal.run("claude", { events: cast.events });
+demo.terminal.open({ cols: cast.cols, rows: cast.rows, lineHeight: 1 });
+demo.terminal.run("claude", { events: cast.events });
 ```
 
 A recording as wide as your own terminal needs a window as big: give `open()` a `width` and `height`, or a smaller `fontSize`. `check` warns when the terminal's `cols` and `rows` don't fit its window, since the rest would be cut off.
@@ -309,7 +309,6 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | --- | --- |
 | `createDemo(options)` | Start a demo. Options below. |
 | `demo.render(path)` | Render to `.mp4` (H.264, with narration) or `.gif` (palette-optimized, silent); any other extension is an error. `path` is relative to the script. Resolves once the video is written, with `{ command, out, durationMs, frames, width, height }`; `out` is where it went (`--out`, when given), so the script can go on to cut or caption it. The script also runs under `check`, `preview` and `record`, which write no video (`preview` writes a frame): `command` says which ran it, so cut or caption when it's `"render"`. |
-| `demo.check()` | What `reelscript check` runs: the timeline against the real app, no rendering. |
 | `demo.getTimeline()` | The actions queued so far, for tests. |
 | `readAsciicast(path)` | An asciinema recording as `{ events, cols, rows }` for `terminal.run(cmd, { events })`. |
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a target. Duration defaults from distance. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |

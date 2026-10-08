@@ -150,6 +150,9 @@ interface Attention {
   y: number;
 }
 
+/** The smallest a window can be, frame aside. */
+const MIN_WINDOW = [200, 120] as const;
+
 interface Geometry {
   x?: number;
   y?: number;
@@ -374,23 +377,36 @@ class Engine {
     return this.theme.titleHeight;
   }
 
-  /** Fit a window on the desktop, below its menu bar, and say so at the line when that changed what the script asked for. */
+  /** Fit a window on the desktop, below its menu bar, and say so at the line, with why, when that changed what the script asked for. */
   private clampGeometry(w: Win, asked?: Geometry): void {
     const [W, H] = this.desktop;
     const top = this.theme.topInset;
     const before = { x: w.x, y: w.y, width: w.width, height: w.height };
-    w.width = Math.max(200, Math.min(w.width, W));
-    w.height = Math.max(120, Math.min(w.height, H - top - this.titleH));
+    w.width = Math.max(MIN_WINDOW[0], Math.min(w.width, W));
+    w.height = Math.max(MIN_WINDOW[1], Math.min(w.height, H - top - this.titleH));
     w.x = Math.round(clamp(w.x, 0, W - w.width));
     w.y = Math.round(clamp(w.y, top, H - w.height - this.titleH));
-    const changed = (["x", "y", "width", "height"] as const).filter((k) => asked?.[k] !== undefined && w[k] !== before[k]);
-    if (changed.length) {
-      warn(
-        `the ${w.id} window doesn't fit on the ${W}x${H} desktop as asked, so its ${changed.join(", ")} became ` +
-          `${changed.map((k) => `${k}: ${w[k]}`).join(", ")} (the desktop option sets the desktop's size)\n  at ${this.at}`,
+    const why: string[] = [];
+    const was = (k: "x" | "y" | "width" | "height") => asked?.[k] !== undefined && w[k] !== before[k];
+    for (const k of ["width", "height"] as const) {
+      if (!was(k)) continue;
+      why.push(
+        w[k] > before[k]
+          ? `${k} ${before[k]} became ${w[k]}, the smallest a window can be (${MIN_WINDOW[0]}x${MIN_WINDOW[1]})`
+          : `${k} ${before[k]} became ${w[k]}, as much as the ${W}x${H} desktop has room for (the desktop option makes it bigger)`,
       );
     }
+    for (const k of ["x", "y"] as const) {
+      if (!was(k)) continue;
+      why.push(
+        k === "y" && w.y === top && before.y < top
+          ? `y ${before.y} became ${w.y}, below the menu bar (menubar: false removes it)`
+          : `${k} ${before[k]} became ${w[k]}, to keep the window on the ${W}x${H} desktop`,
+      );
+    }
+    if (why.length) warn(`the ${w.id} window was refitted: ${why.join("; ")}\n  at ${this.at}`);
   }
+
 
   /** Get a window, creating its page if this is the first time it's used. */
   private async ensureWindow(id: string, kind: WindowKind, geometry: Geometry = {}): Promise<Win> {
@@ -588,20 +604,30 @@ class Engine {
 
   /** Resolve a target to desktop coordinates, searching the given or focused window. */
   /** The element the cursor last moved to, which a click there is meant to hit. */
-  private aimed: { selector: string; window: string } | null = null;
+  private aimed: { selector?: string; point?: Point; window: string } | null = null;
 
   /**
    * A click must land on what the cursor moved to. Another window on top, or
    * an element covering the target (an overlay, a toast), would take the
    * click instead, and the demo would carry on showing the wrong thing.
    */
-  private async expectClickLands(w: Win | null, aimed: { selector: string; window: string }): Promise<void> {
+  private async expectClickLands(w: Win | null, aimed: { selector?: string; point?: Point; window: string }): Promise<void> {
+    const named = aimed.selector !== undefined ? `"${aimed.selector}"` : `the point { x: ${aimed.point?.x}, y: ${aimed.point?.y} }`;
+    const own = this.windows.get(aimed.window);
+    if (aimed.point && own && this.outside(own, aimed.point)) {
+      throw new Error(
+        `reelscript: the click at ${named} would land outside the ${aimed.window} window, whose content is ${own.width}x${own.height}; ` +
+          `points are from the content's top left corner`,
+      );
+    }
     if (!w || w.id !== aimed.window) {
       throw new Error(
-        `reelscript: the click on "${aimed.selector}" would land on ${w ? `the ${w.id} window` : "the desktop"}, ` +
+        `reelscript: the click on ${named} would land on ${w ? `the ${w.id} window` : "the desktop"}, ` +
           `which covers the ${aimed.window} window there; bring it forward first with demo.${aimed.window}.focus()`,
       );
     }
+    // A point names a place in the window, not an element, so landing in that window is all there is to check.
+    if (aimed.selector === undefined) return;
     const local = this.toLocal(w, this.cursor);
     // No named helper functions inside evaluate: some compilers wrap them in
     // helpers (__name) that don't exist in the page.
@@ -704,9 +730,19 @@ class Engine {
     }
   }
 
-  private async resolveRect(target: Target, windowId?: string): Promise<Rect> {
+  private async resolveRect(target: Target, windowId?: string, anywhere = false): Promise<Rect> {
     const w = windowId ? this.window(windowId) : this.focused();
-    if (typeof target !== "string") return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+    if (typeof target !== "string") {
+      // Like a selector's target, a point to zoom to must be within the window's visible content.
+      // The cursor may go anywhere, though: out of the shot, say.
+      if (!anywhere && this.outside(w, target)) {
+        throw new Error(
+          `reelscript: the point { x: ${target.x}, y: ${target.y} } is outside the ${w.id} window, whose content is ${w.width}x${w.height}; ` +
+            `points are from the content's top left corner`,
+        );
+      }
+      return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+    }
     const loc = await this.visible(w, target);
     let box = await this.inView(w, loc, target);
     // VS Code runs on real time, and may still be laying out (a folder
@@ -745,8 +781,12 @@ class Engine {
     return box;
   }
 
+  private outside(w: Win, p: Point): boolean {
+    return p.x < 0 || p.y < 0 || p.x > w.width || p.y > w.height;
+  }
+
   private async resolvePoint(target: Target, windowId?: string): Promise<Point> {
-    const r = await this.resolveRect(target, windowId);
+    const r = await this.resolveRect(target, windowId, true);
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
   }
 
@@ -853,7 +893,9 @@ class Engine {
       case "cursor.moveTo": {
         const to = await this.resolvePoint(action.target, action.window);
         this.aimed =
-          typeof action.target === "string" ? { selector: action.target, window: action.window ?? this.focusedId ?? "" } : null;
+          typeof action.target === "string"
+            ? { selector: action.target, window: action.window ?? this.focusedId ?? "" }
+            : { point: action.target, window: action.window ?? this.focusedId ?? "" };
         const from = { ...this.cursor };
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
         const dur = action.duration ?? clamp(Math.round(dist * 0.9 + 200), 250, 1400);

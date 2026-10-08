@@ -11,28 +11,28 @@ const demo = createDemo({
   pronunciations: { Reelscript: "Reel script" },
 });
 
-await demo.browser.goto("./app.html");
+demo.browser.goto("./app.html");
 demo.say("Reelscript can put a browser and a terminal on the same desktop.");
-await demo.wait(600);
+demo.wait(600);
 
-await demo.terminal.open({ title: "acme", prompt: "acme % ", x: 700, y: 560, width: 840, height: 360 });
-await demo.terminal.run("npm run deploy", {
+demo.terminal.open({ title: "acme", prompt: "acme % ", x: 700, y: 560, width: 840, height: 360 });
+demo.terminal.run("npm run deploy", {
   output: "\n> acme@1.4.0 deploy\n> acme-cli deploy --prod\n\n  Building...      done (2.1s)\n  Uploading...     done (0.8s)\n  Live at https://acme.app\n",
   duration: 2200,
 });
-await demo.waitForNarration();
+demo.waitForNarration();
 
 demo.say("Click back into the browser, and keep going.");
-await demo.cursor.moveTo("#new-project", { window: "browser" });
-await demo.cursor.click();
+demo.cursor.moveTo("#new-project", { window: "browser" });
+demo.cursor.click();
 demo.zoom.to("#modal", { scale: 1.4 });
-await demo.cursor.moveTo("#project-name");
-await demo.cursor.click();
-await demo.type("#project-name", "Deployed from the CLI", { wpm: 400 });
-await demo.cursor.moveTo("#create");
-await demo.cursor.click();
+demo.cursor.moveTo("#project-name");
+demo.cursor.click();
+demo.type("#project-name", "Deployed from the CLI", { wpm: 400 });
+demo.cursor.moveTo("#create");
+demo.cursor.click();
 demo.zoom.out();
-await demo.waitForNarration();
-await demo.wait(900);
+demo.waitForNarration();
+demo.wait(900);
 
 await demo.render("out/desktop.mp4");

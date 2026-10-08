@@ -9,31 +9,31 @@ const demo = createDemo({
   pronunciations: { Reelscript: "Reel script" },
 });
 
-await demo.editor.open({ workspace: "./acme" });
+demo.editor.open({ workspace: "./acme" });
 demo.say("Reelscript can drive a real VS Code, so you can demo your extension or dev tool the way users see it.");
-await demo.wait(500);
+demo.wait(500);
 
-await demo.cursor.moveTo(demo.editor.file("src"));
-await demo.cursor.click();
-await demo.cursor.moveTo(demo.editor.file("app.ts"));
-await demo.cursor.click();
-await demo.waitForNarration();
+demo.cursor.moveTo(demo.editor.file("src"));
+demo.cursor.click();
+demo.cursor.moveTo(demo.editor.file("app.ts"));
+demo.cursor.click();
+demo.waitForNarration();
 
 demo.say("Add a health check route.");
 // Click into the editor first: opening a file from the Explorer leaves
 // keyboard focus in the tree, exactly as it does for a person.
-await demo.cursor.moveTo(".monaco-editor .view-lines");
-await demo.cursor.click();
-await demo.press("Meta+ArrowDown");
-await demo.press("Enter");
+demo.cursor.moveTo(".monaco-editor .view-lines");
+demo.cursor.click();
+demo.press("Meta+ArrowDown");
+demo.press("Enter");
 demo.zoom.to(".monaco-editor .view-overlays .current-line", { scale: 1.4 });
-await demo.editor.type('server.get("/health", () => ({ ok: true }));', { wpm: 350 });
-await demo.waitForNarration();
+demo.editor.type('server.get("/health", () => ({ ok: true }));', { wpm: 350 });
+demo.waitForNarration();
 
 demo.say("And run anything from the command palette.");
-await demo.editor.command("Toggle Minimap");
-await demo.waitForNarration();
+demo.editor.command("Toggle Minimap");
+demo.waitForNarration();
 demo.zoom.out();
-await demo.wait(800);
+demo.wait(800);
 
 await demo.render("out/editor.mp4");
