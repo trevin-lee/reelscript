@@ -121,7 +121,21 @@ async function runScript(path: string): Promise<void> {
   const g = globalThis as { __reelscript_runs?: { render: number; check: number } };
   const counts = () => ({ render: 0, check: 0, ...g.__reelscript_runs });
   const before = counts();
-  await importScript(path);
+  let failed: unknown = null;
+  try {
+    await importScript(path);
+  } catch (err) {
+    failed = err;
+  }
+  // A render() the script didn't await is still running; its result, or failure, is the script's. The runs a
+  // script started are its own either way: the next script mustn't inherit them.
+  const pending = (globalThis as { __reelscript_pending?: Promise<unknown>[] }).__reelscript_pending ?? [];
+  const runs = pending.splice(0);
+  if (failed) {
+    await Promise.allSettled(runs); // the same failure, when the script awaited it: reported once, below
+    throw failed;
+  }
+  await Promise.all(runs);
   const after = counts();
   // demo.check() is a run only for `reelscript check`; render, preview and record need demo.render().
   const ran = after.render > before.render || (process.env.REELSCRIPT_CHECK && after.check > before.check);

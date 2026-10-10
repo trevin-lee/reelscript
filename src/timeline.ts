@@ -1,3 +1,4 @@
+import type { DeskView } from "./desk.js";
 import type { Ease } from "./easing.js";
 import type { BrowserContext, Page } from "playwright";
 
@@ -19,6 +20,9 @@ export type Action =
   | { kind: "cursor.click"; button?: "left" | "right"; duration?: number; /** How to answer an alert, confirm or prompt the click opens. */ dialog?: "accept" | "dismiss" }
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
+  | { kind: "desk.to"; view: DeskView; duration?: number; ease?: Ease }
+  | { kind: "desk.out"; duration?: number; ease?: Ease }
+  | { kind: "keyboard.open"; labels?: boolean; x?: number; y?: number; width?: number; height?: number }
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
   | { kind: "press"; key: string; window?: string }
   | { kind: "wait"; ms: number }
@@ -96,6 +100,8 @@ export const DEFAULTS = {
   typeWpm: 300,
   zoomScale: 1.6,
   zoomDuration: 700,
+  /** a desk view flying in or out */
+  deskDuration: 1400,
   /** frames appended after the last action so the ending doesn't feel clipped */
   tailMs: 500,
   /** silence between consecutive narration clips */

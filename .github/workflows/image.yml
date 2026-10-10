@@ -48,7 +48,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
       - name: Smoke test on ${{ matrix.slug }}
         run: |
-          docker run --rm -v "$PWD:/work" reelscript:test check examples/basic.ts examples/terminal.ts examples/editor.ts
+          docker run --rm -v "$PWD:/work" reelscript:test check examples/basic.ts examples/terminal.ts examples/editor.ts examples/keyboard.ts
           docker run --rm -v "$PWD:/work" reelscript:test render examples/terminal.ts --out smoke-${{ matrix.slug }}.mp4
           test -s smoke-${{ matrix.slug }}.mp4
           docker run --rm reelscript:test --version

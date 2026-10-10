@@ -26,6 +26,8 @@ import {
   type TermEvent,
 } from "./terminal.js";
 import { EditorServer, editorStyles, editorTitle } from "./editor.js";
+import { DESK_DEFAULTS, DESK_URL, deskAsset, deskPageHtml, type DeskOptions, type DeskView, type KeyEvent } from "./desk.js";
+import { assignFingers, layout as keyboardLayout, resolveChar, resolveChord, type Layout } from "./keyboard.js";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -52,6 +54,10 @@ export interface RenderOptions {
   address?: (url: string) => string;
   /** The macOS theme's menu bar, or `false` for none. */
   menubar?: Menubar;
+  /** The desk behind the keyboard window and the desk views: the laptop, the hands, the surface. */
+  desk?: DeskOptions;
+  /** The macOS theme's wallpaper: a CSS colour or gradient, or an image file's path. */
+  wallpaper?: string;
   /** The moment the demo happens at: the page's Date starts here and the menu bar shows it. */
   clock?: string | Date;
   /** IANA timezone for the page and the menu bar. Default: "UTC" */
@@ -230,6 +236,19 @@ class Engine {
   /** Rewrites a page URL before the address pill shows it. */
   address?: (url: string) => string;
 
+  // the desk: a laptop with the demo on its screen and hands on its keys, behind the keyboard window and the desk views
+  private deskOpts: Required<DeskOptions>;
+  private deskLayout: Layout;
+  /** Every key pressed or typed while the desk was shown, for the hands. */
+  private keyEvents: KeyEvent[] = [];
+  /** How many of them each desk page has been given. */
+  private deskFed = new Map<string, number>();
+  /** The page that draws a desk view as the whole frame, opened at the first one. */
+  private deskPage: { page: Page; cdp: CDPSession } | null = null;
+  private deskAnim: { from: DeskView; to: DeskView; start: number; dur: number; ease: Ease } | null = null;
+  private keyboardLabels = true;
+  private unshownKeys = new Set<string>();
+
   constructor(
     private viewport: [number, number],
     desktop: [number, number] | undefined,
@@ -238,8 +257,12 @@ class Engine {
     menubar: Menubar = {},
     /** One frame of page time, for steps that run the clock off camera. */
     private frameMs = 1000 / DEFAULTS.fps,
+    desk: DeskOptions = {},
+    wallpaper?: string,
   ) {
-    this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar);
+    this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar, wallpaper);
+    this.deskOpts = { ...DESK_DEFAULTS, ...desk };
+    this.deskLayout = keyboardLayout(this.deskOpts.laptop);
     this.epoch = clockEpoch(DEFAULT_CLOCK, DEFAULT_TIMEZONE);
     // Even sizes, as H.264 needs; the default desktop already is.
     this.desktop = desktop ? [desktop[0] + (desktop[0] % 2), desktop[1] + (desktop[1] % 2)] : this.theme.defaultDesktop(viewport);
@@ -277,7 +300,7 @@ class Engine {
       const b = el.getBoundingClientRect();
       return { x: b.left + Math.min(b.width / 2, 300), y: b.top + b.height / 2 };
     });
-    if (r) this.attend(t, { x: w.x + r.x, y: w.y + this.titleH + r.y });
+    if (r) this.attend(t, { x: w.x + r.x, y: w.y + this.titleOf(w) + r.y });
   }
 
   async open(): Promise<void> {
@@ -348,6 +371,7 @@ class Engine {
 
   async close(): Promise<void> {
     this.unregisterBrowser?.();
+    await this.deskPage?.page.close().catch(() => {});
     await this.browser?.close();
     await this.editorServer?.stop();
     this.local.close();
@@ -377,15 +401,20 @@ class Engine {
     return this.theme.titleHeight;
   }
 
+  /** A window's title bar: the theme's, or none for the keyboard panel, which draws its own shape. */
+  private titleOf(w: Win): number {
+    return w.kind === "keyboard" ? 0 : this.titleH;
+  }
+
   /** Fit a window on the desktop, below its menu bar, and say so at the line, with why, when that changed what the script asked for. */
   private clampGeometry(w: Win, asked?: Geometry): void {
     const [W, H] = this.desktop;
     const top = this.theme.topInset;
     const before = { x: w.x, y: w.y, width: w.width, height: w.height };
     w.width = Math.max(MIN_WINDOW[0], Math.min(w.width, W));
-    w.height = Math.max(MIN_WINDOW[1], Math.min(w.height, H - top - this.titleH));
+    w.height = Math.max(MIN_WINDOW[1], Math.min(w.height, H - top - this.titleOf(w)));
     w.x = Math.round(clamp(w.x, 0, W - w.width));
-    w.y = Math.round(clamp(w.y, top, H - w.height - this.titleH));
+    w.y = Math.round(clamp(w.y, top, H - w.height - this.titleOf(w)));
     const why: string[] = [];
     const was = (k: "x" | "y" | "width" | "height") => asked?.[k] !== undefined && w[k] !== before[k];
     for (const k of ["width", "height"] as const) {
@@ -417,17 +446,18 @@ class Engine {
       }
       return existing;
     }
-    const first = this.windows.size === 0;
+    const first = kind !== "keyboard" && [...this.windows.values()].every((w) => w.kind === "keyboard");
     const [W, H] = this.desktop;
-    let width = geometry.width ?? (first ? this.viewport[0] : Math.min(900, Math.round(W * 0.6)));
-    let height = geometry.height ?? (first ? this.viewport[1] : Math.min(520, Math.round(H * 0.5)));
+    const panelW = Math.min(560, Math.round(W * 0.42)); // the keyboard panel: wide and low, like the keys
+    let width = geometry.width ?? (first ? this.viewport[0] : kind === "keyboard" ? panelW : Math.min(900, Math.round(W * 0.6)));
+    let height = geometry.height ?? (first ? this.viewport[1] : kind === "keyboard" ? Math.round((geometry.width ?? panelW) * 0.45) : Math.min(520, Math.round(H * 0.5)));
     let x: number;
     let y: number;
     if (first) {
       ({ x, y } = this.theme.mainPlacement(this.desktop, [width, height]));
     } else {
       x = W - width - CASCADE_MARGIN;
-      y = H - height - this.titleH - CASCADE_MARGIN;
+      y = H - height - (kind === "keyboard" ? 0 : this.titleH) - CASCADE_MARGIN;
     }
     if (geometry.x !== undefined) x = geometry.x;
     if (geometry.y !== undefined) y = geometry.y;
@@ -475,14 +505,99 @@ class Engine {
     this.clampGeometry(win, geometry);
     await page.setViewportSize({ width: win.width, height: win.height });
     this.windows.set(id, win);
-    this.focusedId = id;
+    if (kind === "keyboard") {
+      await this.loadDesk(page, win.cdp, this.keyboardLabels, id);
+      win.url = DESK_URL;
+    } else this.focusedId = id;
     return win;
+  }
+
+  /** Load the desk scene into a page: its assets served under DESK_URL, a see-through background, sized to the page. */
+  private async loadDesk(page: Page, cdp: CDPSession, labels: boolean, key: string): Promise<void> {
+    await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+    const html = deskPageHtml({ ...this.deskOpts, labels, aspect: this.desktop[0] / this.desktop[1] });
+    await page.route(`${DESK_URL}**`, (route) => {
+      const asset = deskAsset(new URL(route.request().url()).pathname);
+      return asset ? route.fulfill({ status: 200, contentType: asset.contentType, body: asset.body }) : route.fulfill({ status: 200, contentType: "text/html", body: html });
+    });
+    await page.goto(DESK_URL, { waitUntil: "load" });
+    await page.evaluate(() => (window as unknown as { __rsDesk: { ready: Promise<void> } }).__rsDesk.ready);
+    const size = page.viewportSize()!;
+    await this.resizeDesk(page, size.width, size.height);
+    this.deskFed.set(key, 0);
+  }
+
+  private async resizeDesk(page: Page, width: number, height: number): Promise<void> {
+    await page.evaluate(([w, h]) => (window as unknown as { __rsDesk: { resize: (w: number, h: number) => void } }).__rsDesk.resize(w, h), [width, height] as const);
+  }
+
+  /** Whether keys pressed now show on the desk: a keyboard window is open, or a desk view is on. */
+  private sceneShown(): boolean {
+    return this.windows.has("keyboard") || (this.deskAnim !== null && this.deskAnim.to !== "flat");
+  }
+
+  /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
+  private noteChord(chord: string, at: number, hold: number, withLabel: boolean): void {
+    if (!this.sceneShown()) return;
+    const resolved = resolveChord(chord, this.deskLayout);
+    if ("missing" in resolved) {
+      throw new Error(`reelscript: press("${chord}"): the ${this.deskOpts.laptop === "mac" ? "Mac" : "PC"} keyboard on the desk has no "${resolved.missing}" key`);
+    }
+    this.keyEvents.push({ at, hold, keys: assignFingers(resolved.keys, this.deskLayout), label: withLabel ? resolved.label : undefined });
+  }
+
+  /** Text typed from `firstAt`, a character every `msPerChar`, for the hands. A character the laptop can't type is a warning, once. */
+  private noteTyped(text: string, firstAt: number, msPerChar: number): void {
+    if (!this.sceneShown()) return;
+    const hold = Math.min(70, Math.max(30, msPerChar * 0.7));
+    Array.from(text).forEach((ch, i) => {
+      const keys = resolveChar(ch, this.deskLayout);
+      if (!keys) {
+        if (!this.unshownKeys.has(ch)) {
+          this.unshownKeys.add(ch);
+          warn(`the keyboard on the desk has no key for ${JSON.stringify(ch)}, so typing it isn't shown there\n  at ${this.at}`);
+        }
+        return;
+      }
+      this.keyEvents.push({ at: firstAt + i * msPerChar, hold, keys: assignFingers(keys, this.deskLayout) });
+    });
+  }
+
+  /** The desk view at `t`: which presets it's between, and how far; null before any. */
+  private deskViewState(t: number): { from: DeskView; to: DeskView; amount: number } | null {
+    if (!this.deskAnim) return null;
+    const a = this.deskAnim;
+    return { from: a.from, to: a.to, amount: progress(t, a.start, a.dur, a.ease) };
+  }
+
+  /** Hand a desk page the screen's picture and the key events it hasn't had, and draw it at `t` from `view`. */
+  private async deskRender(
+    page: Page,
+    t: number,
+    view: { from?: DeskView; to: DeskView; amount?: number },
+    screen: { data: Buffer; width: number; height: number; channels: 3 | 4 } | null,
+    key: string,
+    lossless: boolean,
+  ): Promise<void> {
+    if (screen) {
+      const image = sharp(screen.data, { raw: { width: screen.width, height: screen.height, channels: screen.channels } });
+      const bytes = await (lossless ? image.png({ compressionLevel: 1 }) : image.jpeg({ quality: 88 })).toBuffer();
+      const url = `data:image/${lossless ? "png" : "jpeg"};base64,${bytes.toString("base64")}`;
+      await page.evaluate((u) => (window as unknown as { __rsDesk: { setScreen: (u: string) => Promise<void> } }).__rsDesk.setScreen(u), url);
+    }
+    const fed = this.deskFed.get(key) ?? 0;
+    const events = this.keyEvents.slice(fed);
+    this.deskFed.set(key, this.keyEvents.length);
+    await page.evaluate(
+      ([t, events, view]) => (window as unknown as { __rsDesk: { render: (t: number, e: unknown[], v: unknown) => void } }).__rsDesk.render(t, events, view),
+      [t, events, view] as const,
+    );
   }
 
   private window(id: string): Win {
     const w = this.windows.get(id);
     if (!w) {
-      const how: Record<string, string> = { browser: "demo.browser.goto() or demo.browser.open()", terminal: "demo.terminal.open()", editor: "demo.editor.open()" };
+      const how: Record<string, string> = { browser: "demo.browser.goto() or demo.browser.open()", terminal: "demo.terminal.open()", editor: "demo.editor.open()", keyboard: "demo.keyboard.open()" };
       throw new Error(`reelscript: window "${id}" is not open (open it with ${how[id] ?? "its open() method"} first)`);
     }
     return w;
@@ -505,15 +620,16 @@ class Engine {
     if (this.typing?.win === w) this.typing = null;
     await w.page.close();
     await w.ctx?.close();
+    this.deskFed.delete(w.id);
     if (this.focusedId === w.id) {
-      const top = this.byZ().at(-1);
+      const top = this.byZ().filter((x) => x.kind !== "keyboard").at(-1);
       this.focusedId = top ? top.id : null;
     }
   }
 
   private focus(w: Win): void {
     if (this.focusedId !== w.id || w.z !== this.zTop) w.z = ++this.zTop;
-    this.focusedId = w.id;
+    if (w.kind !== "keyboard") this.focusedId = w.id; // the keyboard panel shows keys and takes none
   }
 
   private async place(w: Win, g: Geometry): Promise<void> {
@@ -526,6 +642,7 @@ class Engine {
     if (resized) {
       await w.page.setViewportSize({ width: w.width, height: w.height });
       if (w.kind === "terminal") await this.refitTerminal(w);
+      if (w.kind === "keyboard") await this.resizeDesk(w.page, w.width, w.height);
     }
   }
 
@@ -538,13 +655,13 @@ class Engine {
     const wins = this.byZ();
     for (let i = wins.length - 1; i >= 0; i--) {
       const w = wins[i];
-      if (p.x >= w.x && p.x < w.x + w.width && p.y >= w.y && p.y < w.y + w.height + this.titleH) return w;
+      if (p.x >= w.x && p.x < w.x + w.width && p.y >= w.y && p.y < w.y + w.height + this.titleOf(w)) return w;
     }
     return null;
   }
 
   private toLocal(w: Win, p: Point): Point {
-    return { x: p.x - w.x, y: p.y - w.y - this.titleH };
+    return { x: p.x - w.x, y: p.y - w.y - this.titleOf(w) };
   }
 
   private inContent(w: Win, local: Point): boolean {
@@ -741,7 +858,7 @@ class Engine {
             `points are from the content's top left corner`,
         );
       }
-      return { x: w.x + target.x, y: w.y + this.titleH + target.y, w: 0, h: 0 };
+      return { x: w.x + target.x, y: w.y + this.titleOf(w) + target.y, w: 0, h: 0 };
     }
     const loc = await this.visible(w, target);
     let box = await this.inView(w, loc, target);
@@ -754,7 +871,7 @@ class Engine {
       if (!now || (Math.abs(now.x - box.x) < 0.5 && Math.abs(now.y - box.y) < 0.5)) break;
       box = await this.inView(w, loc, target);
     }
-    return { x: w.x + box.x, y: w.y + this.titleH + box.y, w: box.width, h: box.height };
+    return { x: w.x + box.x, y: w.y + this.titleOf(w) + box.y, w: box.width, h: box.height };
   }
 
   /** A target's box, which must be within the visible part of its window. */
@@ -956,6 +1073,7 @@ class Engine {
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
         const firstAt = start + 80;
+        this.noteTyped(action.text, firstAt, msPerChar);
         let next = 0;
         const flush = async (upTo: number) => {
           let batch = "";
@@ -976,6 +1094,7 @@ class Engine {
           throw new Error(`reelscript: keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`);
         }
         if (action.window) this.focus(w);
+        this.noteChord(action.key, start, 90, true);
         // A shortcut that edits text does what it does on a Mac, as the page believes it's on one (see macKeys).
         const mac = w.kind === "browser" && process.platform !== "darwin" ? macShortcut(action.key) : null;
         if (mac) await pressMacShortcut(w.page, w.cdp, mac);
@@ -1096,7 +1215,7 @@ class Engine {
           const w = action.window ? this.window(action.window) : this.focused();
           const [W, H] = this.desktop;
           cx = centreWithin(cx, W / scale, w.x, w.x + w.width);
-          cy = centreWithin(cy, H / scale, w.y, w.y + this.titleH + w.height);
+          cy = centreWithin(cy, H / scale, w.y, w.y + this.titleOf(w) + w.height);
         }
         const to: ZoomState = { scale, cx, cy };
         this.zoomAnim = { from: zoomAt(this.zoomAnim, this.zoom, start), to, start, dur: action.duration ?? DEFAULTS.zoomDuration, ease: action.ease ?? "smooth" };
@@ -1166,6 +1285,9 @@ class Engine {
         const typeStart = start + 350;
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
+        this.noteChord(action.kind === "editor.openFile" ? "Meta+P" : "F1", start, 90, true);
+        this.noteTyped(text, typeStart, msPerChar);
+        this.noteChord("Enter", enterAt, 80, false);
         await w.page.keyboard.press(action.kind === "editor.openFile" ? "Meta+P" : "F1");
         let next = 0;
         let entered = false;
@@ -1186,6 +1308,20 @@ class Engine {
       }
       case "window.focus": {
         this.focus(this.window(action.window));
+        return null;
+      }
+      case "keyboard.open": {
+        this.keyboardLabels = action.labels ?? true;
+        const w = await this.ensureWindow("keyboard", "keyboard", action);
+        this.focus(w); // to the front; typing stays where it was
+        return { end: start + 300 };
+      }
+      case "desk.to":
+      case "desk.out": {
+        // Like a zoom: it runs alongside what follows. A new one starts from the view the last was heading for.
+        const to: DeskView = action.kind === "desk.to" ? action.view : "flat";
+        const from: DeskView = this.deskAnim ? this.deskAnim.to : "flat";
+        this.deskAnim = { from, to, start, dur: action.duration ?? DEFAULTS.deskDuration, ease: action.ease ?? "smooth" };
         return null;
       }
       case "window.place": {
@@ -1252,6 +1388,8 @@ class Engine {
         const typeStart = start + 120;
         const typeEnd = typeStart + chars.length * msPerChar;
         const outStart = typeEnd + 60;
+        this.noteTyped(action.command, typeStart, msPerChar);
+        this.noteChord("Enter", typeEnd, 80, false);
         const lastOut = events.length ? outStart + events[events.length - 1][0] : outStart;
         const text = events.map((e) => e[1]).join("");
         const endsWithNewline = !text || /\n$/.test(text);
@@ -1449,7 +1587,8 @@ class Engine {
   pendingUntil(): number {
     const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
     const follow = this.follow && this.attention ? this.attention.at + this.follow.hold + 900 : 0;
-    return Math.max(zoom, this.narrationEnd, follow);
+    const desk = this.deskAnim ? this.deskAnim.start + this.deskAnim.dur : 0;
+    return Math.max(zoom, this.narrationEnd, follow, desk);
   }
 
   /** Advance continuous state (cursor, zoom) to time t. */
@@ -1527,13 +1666,17 @@ class Engine {
    * our control and slower; CDP grabs the current compositor frame directly.
    */
   private async capture(w: Win): Promise<Buffer> {
-    return retryCapture(`the ${w.id} window`, async () => {
+    return this.captureFrom(w.cdp, `the ${w.id} window`);
+  }
+
+  private async captureFrom(cdp: CDPSession, what: string): Promise<Buffer> {
+    return retryCapture(what, async () => {
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("the page's compositor stalled for 10s")), 10_000);
       });
       try {
-        const { data } = await Promise.race([w.cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
+        const { data } = await Promise.race([cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
         return Buffer.from(data, "base64");
       } finally {
         clearTimeout(timer);
@@ -1544,11 +1687,11 @@ class Engine {
   /** Window content as RGBA raw, masked to the theme's rounded corners. */
   private async contentOverlay(w: Win): Promise<OverlayOptions> {
     const png = await this.capture(w);
-    const mask = await this.theme.contentMask(w.width, w.height);
+    const mask = await this.theme.contentMask(w.width, w.height, w.kind);
     let pipeline = sharp(png).ensureAlpha();
     if (mask) pipeline = pipeline.composite([{ input: mask.data, raw: { width: mask.width, height: mask.height, channels: 4 }, blend: "dest-in" }]);
     const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
-    return { input: data, raw: { width: info.width, height: info.height, channels: 4 }, left: w.x, top: w.y + this.titleH };
+    return { input: data, raw: { width: info.width, height: info.height, channels: 4 }, left: w.x, top: w.y + this.titleOf(w) };
   }
 
   /** Window chrome as an overlay, clipped to the desktop; cached per style and position. */
@@ -1571,16 +1714,25 @@ class Engine {
   async frame(t: number): Promise<Buffer> {
     const [W, H] = this.desktop;
     const bg = await this.theme.background(this.desktop);
+    const keyboard = this.windows.get("keyboard") ?? null;
     const layers = await Promise.all(
-      this.byZ().map(async (w) => {
-        const [frame, content] = await Promise.all([this.frameOverlay(w), this.contentOverlay(w)]);
-        return frame ? [frame, content] : [content];
-      }),
+      this.byZ()
+        .filter((w) => w !== keyboard)
+        .map(async (w) => {
+          const [frame, content] = await Promise.all([this.frameOverlay(w), this.contentOverlay(w)]);
+          return frame ? [frame, content] : [content];
+        }),
     );
-    const { data: sceneData } = await sharp(bg.data, { raw: { width: bg.width, height: bg.height, channels: 4 } })
+    let { data: sceneData } = await sharp(bg.data, { raw: { width: bg.width, height: bg.height, channels: 4 } })
       .composite(layers.flat())
       .raw()
       .toBuffer({ resolveWithObject: true });
+    if (keyboard) {
+      // The panel films the desk with the desktop so far on the laptop's screen, then sits on top of it.
+      await this.deskRender(keyboard.page, t, { to: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false);
+      const panel = await this.contentOverlay(keyboard);
+      ({ data: sceneData } = await sharp(sceneData, { raw: { width: W, height: H, channels: 4 } }).composite([panel]).raw().toBuffer({ resolveWithObject: true }));
+    }
 
     const s = this.zoom.scale;
     const cw = W / s;
@@ -1629,7 +1781,20 @@ class Engine {
 
     let pipeline = sharp(zoomed, { raw: { width: W, height: H, channels: 4 } });
     if (overlays.length) pipeline = pipeline.composite(overlays);
-    return pipeline.removeAlpha().raw().toBuffer();
+    const flat: Buffer = await pipeline.removeAlpha().raw().toBuffer();
+    const view = this.deskViewState(t);
+    if (!view || (view.amount <= 0 && view.from === "flat") || (view.amount >= 1 && view.to === "flat")) return flat;
+    // A desk view: the frame so far is what's on the laptop's screen, and the desk is the frame.
+    if (!this.deskPage) {
+      const page = await this.context.newPage();
+      await page.setViewportSize({ width: W, height: H });
+      const cdp = await this.context.newCDPSession(page);
+      this.deskPage = { page, cdp };
+      await this.loadDesk(page, cdp, false, "desk");
+    }
+    await this.deskRender(this.deskPage.page, t, view, { data: flat, width: W, height: H, channels: 3 }, "desk", true);
+    const png = await this.captureFrom(this.deskPage.cdp, "the desk");
+    return sharp(png).removeAlpha().raw().toBuffer();
   }
 }
 
@@ -1834,7 +1999,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           app: options.menubar?.app,
           clockText: options.menubar?.clockText ?? options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone),
         };
-  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs);
+  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs, options.desk, options.wallpaper);
   if (options.onStatus) engine.onStatus = options.onStatus;
   engine.sources = options.sources ?? [];
   engine.timezone = options.timezone ?? DEFAULT_TIMEZONE;

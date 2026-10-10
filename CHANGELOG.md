@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+**Keyboard view and desk shots.** A desk behind the demo: a laptop under a lamp with the demo on its screen and two hands on its keys, drawn in 3D (Three.js in a Chromium page) a frame at a time like everything else, so it renders the same every time.
+
+- `demo.keyboard.open()` opens the keyboard window: a panel over the laptop's keys, lower right unless placed, moved and closed like any window. While it's open, every key the demo presses or types plays on it: `press()`, `type()`, a terminal command as it's typed, and the editor's Quick Open and Command Palette. The keys go down and light, the hands press them (touch-typing fingers; a thumb on ⌘, the other hand's little finger on Shift), and a chord shows as a label under the keys ("⇧ ⌘ P"). The panel comes to the front but never takes typing. A key the laptop hasn't got fails at the line; a character it can't type is a warning.
+- `demo.desk.to("screen" | "desk" | "keyboard")` flies the whole frame to the desk, like a zoom, alongside what follows, with the flat desktop on the laptop's screen; `demo.desk.out()` flies back. The flight starts from the frame exactly as it was.
+- `createDemo({ desk })` sets the desk up: `laptop: "mac"` (silver, ⌘) or `"pc"` (dark, Ctrl), `hands`, `handColor`, `surface`.
+- `createDemo({ wallpaper })`: the macOS theme's desktop as a CSS colour or gradient, or an image file relative to the script.
+- The hands are the WebXR generic hand models (MIT, in assets/hands), posed by reelscript; Three.js is a new dependency.
+- `examples/keyboard.ts`; ⌘N opens the sample app's New project dialog, and Enter in the name field creates the project.
+- A script that calls `render()` without `await` is waited for anyway: its render finishes, and a failure prints as reelscript's, at the line, where it was Node's unhandled-rejection dump.
+
 ## 0.5.2
 
 - `editor.openFile()` and `editor.command()` let VS Code finish a search before asking again. On a busy machine (a loaded CI runner, several code-servers at once) a Quick Open search could take longer than the pause before reelscript closed the palette and typed the name again, which started the search over; after ten seconds of that, `check` failed with "Quick Open found no file named …" for a file that exists. A search in flight is now waited for (up to 45 seconds), only VS Code's answers count toward the ten, and a timeout says VS Code hadn't found the file or command, not that it doesn't exist.

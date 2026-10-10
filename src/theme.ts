@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
  */
 
 export type ThemeName = "macos" | "bare";
-export type WindowKind = "browser" | "terminal" | "editor";
+export type WindowKind = "browser" | "terminal" | "editor" | "keyboard";
 
 export interface RawImage {
   data: Buffer;
@@ -52,7 +52,7 @@ export interface Theme {
   /** Window chrome, or null for none. */
   frame(style: WindowStyle): Promise<FrameImage | null>;
   /** Alpha mask applied to window content, or null for none. */
-  contentMask(width: number, height: number): Promise<RawImage | null>;
+  contentMask(width: number, height: number, kind?: WindowKind): Promise<RawImage | null>;
 }
 
 function even(n: number): number {
@@ -111,6 +111,16 @@ class BareTheme implements Theme {
   }
 }
 
+/** The wallpaper as CSS: an image file inlined (so the rasterizer needs no file access), or the colour or gradient given. */
+function wallpaperCss(wallpaper: string | undefined): string {
+  if (!wallpaper) return "linear-gradient(135deg, #4f46e5 0%, #c2410c 55%, #f59e0b 100%)";
+  if (/\.(png|jpe?g|webp|gif|avif)$/i.test(wallpaper)) {
+    const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", avif: "image/avif" }[wallpaper.split(".").pop()!.toLowerCase()];
+    return `url("data:${mime};base64,${readFileSync(wallpaper).toString("base64")}") center / cover no-repeat`;
+  }
+  return wallpaper;
+}
+
 // ---------------------------------------------------------------- macos
 
 const MENUBAR_H = 28;
@@ -131,6 +141,8 @@ class MacosTheme implements Theme {
   constructor(
     private rasterize: HtmlRasterizer,
     private menubar: Menubar = {},
+    /** A CSS colour or gradient, or an image file's path, behind everything. Default: the theme's own gradient. */
+    private wallpaper?: string,
   ) {}
 
   get topInset(): number {
@@ -163,7 +175,7 @@ html, body { margin: 0; overflow: hidden; font-family: Inter, system-ui, sans-se
       const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 ${this.css()}
 html, body { width: ${w}px; height: ${h}px; }
-.wall { position: absolute; inset: 0; background: linear-gradient(135deg, #4f46e5 0%, #c2410c 55%, #f59e0b 100%); }
+.wall { position: absolute; inset: 0; background: ${wallpaperCss(this.wallpaper)}; }
 .glow { position: absolute; inset: 0; background: radial-gradient(80% 80% at 30% 20%, rgba(255,255,255,.22), rgba(255,255,255,0)); }
 .menubar { position: absolute; left: 0; top: 0; right: 0; height: ${MENUBAR_H}px; background: rgba(255,255,255,.16);
   color: #fff; font-size: 13px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; }
@@ -178,7 +190,8 @@ ${this.menubar === false ? "" : `<div class="menubar"><b>${escapeHtml(this.menub
     return p;
   }
 
-  frame(style: WindowStyle): Promise<FrameImage> {
+  frame(style: WindowStyle): Promise<FrameImage | null> {
+    if (style.kind === "keyboard") return Promise.resolve(null); // a panel that draws its own shape, with no chrome
     const key = JSON.stringify(style);
     let p = this.frameCache.get(key);
     if (!p) {
@@ -229,7 +242,8 @@ html, body { width: ${W}px; height: ${H}px; background: transparent; }
     return p;
   }
 
-  contentMask(width: number, height: number): Promise<RawImage> {
+  contentMask(width: number, height: number, kind?: WindowKind): Promise<RawImage | null> {
+    if (kind === "keyboard") return Promise.resolve(null);
     const key = `${width}x${height}`;
     let p = this.maskCache.get(key);
     if (!p) {
@@ -271,12 +285,12 @@ function escapeHtml(s: string): string {
  */
 export type Menubar = false | { app?: string; clockText?: string; /** @deprecated Renamed to clockText, since `clock` elsewhere is a moment, not text. Still works; removed in 1.0. */ clock?: string };
 
-export function createTheme(name: ThemeName, rasterize: HtmlRasterizer, menubar: Menubar = {}): Theme {
+export function createTheme(name: ThemeName, rasterize: HtmlRasterizer, menubar: Menubar = {}, wallpaper?: string): Theme {
   switch (name) {
     case "bare":
       return new BareTheme();
     case "macos":
-      return new MacosTheme(rasterize, menubar);
+      return new MacosTheme(rasterize, menubar, wallpaper);
     default:
       throw new Error(`reelscript: unknown theme "${name as string}"`);
   }

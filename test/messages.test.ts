@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,4 +252,17 @@ test("say()'s voice is checked at its line, as the demo's is", () => {
   const own = createDemo({ tts: engine as never });
   assert.throws(() => own.say("hi", { voice: "mid" }), /unknown voice "mid". Voices: low, high/);
   own.say("hi", { voice: "high" });
+});
+
+test("a render() the script didn't await is waited for, and its failure prints at the line, not as an unhandled rejection", { timeout: 120_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-msg-"));
+  demo(dir, `const demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\ndemo.browser.goto("data:text/html,hi");\ndemo.cursor.moveTo("#nope");\ndemo.render("out.mp4");`);
+  const bad = await run(["check", "s.ts"], dir);
+  assert.equal(bad.code, 1);
+  assert.match(bad.output, /^reelscript: target "#nope" was not found[\s\S]*s\.ts:4/m);
+  assert.doesNotMatch(bad.output, /throw new Error|unhandled/i);
+  demo(dir, `const demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\ndemo.browser.goto("data:text/html,hi");\ndemo.render("out.mp4");`);
+  const ok = await run(["render", "s.ts"], dir);
+  assert.equal(ok.code, 0, ok.output);
+  assert.ok(existsSync(join(dir, "out.mp4")), "the video was written before the CLI exited");
 });

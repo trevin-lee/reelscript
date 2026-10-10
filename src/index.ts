@@ -15,6 +15,8 @@ import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import { checkOutputFormat, type GifOptions } from "./encoder.js";
 import { KOKORO_VOICES, type TtsEngine } from "./tts.js";
+import { DESK_VIEWS, type DeskOptions, type DeskView } from "./desk.js";
+import { KEYBOARD_LAYOUTS } from "./keyboard.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
@@ -58,7 +60,8 @@ function invalidChoice(action: Action): string | null {
     value !== undefined && !allowed.includes(value as string) ? `unknown ${name} ${JSON.stringify(value)} (use ${allowed.map((x) => `"${x}"`).join(", ")})` : null;
   return (
     one("ease", a.ease, EASES) ??
-    one("window", a.window, WINDOWS) ??
+    one("window", a.window, action.kind.startsWith("window.") ? [...WINDOWS, "keyboard"] : WINDOWS) ??
+    (action.kind === "desk.to" ? one("view", a.view, DESK_VIEWS) : null) ??
     (action.kind === "zoom.to" ? one("within", a.within, ["window"]) : null) ??
     (action.kind === "cursor.click" ? one("button", a.button, ["left", "right"]) ?? one("dialog", a.dialog, ["accept", "dismiss"]) : null)
   );
@@ -144,19 +147,30 @@ function invalidOption(o: DemoOptions): string | null {
   if (unknown) return unknown;
   // An option the theme can't apply fails, like any other that can't.
   if (o.theme === "bare" && o.menubar !== undefined && o.menubar !== false) return `the bare theme has no menu bar, so menubar does nothing there (it's the macos theme's)`;
-  if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
   // The demo's voice, here like every other option rather than at the first say() (or never, with none).
   if (o.voice !== undefined) {
     const problem = unknownVoice(o.voice, o.tts);
     if (problem) return problem;
   }
   // And inside the options that are objects themselves.
-  const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS]];
+  const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS], ["desk", o.desk, DESK_FIELDS]];
   for (const [name, value, fields] of inside) {
     const problem = value && typeof value === "object" ? unknownField(value, fields) : null;
     if (problem) return `${name}: ${problem}`;
   }
   const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
+  if (o.theme === "bare" && o.wallpaper !== undefined) return `the bare theme draws no desktop, so wallpaper does nothing there (it's the macos theme's)`;
+  if (o.wallpaper !== undefined && typeof o.wallpaper !== "string") return `wallpaper must be a CSS colour or gradient, or an image file's path, not ${shown(o.wallpaper)}`;
+  if (o.desk !== undefined) {
+    if (typeof o.desk !== "object" || o.desk === null) return `desk must be an object of options, not ${shown(o.desk)}`;
+    const d = o.desk as DeskOptions;
+    if (d.laptop !== undefined && !KEYBOARD_LAYOUTS.includes(d.laptop)) return `unknown desk laptop ${shown(d.laptop)} (use "mac" or "pc")`;
+    if (d.hands !== undefined && typeof d.hands !== "boolean") return `desk hands must be true or false, not ${shown(d.hands)}`;
+    for (const k of ["handColor", "surface"] as const) {
+      if (d[k] !== undefined && (typeof d[k] !== "string" || !/^(#[0-9a-f]{3,8}|[a-z]+|rgba?\(.*\)|hsla?\(.*\))$/i.test(d[k]!))) return `desk ${k} must be a CSS colour, not ${shown(d[k])}`;
+    }
+  }
+  if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
   const camera = o.camera;
   if (camera !== undefined && camera !== "manual" && camera !== "follow" && (typeof camera !== "object" || camera === null)) {
     return `unknown camera ${shown(camera)} (use "manual", "follow", or { scale, hold })`;
@@ -207,6 +221,9 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "cursor.click": { button: true, duration: true, dialog: true },
   "zoom.to": { target: true, scale: true, duration: true, ease: true, window: true, within: true },
   "zoom.out": { duration: true, ease: true },
+  "desk.to": { view: true, duration: true, ease: true },
+  "desk.out": { duration: true, ease: true },
+  "keyboard.open": { labels: true, x: true, y: true, width: true, height: true },
   type: { target: true, text: true, wpm: true, window: true },
   press: { key: true, window: true },
   wait: { ms: true },
@@ -254,6 +271,7 @@ const REQUIRED: Partial<Record<Action["kind"], string[]>> = {
   "browser.mockAPI": ["pattern"],
   "cursor.moveTo": ["target"],
   "zoom.to": ["target"],
+  "desk.to": ["view"],
   type: ["text"],
   press: ["key"],
   wait: ["ms"],
@@ -280,7 +298,9 @@ function missingField(action: Action): string | null {
 const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   session: true, clock: true, timezone: true, theme: true, viewport: true, desktop: true, fps: true, camera: true, deterministic: true,
   gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
+  desk: true, wallpaper: true,
 };
+const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, surface: true };
 
 const CAMERA_FIELDS: { readonly [P in keyof FollowCamera]-?: true } = { scale: true, hold: true, holdMs: true };
 const MENUBAR_FIELDS: { readonly [P in keyof Exclude<Menubar, false>]-?: true } = { app: true, clockText: true, clock: true };
@@ -334,6 +354,7 @@ export type { Action, CallContext, Target } from "./timeline.js";
 export type { Ease } from "./easing.js";
 export type { Menubar, ThemeName } from "./theme.js";
 export type { RenderResult, FollowCamera } from "./renderer.js";
+export type { DeskOptions, DeskView } from "./desk.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
@@ -405,6 +426,28 @@ export interface DemoOptions {
    * "reelscript", and the demo's `clock`.
    */
   menubar?: Menubar;
+  /**
+   * The desk the keyboard window and the desk views show: the laptop ("mac"
+   * or "pc"), whether the hands show, their colour, and the desk's surface.
+   */
+  desk?: DeskOptions;
+  /**
+   * The macOS theme's wallpaper: a CSS colour or gradient ("#1c1c1e",
+   * "linear-gradient(…)"), or an image file (.png, .jpg, .webp, .gif,
+   * .avif) relative to the script, shown to cover the desktop.
+   */
+  wallpaper?: string;
+}
+
+export interface KeyboardOptions {
+  /** Show each chord pressed as a label under the keys ("⌘ ⇧ P"). Default: true */
+  labels?: boolean;
+}
+
+export interface DeskViewOptions {
+  /** Flight time, ms. Default: 1400 */
+  duration?: number;
+  ease?: Ease;
 }
 
 export interface MoveOptions {
@@ -603,7 +646,7 @@ class Zoom {
 class Win {
   constructor(
     protected demo: Demo,
-    readonly id: "browser" | "terminal" | "editor",
+    readonly id: "browser" | "terminal" | "editor" | "keyboard",
   ) {}
 
   /** Bring this window to the front and direct typing to it. */
@@ -683,6 +726,41 @@ class TerminalWindow extends Win {
   }
 }
 
+class KeyboardWindow extends Win {
+  constructor(demo: Demo) {
+    super(demo, "keyboard");
+  }
+
+  /**
+   * Open the keyboard window: the desk's keyboard with the hands on it, as a
+   * panel on the desktop (lower right, unless placed). While it's open, every
+   * key the demo presses or types plays on it. It comes to the front but never
+   * takes typing: keys still go to the window that had them.
+   */
+  open(opts: KeyboardOptions & WindowGeometry = {}): void {
+    this.demo._push({ kind: "keyboard.open" }, opts);
+  }
+}
+
+/** The desk views: the whole frame becomes the desk, with the demo on the laptop's screen. */
+class Desk {
+  constructor(private demo: Demo) {}
+
+  /**
+   * Fly to a view of the desk: "screen" (the laptop's screen, a little from
+   * the side), "desk" (the laptop and the hands) or "keyboard" (over the
+   * keys). Runs alongside following actions, like a zoom.
+   */
+  to(view: DeskView, opts: DeskViewOptions = {}): void {
+    this.demo._push({ kind: "desk.to", view }, opts);
+  }
+
+  /** Fly back to the flat desktop. */
+  out(opts: DeskViewOptions = {}): void {
+    this.demo._push({ kind: "desk.out" }, opts);
+  }
+}
+
 class EditorWindow extends Win {
   constructor(demo: Demo) {
     super(demo, "editor");
@@ -749,6 +827,8 @@ export class Demo {
   readonly browser = new Browser(this);
   readonly terminal = new TerminalWindow(this);
   readonly editor = new EditorWindow(this);
+  readonly keyboard = new KeyboardWindow(this);
+  readonly desk = new Desk(this);
 
   private actions: Action[] = [];
   /** Where in the user's script each action was created, for error messages. */
@@ -766,6 +846,15 @@ export class Demo {
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${this.createdAt} (createDemo)`);
     if (options.camera && typeof options.camera === "object") noteRenamed(options.camera, "createDemo", this.createdAt);
     if (options.menubar) noteRenamed(options.menubar, "createDemo", this.createdAt);
+  }
+
+  /** The wallpaper as the theme takes it: an image file resolved against the script (an error at the createDemo line if it's missing), or CSS as given. */
+  private wallpaper(): string | undefined {
+    const w = this.options.wallpaper;
+    if (w === undefined || !/\.(png|jpe?g|webp|gif|avif)$/i.test(w)) return w;
+    const file = fromScript(w);
+    if (!existsSync(file)) throw new Error(`reelscript: there's no wallpaper image at ${file} (a wallpaper is relative to the script)\n  at ${this.createdAt} (createDemo)`);
+    return file;
   }
 
   /** The session file to start signed in with, or an error at the createDemo line. */
@@ -1026,6 +1115,8 @@ export class Demo {
       clock: this.options.clock,
       timezone: this.options.timezone,
       menubar: this.options.menubar,
+      desk: this.options.desk,
+      wallpaper: this.wallpaper(),
       fps: this.options.fps,
       viewport: this.options.viewport,
       desktop: this.options.desktop,
@@ -1054,7 +1145,16 @@ export class Demo {
    * `record`, which set REELSCRIPT_CHECK, REELSCRIPT_SNAPSHOT_AT,
    * REELSCRIPT_RECORD and REELSCRIPT_OUT.
    */
-  async render(outPath: string): Promise<RenderResult> {
+  render(outPath: string): Promise<RenderResult> {
+    // Not async: the script gets the run itself, which the CLI waits for, not a wrapper that would reject on its own.
+    const run = this.renderNow(outPath);
+    // The CLI waits for every run a script starts, so a render() that isn't awaited still finishes, and fails, in its turn.
+    const g = globalThis as { __reelscript_pending?: Promise<unknown>[] };
+    (g.__reelscript_pending ??= []).push(run);
+    return run;
+  }
+
+  private async renderNow(outPath: string): Promise<RenderResult> {
     if (process.env.REELSCRIPT_CHECK) return this.checkTimeline(outPath);
     noteRun("render");
     if (process.env.REELSCRIPT_RECORD) {
@@ -1106,6 +1206,8 @@ export class Demo {
       pronunciations: this.options.pronunciations,
       address: this.options.address,
       menubar: this.options.menubar,
+      desk: this.options.desk,
+      wallpaper: this.wallpaper(),
       clock: this.options.clock,
       timezone: this.options.timezone,
       snapshotAt,

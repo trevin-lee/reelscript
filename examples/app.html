@@ -90,6 +90,9 @@
   const $ = (s) => document.querySelector(s);
   const open = (v) => { $("#modal").classList.toggle("open", v); $("#backdrop").classList.toggle("open", v); if (v) setTimeout(() => $("#project-name").focus(), 200); };
   $("#new-project").addEventListener("click", () => open(true));
+  // ⌘N opens the dialog; Enter in the name field creates the project.
+  window.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") { e.preventDefault(); open(true); } });
+  $("#project-name").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#create").click(); });
   $("#cancel").addEventListener("click", () => open(false));
   $("#backdrop").addEventListener("click", () => open(false));
   $("#create").addEventListener("click", () => {
