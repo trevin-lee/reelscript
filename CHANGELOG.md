@@ -10,6 +10,7 @@
 - `createDemo({ wallpaper })`: the macOS theme's desktop as a CSS colour or gradient, or an image file relative to the script.
 - The hands are the WebXR generic hand models (MIT, in assets/hands), posed by reelscript; Three.js is a new dependency.
 - `examples/keyboard.ts`; ⌘N opens the sample app's New project dialog, and Enter in the name field creates the project.
+- The drawn caret sits after the last character in a field sized to its text (`field-sizing: content`), where it was drawn a line below, centred under centred text.
 - A script that calls `render()` without `await` is waited for anyway: its render finishes, and a failure prints as reelscript's, at the line, where it was Node's unhandled-rejection dump.
 
 ## 0.5.2

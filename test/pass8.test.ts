@@ -127,3 +127,28 @@ test("an extension folder beside the script can be named without ./", { timeout:
   const r = await run(["check", "s.ts"], dir);
   assert.equal(r.code, 0, r.output);
 });
+
+test("the drawn caret sits after the last character in a field sized to its text, centred or right-aligned", { timeout: 60_000 }, async () => {
+  const fields = ["center", "right", "left"]
+    .map((align) => `<textarea id=${align} rows=1 style="field-sizing:content;text-align:${align};font:16px sans-serif;margin:30px;display:block">API gateway</textarea>`)
+    .join("");
+  await withClock(fields, async (page, advance) => {
+    for (const align of ["center", "right", "left"]) {
+      await page.focus(`#${align}`);
+      await page.evaluate((id) => {
+        const el = document.getElementById(id) as HTMLTextAreaElement;
+        el.setSelectionRange(el.value.length, el.value.length);
+      }, align);
+      await advance(16);
+      const { caret, text } = await page.evaluate((id) => {
+        const el = document.getElementById(id) as HTMLTextAreaElement;
+        const c = [...document.querySelectorAll("div[aria-hidden=true]")].find((d) => (d as HTMLElement).style.position === "fixed") as HTMLElement;
+        const r = el.getBoundingClientRect();
+        return { caret: { left: parseFloat(c.style.left), top: parseFloat(c.style.top), height: parseFloat(c.style.height) }, text: { top: r.top, bottom: r.bottom, right: r.right } };
+      }, align);
+      // A "." mark wrapped onto a second line: the caret was drawn below the text, centred under it.
+      assert.ok(caret.top >= text.top - 1 && caret.top + caret.height <= text.bottom + 1, `${align}: on the text's line, not below it (${JSON.stringify({ caret, text })})`);
+      assert.ok(caret.left >= text.right - 6 && caret.left <= text.right + 1, `${align}: right after the last character (${caret.left} vs field's right edge ${text.right})`);
+    }
+  });
+});

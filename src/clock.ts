@@ -219,11 +219,16 @@ __PIN_NOW__
       "fontFamily", "textAlign", "textTransform", "textIndent", "letterSpacing", "wordSpacing", "tabSize"]) mirror.style[p] = cs[p];
     Object.assign(mirror.style, { position: "absolute", visibility: "hidden", top: "0", left: "-99999px", overflow: "hidden",
       whiteSpace: isInput ? "pre" : "pre-wrap", overflowWrap: isInput ? "normal" : "break-word" });
+    // Chromium keeps room for its caret at the end of a line; without it, the text of a field sized to
+    // fit (field-sizing: content) wraps in the mirror by a fraction of a pixel and the caret drops a line.
+    mirror.style.width = "calc(" + cs.width + " + 1px)";
     const value = el.type === "password" ? "•".repeat(el.value.length) : el.value;
     const at = el.selectionEnd ?? value.length;
     mirror.textContent = value.slice(0, at);
     const mark = document.createElement("span");
-    mark.textContent = value.slice(at) || ".";
+    // At the end, a mark with no width: a "." didn't fit in a field sized to its text (field-sizing: content),
+    // wrapped, and put the caret a line down; it also moved centred text by half its width.
+    mark.textContent = value.slice(at) || "\u200b";
     mirror.appendChild(mark);
     document.documentElement.appendChild(mirror);
     const left = mark.offsetLeft, top = mark.offsetTop;
