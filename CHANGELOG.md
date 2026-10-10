@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- An option named like the call's own argument no longer replaces it: `moveTo("#a", { target: "#b" })` went to `#b`, `terminal.run("ls", { command })` ran the option's command, and `{ kind }` could turn a step into another. It fails at the line.
+- More options a step can't use fail at their line, as the rest have since 0.5.0: `type`, `press` and `scroll` with `window: "terminal"` (and `scroll` with `"editor"`), which always failed at render; `speed` or `maxGap` on declared `output`, and `duration` on timed or recorded output, which were ignored.
+- `say({ voice })` is checked at its line, as the demo's `voice` is; it failed at render.
+- MCP: `check_script` and `render_script` take `scripts`, a list, as `record_script` and the CLI do; `preview_frame`'s `width` is `imageWidth`, since it scales the returned image down, where `inspect_page`'s `width` is the viewport; every path parameter says it's relative to the working directory.
+- README: a local page shows a blank address pill, and `address` gets its `file://` URL; `demo.check()` fails at its line under `render`, `preview` and `record` (it said the old forms all warn); the CLI block is `--help`'s text again.
+
 ## 0.5.0
 
 **Changes that can affect existing scripts**

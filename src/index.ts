@@ -130,6 +130,14 @@ function invalidValue(options: object): string | null {
   return null;
 }
 
+/** What's wrong with a voice, if anything: not a name, or not one the engine has (Kokoro's, without an engine). */
+function unknownVoice(voice: unknown, tts: TtsEngine | undefined): string | null {
+  if (typeof voice !== "string") return `voice must be a voice's name, not ${JSON.stringify(voice)}`;
+  const voices = tts ? tts.voices : KOKORO_VOICES;
+  if (voices && !voices.includes(voice)) return `unknown voice "${voice}". Voices: ${voices.join(", ")}`;
+  return null;
+}
+
 /** What's wrong with createDemo()'s options, if anything: what a render would fail on, found before it starts. */
 function invalidOption(o: DemoOptions): string | null {
   const unknown = unknownField(o, DEMO_FIELDS);
@@ -139,9 +147,8 @@ function invalidOption(o: DemoOptions): string | null {
   if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
   // The demo's voice, here like every other option rather than at the first say() (or never, with none).
   if (o.voice !== undefined) {
-    const voices = o.tts ? o.tts.voices : KOKORO_VOICES;
-    if (typeof o.voice !== "string") return `voice must be a voice's name, not ${JSON.stringify(o.voice)}`;
-    if (voices && !voices.includes(o.voice)) return `unknown voice "${o.voice}". Voices: ${voices.join(", ")}`;
+    const problem = unknownVoice(o.voice, o.tts);
+    if (problem) return problem;
   }
   // And inside the options that are objects themselves.
   const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS]];
@@ -564,7 +571,7 @@ class Cursor {
 
   /** Glide the cursor to a selector or point. */
   moveTo(target: Target, opts: MoveOptions = {}): void {
-    this.demo._push({ kind: "cursor.moveTo", target, ...opts });
+    this.demo._push({ kind: "cursor.moveTo", target }, opts);
   }
 
   /**
@@ -575,7 +582,7 @@ class Cursor {
    * confirm or prompt the click opens, and says it's meant (no warning).
    */
   click(opts: { button?: "left" | "right"; duration?: number; dialog?: "accept" | "dismiss" } = {}): void {
-    this.demo._push({ kind: "cursor.click", ...opts });
+    this.demo._push({ kind: "cursor.click" }, opts);
   }
 }
 
@@ -584,12 +591,12 @@ class Zoom {
 
   /** Animate a zoom centered on a selector or point. Runs alongside following actions. */
   to(target: Target, opts: ZoomOptions = {}): void {
-    this.demo._push({ kind: "zoom.to", target, ...opts });
+    this.demo._push({ kind: "zoom.to", target }, opts);
   }
 
   /** Animate back to the whole desktop. Runs alongside following actions. */
   out(opts: Pick<ZoomOptions, "duration" | "ease"> = {}): void {
-    this.demo._push({ kind: "zoom.out", ...opts });
+    this.demo._push({ kind: "zoom.out" }, opts);
   }
 }
 
@@ -611,7 +618,7 @@ class Win {
 
   /** Move or resize this window. */
   place(geometry: WindowGeometry): void {
-    this.demo._push({ kind: "window.place", window: this.id, ...geometry });
+    this.demo._push({ kind: "window.place", window: this.id }, geometry);
   }
 }
 
@@ -625,12 +632,12 @@ class Browser extends Win {
    * Optional: goto() opens it if it isn't open yet.
    */
   open(geometry: WindowGeometry = {}): void {
-    this.demo._push({ kind: "browser.open", ...geometry });
+    this.demo._push({ kind: "browser.open" }, geometry);
   }
 
   /** Navigate the browser window (opening it if needed) and bring it to the front. */
   goto(url: string, opts: GotoOptions = {}): void {
-    this.demo._push({ kind: "browser.goto", url, ...opts });
+    this.demo._push({ kind: "browser.goto", url }, opts);
   }
 
   /**
@@ -640,7 +647,7 @@ class Browser extends Win {
    * One that no request matched by the end is a warning.
    */
   mockAPI(pattern: string, response: unknown, opts: MockOptions = {}): void {
-    this.demo._push({ kind: "browser.mockAPI", pattern, response, ...opts });
+    this.demo._push({ kind: "browser.mockAPI", pattern, response }, opts);
   }
 }
 
@@ -651,7 +658,7 @@ class TerminalWindow extends Win {
 
   /** Open a terminal window on the desktop (beside or over the browser) and focus it. */
   open(opts: TerminalOptions & WindowGeometry = {}): void {
-    this.demo._push({ kind: "terminal.open", ...opts });
+    this.demo._push({ kind: "terminal.open" }, opts);
   }
 
   /**
@@ -659,7 +666,7 @@ class TerminalWindow extends Win {
    * without it, the output is replayed from a recording (see `reelscript record`).
    */
   run(command: string, opts: RunOptions = {}): void {
-    this.demo._push({ kind: "terminal.run", command, ...opts });
+    this.demo._push({ kind: "terminal.run", command }, opts);
   }
 
   /**
@@ -672,7 +679,7 @@ class TerminalWindow extends Win {
     text: string,
     opts: { duration?: number; prompt?: boolean | string; events?: [number, string][]; speed?: number; maxGap?: number; /** @deprecated Renamed to maxGap. */ maxGapMs?: number } = {},
   ): void {
-    this.demo._push({ kind: "terminal.print", text, ...opts });
+    this.demo._push({ kind: "terminal.print", text }, opts);
   }
 }
 
@@ -683,22 +690,22 @@ class EditorWindow extends Win {
 
   /** Open a real VS Code (code-server) window on a workspace folder and focus it. */
   open(opts: EditorOptions & WindowGeometry = {}): void {
-    this.demo._push({ kind: "editor.open", ...opts });
+    this.demo._push({ kind: "editor.open" }, opts);
   }
 
   /** Open a file through Quick Open (⌘P), typing its name. */
   openFile(path: string, opts: TypeOptions = {}): void {
-    this.demo._push({ kind: "editor.openFile", path, ...opts });
+    this.demo._push({ kind: "editor.openFile", path }, opts);
   }
 
   /** Run a command through the Command Palette, typing its name. */
   command(command: string, opts: TypeOptions = {}): void {
-    this.demo._push({ kind: "editor.command", command, ...opts });
+    this.demo._push({ kind: "editor.command", command }, opts);
   }
 
   /** Type into the editor at the caret. */
   type(text: string, opts: TypeOptions = {}): void {
-    this.demo._push({ kind: "type", text, ...opts, window: "editor" });
+    this.demo._push({ kind: "type", text, window: "editor" }, opts);
   }
 
   /** Selector for a file or folder row in the Explorer, by its name ("app.ts"), or its folder and name ("src/app.ts"), for cursor.moveTo(). */
@@ -773,8 +780,14 @@ export class Demo {
   }
 
   /** @internal */
-  _push(action: Action): void {
+  _push(base: { kind: Action["kind"] } & Record<string, unknown>, opts: object = {}): void {
     const source = callerLocation();
+    // An option named like the call's own argument, or like kind, would replace it: moveTo("#a", { target: "#b" }) went to #b.
+    const taken = Object.keys(opts).filter((k) => k in base);
+    if (taken.length) {
+      throw new Error(`reelscript: ${taken.join(", ")} ${taken.length === 1 ? "is" : "are"} set by the call itself, not by its options\n  at ${source} (${base.kind})`);
+    }
+    const action = { ...base, ...opts } as Action;
     // A misspelt choice or an impossible number fails here, where the script queued it, not deep in a render.
     const problem = unknownField(action, ACTION_FIELDS[action.kind] ?? {}) ?? missingField(action) ?? invalidChoice(action) ?? invalidNumber(action) ?? invalidValue(action);
     if (problem) throw new Error(`reelscript: ${problem}\n  at ${source} (${action.kind})`);
@@ -805,6 +818,22 @@ export class Demo {
       this.term = null;
       this.termOpened = undefined;
       return null;
+    }
+    if (a.kind === "type" && a.window === "terminal") {
+      return `typing into the terminal window isn't shown; use demo.terminal.run() or terminal.print(), or name the window the field is in: { window: "browser" }`;
+    }
+    if (a.kind === "press" && a.window === "terminal") return `keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`;
+    if (a.kind === "scroll" && a.window === "terminal") return `demo.scroll() scrolls web pages; a terminal scrolls as its output grows`;
+    if (a.kind === "scroll" && a.window === "editor") return `demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("Meta+ArrowDown") for the end of the file`;
+    if (a.kind === "say" && a.voice !== undefined) return unknownVoice(a.voice, this.options.tts);
+    if (a.kind === "terminal.run" || a.kind === "terminal.print") {
+      // Declared output is spread over duration; recorded and timed output keep their own times, played at speed with gaps capped.
+      const declared = a.kind === "terminal.run" ? o.output !== undefined : o.events === undefined;
+      const playback = ["speed", "maxGap", "maxGapMs"].filter((k) => o[k] !== undefined);
+      if (declared && playback.length) {
+        return `${playback.join(", ")} ${playback.length === 1 ? "plays" : "play"} recorded or timed output, which has its own times; declared output is spread over duration`;
+      }
+      if (!declared && o.duration !== undefined) return `duration spreads declared output over that time; recorded and timed output keep their own times`;
     }
     if (a.kind === "terminal.run") {
       const given = o.output !== undefined || o.events !== undefined;
@@ -838,12 +867,12 @@ export class Demo {
 
   /** Type into a field with accelerated, evenly paced keystrokes. */
   type(target: string, text: string, opts: DemoTypeOptions = {}): void {
-    this._push({ kind: "type", target, text, ...opts });
+    this._push({ kind: "type", target, text }, opts);
   }
 
   /** Press a key or chord, e.g. "Enter" or "Meta+K", in the focused window or the one named by `window` (it comes to the front). */
   press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): void {
-    this._push({ kind: "press", key, ...opts });
+    this._push({ kind: "press", key }, opts);
   }
 
   wait(ms: number): void {
@@ -856,8 +885,8 @@ export class Demo {
    * position on the page, e.g. `scroll({ by: 600 })` or `scroll({ to: 0 })`.
    */
   scroll(target: string | { by?: number; to?: number }, opts: ScrollOptions = {}): void {
-    if (typeof target === "string") this._push({ kind: "scroll", target, ...opts });
-    else this._push({ kind: "scroll", ...target, ...opts });
+    if (typeof target === "string") this._push({ kind: "scroll", target }, opts);
+    else this._push({ kind: "scroll", ...target }, opts);
   }
 
   /**
@@ -878,7 +907,7 @@ export class Demo {
    * to load, fetch or animate gets it without its loading being filmed.
    */
   waitFor(selector: string, opts: WaitForOptions = {}): void {
-    this._push({ kind: "waitFor", target: selector, ...opts });
+    this._push({ kind: "waitFor", target: selector }, opts);
   }
 
   /**
@@ -887,7 +916,7 @@ export class Demo {
    * the timeline until speech ends.
    */
   say(text: string, opts: SayOptions = {}): void {
-    this._push({ kind: "say", text, ...opts });
+    this._push({ kind: "say", text }, opts);
   }
 
   /** Hold until all narration queued so far has finished. */
@@ -968,14 +997,6 @@ export class Demo {
     return files;
   }
 
-  /**
-   * Run the whole timeline against the real app without capturing or
-   * encoding: every selector must resolve, every file and command typed into
-   * the editor must be found, and every terminal recording must exist.
-   * Narration isn't synthesized: a line spoken in an earlier render keeps its
-   * real length, and a new one's is estimated. Throws on the first failure
-   * with the script location.
-   */
   /**
    * @deprecated End the script with `demo.render(path)`, which `reelscript check` checks.
    * This still works under `reelscript check`, with a warning; it's removed in 1.0.

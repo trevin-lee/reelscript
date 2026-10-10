@@ -84,7 +84,7 @@ The example drives a small dashboard app that ships with the repo, so it's fully
 
 A script creates a demo with `createDemo()`, queues actions, and ends with `await demo.render(path)`. Steps return nothing and only queue: nothing runs until `render()` plays the queue (under `check`, `preview` and `record` too), so `render()` is the one call to await. A step's own mistake, like a misspelt option, throws at its line right away; what happens when it runs (a selector that matches nothing) fails at `render()` or `check`, so a `try`/`catch` around a step can't handle it. For work that depends on what the page shows, use `call()`, which runs off camera at its point in the timeline. A few rules hold everywhere:
 
-- **Renamed options.** `goto({ settle })`, `maxGapMs`, camera `holdMs` and `menubar.clock` are now `hold`, `maxGap`, `hold` and `clockText`, and `demo.check()` gives way to `demo.render()`, which `reelscript check` checks. The old forms work until 1.0, with a warning at the line, so `--strict` finds them.
+- **Renamed options.** `goto({ settle })`, `maxGapMs`, camera `holdMs` and `menubar.clock` are now `hold`, `maxGap`, `hold` and `clockText`. The old names work until 1.0, with a warning at the line, so `--strict` finds them. `demo.check()` gives way to `demo.render()`, which `reelscript check` checks: under `reelscript check` it still runs, with the same warning, and under the other commands it fails at its line.
 - **Paths in a script are relative to the script's folder**, wherever you run it from: the render output, `session`, `recordingsDir`, an editor's `workspace` and `extensions`, and a local page in `browser.goto("./app.html")`, which reelscript serves from this machine over http so it behaves as it would on a site (its `fetch("/api/...")` reaches `mockAPI`, its cookies stick, its modules load) (anything with a scheme, like `https://` or `file://`, is a URL as is, and a path from the root, `goto("/pricing")`, is a page on the site the browser is showing, as it is in `mockAPI`). Paths you pass on the command line are relative to your working directory. The exception is Playwright's own calls inside `demo.call()` (`page.setInputFiles`, `page.screenshot`), which take paths relative to the working directory; name a file beside the script with `fileURLToPath(new URL("data.csv", import.meta.url))`, for example to choose a file for an upload, which is Chromium's own dialog and isn't drawn: `demo.call(({ page }) => page!.setInputFiles("#file", fileURLToPath(new URL("data.csv", import.meta.url))))`.
 - **Targets are [Playwright selectors](https://playwright.dev/docs/locators)**: CSS (`#create`), `text=Create`, `role=button[name="Create"]`, and so on. Prefer ids and `data-testid` attributes; they survive redesigns. A target means its first visible match; when several visible elements match, reelscript warns at that line, since the first may not be the one you meant. A target can also be a point, `{ x, y }`, in the window's own coordinates. A target is in the window's own page, not inside an iframe; fill a field in an iframe (a payment form) off camera with `demo.call(({ page }) => page!.frameLocator("iframe#pay").locator("#card").fill("4242 4242 4242 4242"))`. A target counts as visible when a viewer could see it: an element inside something faded all the way out (a closed modal at `opacity: 0`) isn't, and `demo.type()` fails on a field that can't take the keyboard (disabled, read-only, not a text field).
 - **What you aim at must be on screen, and a click must land on it.** Moving to or zooming on an element outside the visible part of its window fails, with a hint to `demo.scroll()` to it first. A click on an element covered by another window or by something in the page (an overlay, a toast) fails at its line instead of clicking whatever is on top.
@@ -253,9 +253,9 @@ npx @reelscript/cli warmup browser   # once: the browser it drives
 | `reelscript_docs` | This README. |
 | `inspect_page` | Visible buttons, links, and inputs on a URL or a local page, each with a suggested selector and position, plus a screenshot, as a demo's browser sees them. Takes a `session` for pages behind a sign-in, and a `clock` (`"now"` or an ISO date) and `timezone` like a demo's. |
 | `record_script` | Runs scripts' real terminal commands and saves recordings; with `prune`, also removes recordings the listed scripts made and no longer use. Strict by default: a command that failed without the run's `exitCode` saying so fails it, and the previous recordings stay. |
-| `check_script` | Runs the timeline without rendering; passes, or names the script line that failed. Strict by default, as `check --strict` in CI: warnings fail too. |
-| `preview_frame` | The frame at a given second, as an image the agent can look at. |
-| `render_script` | The final `.mp4` or `.gif`. With `strict`, warnings fail and the previous video stays. |
+| `check_script` | Runs the scripts' timelines without rendering; passes, or names the script line that failed. Strict by default, as `check --strict` in CI: warnings fail too. |
+| `preview_frame` | The frame at a given second, as an image the agent can look at (`imageWidth` scales it down). |
+| `render_script` | The final `.mp4` or `.gif` of each script. With `strict`, warnings fail and the previous video stays. |
 
 `check_script`, `preview_frame`, and `render_script` click through your real app and run the script's `call()` code, and `record_script` runs shell commands, so none of them is marked read-only.
 
@@ -265,16 +265,18 @@ npx @reelscript/cli warmup browser   # once: the browser it drives
 reelscript render  <script> [more...] [--out demo.mp4] [--strict]
                                                  render scripts to .mp4 or .gif
 reelscript preview <script> [--at <seconds>] [--out frame.png]
-                                                 render one frame as a PNG
-                                                 (default: preview-<seconds>s.png here)
-reelscript check   <script> [more...] [--strict]  run the timeline without rendering; --strict
-                                                 fails on warnings too (a 404, an unused mock)
+                                                 render one frame as a PNG (default:
+                                                 preview-<seconds>s.png here)
+reelscript check   <script> [more...] [--strict]  run the timeline without rendering; fail on
+                                                 anything missing, with the script line;
+                                                 --strict fails on warnings too (for CI)
 reelscript record  <script> [more...] [--prune] [--strict]
-                                                 run terminal commands for real and save recordings
+                                                 run terminal commands for real and save
+                                                 recordings; --prune deletes unused ones
 reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
 reelscript warmup  [browser] [narration] [editor] [--with-deps]
-                                                   download the browser, voice model and VS Code;
-                                                   --with-deps adds Chromium's Linux libraries
+                                                 download the browser, voice model and VS Code;
+                                                 --with-deps adds Chromium's Linux libraries
 reelscript cache   [clear <part...|all>]         show or clear what's cached on disk
 reelscript mcp                                   MCP server (stdio) for coding agents
 reelscript --version
@@ -347,7 +349,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` or `"now"` gives the real time. |
 | `timezone` | `"UTC"` | IANA timezone for the page and the menu bar. |
 | `session` | none | A saved login from `reelscript login`, relative to the script. |
-| `address` | none | `(url) => string`, rewriting what the browser's address pill shows. |
+| `address` | none | `(url) => string`, rewriting what the browser's address pill shows. A local page (`goto("./app.html")`) shows a blank pill, and `address` gets its `file://` URL: `address: () => "app.acme.com"` names a site. |
 | `menubar` | `{ app: "reelscript" }` | The macOS menu bar's text: `app`, and `clockText` for what its clock shows, which is the demo's `clock` unless you set it. `false` removes the bar. |
 | `voice` | `"af_heart"` | Narration voice. With your own `tts` engine, the default is its `defaultVoice`, or the first of its `voices`. |
 | `tts` | Kokoro | Voice engine; see Narration. |

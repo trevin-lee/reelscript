@@ -90,10 +90,10 @@ test("MCP check_script is strict by default, as CI's check --strict", { timeout:
   const client = new Client({ name: "reelscript-test", version: "0.0.0" });
   try {
     await client.connect(transport);
-    const strict = await client.callTool({ name: "check_script", arguments: { script: join(dir, "s.ts") } });
+    const strict = await client.callTool({ name: "check_script", arguments: { scripts: [join(dir, "s.ts")] } });
     assert.equal(strict.isError, true);
     assert.match(((strict.content as { text?: string }[])[0].text ?? ""), /--strict makes a run with warnings fail/);
-    const loose = await client.callTool({ name: "check_script", arguments: { script: join(dir, "s.ts"), strict: false } });
+    const loose = await client.callTool({ name: "check_script", arguments: { scripts: [join(dir, "s.ts")], strict: false } });
     assert.equal(loose.isError, false, JSON.stringify(loose.content));
   } finally {
     await client.close();

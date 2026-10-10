@@ -212,3 +212,44 @@ test("an option a step can't use fails at its line instead of doing nothing", ()
   quiet.terminal.open({ prompt: "" });
   quiet.terminal.print("", { events });
 });
+
+test("an option can't replace the call's own argument, or its kind", () => {
+  const demo = createDemo();
+  const taken = /is set by the call itself, not by its options/;
+  assert.throws(() => demo.cursor.moveTo("#a", { target: "#b" } as never), taken);
+  assert.throws(() => demo.terminal.run("ls", { command: "rm -rf x" } as never), taken);
+  assert.throws(() => demo.editor.command("x", { kind: "terminal.run" } as never), /kind is set by the call itself/);
+  assert.throws(() => demo.editor.type("x", { window: "browser" } as never), /window is set by the call itself/);
+  assert.throws(() => demo.browser.place({ window: "terminal", x: 0 } as never), /window is set by the call itself/);
+  demo.cursor.moveTo("#a", { duration: 100 });
+  assert.deepEqual(demo.getTimeline().at(-1), { kind: "cursor.moveTo", target: "#a", duration: 100 });
+});
+
+test("a step that can't use the terminal, or an option its output can't use, fails at its line", () => {
+  const demo = createDemo();
+  demo.terminal.open({ prompt: "" });
+  assert.throws(() => demo.type("#f", "x", { window: "terminal" }), /typing into the terminal window isn't shown/);
+  assert.throws(() => demo.press("Enter", { window: "terminal" }), /keys pressed in the terminal window aren't shown/);
+  assert.throws(() => demo.scroll({ by: 10 }, { window: "terminal" }), /a terminal scrolls as its output grows/);
+  assert.throws(() => demo.scroll("#x", { window: "editor" }), /in the editor, use keys/);
+  const events: [number, string][] = [[0, "b\n"]];
+  assert.throws(() => demo.terminal.run("x", { output: "a\n", speed: 2 }), /speed plays recorded or timed output/);
+  assert.throws(() => demo.terminal.run("x", { output: "a\n", maxGap: 100 }), /maxGap plays recorded or timed output/);
+  assert.throws(() => demo.terminal.run("x", { events, duration: 100 }), /duration spreads declared output/);
+  assert.throws(() => demo.terminal.run("x", { duration: 100 }), /duration spreads declared output/);
+  assert.throws(() => demo.terminal.print("", { events, duration: 100 }), /duration spreads declared output/);
+  assert.throws(() => demo.terminal.print("more\n", { speed: 2 }), /speed plays recorded or timed output/);
+  demo.terminal.run("x", { output: "a\n", duration: 100 });
+  demo.terminal.run("y", { events, speed: 2, maxGap: 100 });
+  demo.terminal.run("z", { speed: 2 });
+});
+
+test("say()'s voice is checked at its line, as the demo's is", () => {
+  const demo = createDemo();
+  assert.throws(() => demo.say("hi", { voice: "af_hart" }), /unknown voice "af_hart"[\s\S]*\(say\)/);
+  demo.say("hi", { voice: "af_heart" });
+  const engine = { id: "x", voices: ["low", "high"], synthesize: async () => ({ samples: new Float32Array(0), sampleRate: 24000 }) };
+  const own = createDemo({ tts: engine as never });
+  assert.throws(() => own.say("hi", { voice: "mid" }), /unknown voice "mid". Voices: low, high/);
+  own.say("hi", { voice: "high" });
+});

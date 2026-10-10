@@ -52,7 +52,7 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
     assert.equal(nobody.isError, true);
     assert.match((nobody.content as Content)[0].text ?? "", new RegExp(`nothing is answering at 127\\.0\\.0\\.1:${closed}\\. Is the app running\\?`));
 
-    const ok = await client.callTool({ name: "check_script", arguments: { script: "examples/basic.ts" } });
+    const ok = await client.callTool({ name: "check_script", arguments: { scripts: ["examples/basic.ts"] } });
     assert.equal(ok.isError, false);
     assert.match((ok.content as Content)[0].text ?? "", /check passed/);
 
@@ -62,14 +62,14 @@ test("MCP server: docs, inspect, check, and preview work the way an agent uses t
       `import { createDemo } from "@reelscript/cli";\nconst demo = createDemo();\nawait demo.browser.goto(${JSON.stringify(app)});\nawait demo.cursor.moveTo("#nope");\nawait demo.render("out/never.mp4");\n`,
     );
     try {
-      const bad = await client.callTool({ name: "check_script", arguments: { script: broken } });
+      const bad = await client.callTool({ name: "check_script", arguments: { scripts: [broken] } });
       assert.equal(bad.isError, true);
       assert.match((bad.content as Content)[0].text ?? "", /#nope[\s\S]*\.mcp-broken\.ts:4/);
     } finally {
       rmSync(`${root}/${broken}`, { force: true });
     }
 
-    const frame = (await client.callTool({ name: "preview_frame", arguments: { script: "examples/terminal.ts", at: 2, width: 640 } })).content as Content;
+    const frame = (await client.callTool({ name: "preview_frame", arguments: { script: "examples/terminal.ts", at: 2, imageWidth: 640 } })).content as Content;
     const image = frame.find((c) => c.type === "image");
     assert.ok(image?.data && image.data.length > 1000, "preview returns a PNG");
     assert.doesNotMatch(frame.find((c) => c.type === "text")?.text ?? "", /wrote /, "and doesn't name the file it deleted");

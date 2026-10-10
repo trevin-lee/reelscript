@@ -137,8 +137,9 @@ test("cache: a models folder you chose can be cleared; a code-server you pointed
 test("renamed options work, and the old names still do", async () => {
   const { createDemo } = await import("../src/index.js");
   const d = createDemo({ camera: { hold: 800 } });
-  await d.terminal.run("x", { output: "y", maxGap: 300 });
-  await d.terminal.run("x", { output: "y", maxGapMs: 300 });
+  const events: [number, string][] = [[0, "y"]];
+  d.terminal.run("x", { events, maxGap: 300 });
+  d.terminal.run("x", { events, maxGapMs: 300 });
   await d.browser.goto("data:text/html,hi", { hold: 100 });
   await d.browser.goto("data:text/html,hi", { settle: 100 });
   const t = d.getTimeline();

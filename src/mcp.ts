@@ -235,17 +235,17 @@ export async function serve(): Promise<void> {
       description:
         "Run a script's whole timeline against the real app without rendering. Passes in seconds, or fails with the script line of the first step whose selector, command, or recording is missing.",
       inputSchema: {
-        script: z.string().describe("Path to the demo script, relative to the working directory"),
+        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts, relative to the working directory"),
         strict: z
           .boolean()
           .optional()
           .describe("Fail on warnings too (a page that answered 404, a mock no request used, an ambiguous target), as `reelscript check --strict` does in CI. Default true"),
       },
       // Not read-only: it clicks through the real app and runs the script's demo.call() code.
-      annotations: { readOnlyHint: false, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ script, strict = true }, { signal }) => {
-      const { code, output } = await runCli(["check", resolve(script), ...(strict ? ["--strict"] : [])], signal);
+    async ({ scripts, strict = true }, { signal }) => {
+      const { code, output } = await runCli(["check", ...scripts.map((s) => resolve(s)), ...(strict ? ["--strict"] : [])], signal);
       return { content: [text(output || (code === 0 ? "check passed" : "check failed"))], isError: code !== 0 };
     },
   );
@@ -256,20 +256,20 @@ export async function serve(): Promise<void> {
       title: "Preview one frame of a demo",
       description: "Render the single frame at a given time of a script and return it as an image, to judge framing, zoom, and timing without rendering the whole video.",
       inputSchema: {
-        script: z.string().describe("Path to the demo script"),
+        script: z.string().describe("Path to the demo script, relative to the working directory"),
         at: z.number().describe("Time in seconds"),
-        width: z.number().int().optional().describe("Resize the returned image to this width. Default 1280"),
+        imageWidth: z.number().int().positive().optional().describe("Width of the returned image: a wider frame is scaled down to it, never up. Default 1280"),
       },
       // Not read-only: the timeline up to that moment runs against the real app.
-      annotations: { readOnlyHint: false, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async ({ script, at, width = 1280 }, { signal }) => {
+    async ({ script, at, imageWidth = 1280 }, { signal }) => {
       const dir = mkdtempSync(join(tmpdir(), "reelscript-preview-"));
       const out = join(dir, "frame.png");
       try {
         const { code, output } = await runCli(["preview", resolve(script), "--at", String(at), "--out", out], signal);
         if (code !== 0 || !existsSync(out)) return { content: [text(output || "preview failed")], isError: true };
-        const png = await sharp(out).resize({ width, withoutEnlargement: true }).png().toBuffer();
+        const png = await sharp(out).resize({ width: imageWidth, withoutEnlargement: true }).png().toBuffer();
         // The frame comes back as the image; the file the CLI wrote it to is deleted below, so don't name it.
         const said = output.split("\n").filter((line) => !line.startsWith("reelscript: wrote ")).join("\n").trim();
         return { content: [text(said || `the frame at ${at}s`), { type: "image", data: png.toString("base64"), mimeType: "image/png" }] };
@@ -283,15 +283,18 @@ export async function serve(): Promise<void> {
     "render_script",
     {
       title: "Render a demo",
-      description: "Render a script to a video or GIF (by extension). Returns the output path and stats.",
+      description: "Render scripts to video or GIF (by extension). Returns each output path and its stats.",
       inputSchema: {
-        script: z.string().describe("Path to the demo script"),
-        out: z.string().optional().describe("Output path (.mp4 or .gif). Default: whatever the script passes to render()"),
+        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts, relative to the working directory"),
+        out: z.string().optional().describe("Output path (.mp4 or .gif) for a single script. Default: whatever the script passes to render()"),
         strict: z.boolean().optional().describe("Fail on warnings, keeping the previous video, as `reelscript render --strict` does. Default false"),
       },
+      // Not read-only: it clicks through the real app and writes the video.
+      annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async ({ script, out, strict = false }, { signal }) => {
-      const args = ["render", resolve(script), ...(strict ? ["--strict"] : [])];
+    async ({ scripts, out, strict = false }, { signal }) => {
+      if (out && scripts.length > 1) return { content: [text("out names one video; render several scripts without it")], isError: true };
+      const args = ["render", ...scripts.map((s) => resolve(s)), ...(strict ? ["--strict"] : [])];
       if (out) args.push("--out", resolve(out));
       const { code, output } = await runCli(args, signal);
       return { content: [text(output || (code === 0 ? "rendered" : "render failed"))], isError: code !== 0 };
@@ -305,7 +308,7 @@ export async function serve(): Promise<void> {
       description:
         "Run, for real, every terminal.run command in the script that has no declared output, and save the recordings beside the script so renders can replay them. Runs shell commands on this machine.",
       inputSchema: {
-        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts"),
+        scripts: z.array(z.string()).min(1).describe("Paths to the demo scripts, relative to the working directory"),
         prune: z
           .boolean()
           .optional()
