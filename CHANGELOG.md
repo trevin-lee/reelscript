@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- `editor.openFile()` and `editor.command()` let VS Code finish a search before asking again. On a busy machine (a loaded CI runner, several code-servers at once) a Quick Open search could take longer than the pause before reelscript closed the palette and typed the name again, which started the search over; after ten seconds of that, `check` failed with "Quick Open found no file named …" for a file that exists. A search in flight is now waited for (up to 45 seconds), only VS Code's answers count toward the ten, and a timeout says VS Code hadn't found the file or command, not that it doesn't exist.
+- The README's API table gives each action option's default (`zoom.to`'s scale and duration, the follow camera's, `click`'s duration, `waitFor`'s timeout, the terminal's title, prompt and font size, …), as it did only for `createDemo`'s, and says a mock lasts to the end of the demo: it can be replaced, not removed. `reelscript --help` says `warmup` with no part downloads all three.
+
 ## 0.5.1
 
 - An option named like the call's own argument no longer replaces it: `moveTo("#a", { target: "#b" })` went to `#b`, `terminal.run("ls", { command })` ran the option's command, and `{ kind }` could turn a step into another. It fails at the line.

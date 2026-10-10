@@ -1323,30 +1323,50 @@ class Engine {
   private async expectQuickInputMatch(w: Win, text: string, isFile: boolean): Promise<void> {
     // VS Code can still be registering extensions (their commands) or indexing
     // files when the script gets here, and an open palette doesn't refresh its
-    // list. So if nothing matches after a moment, close it and ask again with
-    // the same text; this all happens between frames, so nothing extra is filmed.
-    const deadline = Date.now() + 10_000;
-    let asked = Date.now();
-    let label: string | null = null;
+    // list. So when it answers that nothing matches, close it and ask again with
+    // the same text, for up to ten seconds of answers; this all happens between
+    // frames, so nothing extra is filmed. While it's still searching (a slow
+    // start, a busy machine) it's left to finish: asking again would only start
+    // the search over, and never see its answer.
+    const started = Date.now();
+    let answeredMs = 0;
+    let last = started;
+    let asked = started;
+    let seen: { state: "closed" | "busy" | "answered"; label: string | null } = { state: "busy", label: null };
     for (;;) {
-      label = await w.page.evaluate(() => {
-        const row = document.querySelector(".quick-input-list .monaco-list-row.focused") ?? document.querySelector(".quick-input-list .monaco-list-row");
-        return row?.getAttribute("aria-label") ?? null;
+      seen = await w.page.evaluate(() => {
+        const widget = document.querySelector(".quick-input-widget") as HTMLElement | null;
+        if (!widget || getComputedStyle(widget).display === "none") return { state: "closed" as const, label: null };
+        const row = widget.querySelector(".quick-input-list .monaco-list-row.focused") ?? widget.querySelector(".quick-input-list .monaco-list-row");
+        const label = row?.getAttribute("aria-label") ?? null;
+        // Its progress bar shows a search in flight (after VS Code's own delay); no rows at all is one that hasn't answered yet.
+        const busy = !!widget.querySelector(".quick-input-progress .monaco-progress-container.active") || !label;
+        return { state: busy ? ("busy" as const) : ("answered" as const), label };
       });
-      if (label && quickInputMatches(label, text, isFile)) return;
-      if (Date.now() > deadline) break;
-      if (Date.now() - asked > 1200) {
-        await w.page.keyboard.press("Escape");
+      const now = Date.now();
+      if (seen.label && quickInputMatches(seen.label, text, isFile)) return;
+      if (seen.state === "answered") answeredMs += now - last;
+      last = now;
+      if (answeredMs > 10_000 || now - started > 45_000) break;
+      if (seen.state === "closed" || (seen.state === "answered" && now - asked > 1200)) {
+        if (seen.state !== "closed") await w.page.keyboard.press("Escape");
         await w.page.keyboard.press(isFile ? "Meta+P" : "F1");
         await w.page.keyboard.type(text);
-        asked = Date.now();
+        asked = last = Date.now();
       }
       await new Promise((r) => setTimeout(r, 100));
     }
+    if (seen.state !== "answered") {
+      // It never said: a timeout, not a verdict on the file or command.
+      throw new Error(
+        `reelscript: VS Code hadn't found ${isFile ? "a file" : "a command"} named "${text}" after ${Math.round((Date.now() - started) / 1000)}s: ` +
+          `it was still searching, so the machine may be too busy; it may well exist`,
+      );
+    }
     const what = isFile ? `Quick Open found no file named "${text}"` : `the Command Palette has no command named "${text}"`;
     let offered = "";
-    if (label && !/^No matching/i.test(label)) {
-      const row = label.split(", ")[0]; // "app.ts src" (a file and its folder) or "Format Document"
+    if (seen.label && !/^No matching/i.test(seen.label)) {
+      const row = seen.label.split(", ")[0]; // "app.ts src" (a file and its folder) or "Format Document"
       const space = row.indexOf(" ");
       offered = ` (VS Code offered "${isFile && space > 0 ? `${row.slice(space + 1)}/${row.slice(0, space)}` : row}" instead)`;
     }

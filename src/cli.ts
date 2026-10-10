@@ -57,7 +57,8 @@ usage:
                                                    recordings; --prune deletes unused ones
   reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
   reelscript warmup  [browser] [narration] [editor] [--with-deps]
-                                                   download the browser, voice model and VS Code;
+                                                   download the browser, voice model and VS Code
+                                                   (all three when no part is named, ~800 MB);
                                                    --with-deps adds Chromium's Linux libraries
   reelscript cache   [clear <part...|all>]         show or clear what's cached on disk
   reelscript mcp                                   MCP server (stdio) for coding agents
