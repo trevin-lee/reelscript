@@ -49,6 +49,7 @@ test("the keyboard window and the desk views queue like any window and view, and
   d.desk.to("desk", { duration: 500 });
   d.desk.to("float", { orbit: -30, tilt: 10, distance: 1.2 });
   d.desk.to("desk", { hands: false });
+  d.desk.to("float", { ipad: false, orbit: 360 });
   d.desk.lid(0, { duration: 900 });
   d.desk.out();
   d.keyboard.place({ width: 400 });
@@ -58,6 +59,7 @@ test("the keyboard window and the desk views queue like any window and view, and
     { kind: "desk.to", view: "desk", duration: 500 },
     { kind: "desk.to", view: "float", orbit: -30, tilt: 10, distance: 1.2 },
     { kind: "desk.to", view: "desk", hands: false },
+    { kind: "desk.to", view: "float", ipad: false, orbit: 360 },
     { kind: "desk.lid", degrees: 0, duration: 900 },
     { kind: "desk.out" },
     { kind: "window.place", window: "keyboard", width: 400 },
@@ -68,6 +70,7 @@ test("the keyboard window and the desk views queue like any window and view, and
   assert.throws(() => d.desk.to("desk", { distance: 0 }), /distance must be a number above 0/);
   assert.throws(() => d.desk.to("desk", { orbit: "left" as never }), /orbit must be a number/);
   assert.throws(() => d.desk.to("desk", { hands: "no" as never }), /hands must be true or false/);
+  assert.throws(() => d.desk.to("float", { ipad: 0 as never }), /ipad must be true or false/);
   assert.throws(() => d.desk.out({ orbit: 10 } as never), /orbit/);
   assert.throws(() => d.desk.lid(150), /degrees must be from 0 \(shut\) to 135/);
   assert.throws(() => d.desk.lid(undefined as never), /degrees/);

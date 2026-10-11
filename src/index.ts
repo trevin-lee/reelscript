@@ -127,7 +127,7 @@ function invalidValue(options: object): string | null {
   for (const k of TEXT) {
     if (o[k] !== undefined && typeof o[k] !== "string") return `${k} must be text, not ${JSON.stringify(o[k])}`;
   }
-  for (const k of ["hands", "labels"]) {
+  for (const k of ["hands", "labels", "ipad"]) {
     if (o[k] !== undefined && typeof o[k] !== "boolean") return `${k} must be true or false, not ${JSON.stringify(o[k])}`;
   }
   if (o.prompt !== undefined && typeof o.prompt !== "boolean" && typeof o.prompt !== "string") {
@@ -229,7 +229,7 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "cursor.click": { button: true, duration: true, dialog: true },
   "zoom.to": { target: true, scale: true, duration: true, ease: true, window: true, within: true },
   "zoom.out": { duration: true, ease: true },
-  "desk.to": { view: true, duration: true, ease: true, orbit: true, tilt: true, distance: true, hands: true },
+  "desk.to": { view: true, duration: true, ease: true, orbit: true, tilt: true, distance: true, hands: true, ipad: true },
   "desk.lid": { degrees: true, duration: true, ease: true },
   "desk.out": { duration: true, ease: true },
   "keyboard.open": { labels: true, x: true, y: true, width: true, height: true },
@@ -469,6 +469,8 @@ export interface DeskViewOptions extends DeskMoveOptions {
   distance?: number;
   /** Whether the hands are in the shot; they're never in "float". Default: the desk's hands */
   hands?: boolean;
+  /** In "float", whether the iPad floats beside the laptop; false leaves the laptop alone, in the middle. Default: true */
+  ipad?: boolean;
 }
 
 export interface MoveOptions {

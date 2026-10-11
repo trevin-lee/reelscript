@@ -1360,7 +1360,7 @@ class Engine {
       case "desk.out": {
         // Like a zoom: it runs alongside what follows. A new one starts from where the last one had got to.
         const to: DeskShot =
-          action.kind === "desk.to" ? { view: action.view, orbit: action.orbit, tilt: action.tilt, distance: action.distance, hands: action.hands } : { view: "flat" };
+          action.kind === "desk.to" ? { view: action.view, orbit: action.orbit, tilt: action.tilt, distance: action.distance, hands: action.hands, ipad: action.ipad } : { view: "flat" };
         const from: DeskState = this.deskViewState(start) ?? { view: "flat" };
         this.deskAnim = { from, to, start, dur: action.duration ?? DEFAULTS.deskDuration, ease: action.ease ?? "smooth" };
         return null;

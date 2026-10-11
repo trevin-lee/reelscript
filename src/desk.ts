@@ -66,6 +66,8 @@ export interface DeskShot {
   tilt?: number;
   distance?: number;
   hands?: boolean;
+  /** In "float", whether the iPad floats beside the laptop; without it the laptop is alone in the middle. */
+  ipad?: boolean;
 }
 /** What the desk page draws: a shot, or part of the way between two (the first itself a flight, when one began mid-flight). */
 export type DeskState = DeskShot | { from: DeskState; to: DeskState; amount: number };
@@ -446,20 +448,38 @@ const FLOAT = {
   ipad: { pos: new THREE.Vector3(11.5, 1.5, 6), rot: new THREE.Euler(-0.3, -0.42, -0.06, "YXZ") },
   // Where the iPad comes from as the stage changes: below and in front, out of the shot.
   ipadFrom: new THREE.Vector3(16, -14, 16),
+  // The laptop alone: in the middle, where the camera turns round it.
+  solo: new THREE.Vector3(0, 3, -1),
 };
+// What the float view looks at: between the two devices, or the laptop alone (its middle, the lid up).
+// The middle of the laptop as it stands, in its own space: halfway from the front of the body to the top of the lid,
+// wherever the lid is.
+function laptopMiddle() {
+  const a = lid.rotation.x;
+  const topY = lid.position.y + LID_H * Math.cos(a), topZ = lid.position.z + LID_H * Math.sin(a);
+  const yMin = -DECK_H - 0.2, yMax = Math.max(topY, KEY_H);
+  const zMin = Math.min(-BODY_D / 2, topZ), zMax = BODY_D / 2;
+  return new THREE.Vector3(0, (yMin + yMax) / 2, (zMin + zMax) / 2);
+}
+function floatTarget(ipadAmount) {
+  const solo = FLOAT.solo.clone().add(laptopMiddle().applyEuler(FLOAT.laptop.rot));
+  return solo.lerp(new THREE.Vector3(2.5, 2.5, 0), ipadAmount);
+}
+let floatIpad = 1; // how far the iPad is in the float view, for its camera
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qi = new THREE.Quaternion();
 // Set the stage at t: 0 is the desk, 1 the studio, with the devices in between.
-function setStage(stage, t) {
+function setStage(stage, ipadAmount, t) {
   const e = ease(stage);
+  floatIpad = ipadAmount;
   const drift = (period, phase, size) => Math.sin(((t / period) + phase) * Math.PI * 2) * size * e;
-  laptop.position.copy(FLOAT.laptop.pos).multiplyScalar(e);
+  laptop.position.copy(FLOAT.solo).lerp(FLOAT.laptop.pos, ipadAmount).multiplyScalar(e);
   laptop.position.y += drift(6400, 0, 0.35);
   _qa.setFromEuler(FLOAT.laptop.rot);
   laptop.quaternion.identity().slerp(_qa, e);
   laptop.rotateY(drift(9000, 0.3, 0.02));
-  ipad.visible = stage > 0.001;
   // The iPad arrives in the second half of the change, so it doesn't cross the laptop on the way.
-  const ie = ease(Math.min(1, Math.max(0, stage * 1.6 - 0.6)));
+  const ie = ease(Math.min(1, Math.max(0, Math.min(stage, ipadAmount) * 1.6 - 0.6)));
+  ipad.visible = ie > 0.001;
   ipad.position.lerpVectors(FLOAT.ipadFrom, FLOAT.ipad.pos, ie);
   ipad.position.y += drift(5200, 0.45, 0.3);
   _qb.setFromEuler(FLOAT.ipad.rot);
@@ -476,7 +496,7 @@ function setStage(stage, t) {
     const sh = shadows[name];
     sh.visible = stage > 0.001;
     sh.position.set(obj.position.x, FLOOR_Y, obj.position.z);
-    sh.material.opacity = 0.32 * e * (name === "ipad" ? Math.min(1, Math.max(0, stage * 1.6 - 0.6)) : 1);
+    sh.material.opacity = 0.32 * e * (name === "ipad" ? ie : 1);
   }
   scene.background.copy(ROOM);
   scene.fog.color.copy(ROOM).lerp(BACKDROP.clone().multiplyScalar(0.8), e);
@@ -876,7 +896,12 @@ function viewPose(name) {
     return { pos: new THREE.Vector3(-4, 19, 26), at: new THREE.Vector3(0, 4.5, -2.5), up: new THREE.Vector3(0, 1, 0), fov: 30 };
   }
   if (name === "side") return { pos: new THREE.Vector3(34, 5, 2), at: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 1, 0), fov: 28 };
-  if (name === "float") return { pos: new THREE.Vector3(5, 13, 58), at: new THREE.Vector3(2.5, 2.5, 0), up: new THREE.Vector3(0, 1, 0), fov: 30 };
+  if (name === "float") {
+    // Alone, the laptop is framed closer.
+    const at = floatTarget(floatIpad);
+    const pos = at.clone().add(new THREE.Vector3(2.5, 10.5, 58).multiplyScalar(0.8 + 0.2 * floatIpad));
+    return { pos, at, up: new THREE.Vector3(0, 1, 0), fov: 30 };
+  }
   // keyboard: over the hands, keys filling the width, the screen's foot above
   return { pos: new THREE.Vector3(0, 19.5, 10.7), at: new THREE.Vector3(0, 0.3, -2.4), up: new THREE.Vector3(0, 1, 0), fov: 32 };
 }
@@ -908,8 +933,19 @@ function awayOf(state) {
   if (state.from) return awayOf(state.from) + (awayOf(state.to) - awayOf(state.from)) * state.amount;
   return state.view === "float" || state.hands === false ? 1 : 0;
 }
+function ipadOf(state) {
+  if (state.from) return ipadOf(state.from) + (ipadOf(state.to) - ipadOf(state.from)) * state.amount;
+  return state.view === "float" && state.ipad !== false ? 1 : 0;
+}
 function poseOf(state) {
   if (!state.from) return shotPose(state);
+  // Between two shots of one view, the camera goes round through the angles between (a full orbit is a full turn),
+  // where between views it goes straight from one place to the other.
+  const f = state.from, g = state.to;
+  if (!f.from && f.view === g.view && f.view !== "flat") {
+    const mix = (a, b, base) => (a ?? base) + ((b ?? base) - (a ?? base)) * state.amount;
+    return shotPose({ view: g.view, orbit: mix(f.orbit, g.orbit, 0), tilt: mix(f.tilt, g.tilt, 0), distance: mix(f.distance, g.distance, 1) });
+  }
   const a = poseOf(state.from), b = poseOf(state.to), p = state.amount;
   return {
     pos: a.pos.lerp(b.pos, p),
@@ -936,7 +972,7 @@ function render(t, frame) {
   const state = frame.state ?? { view: "keyboard" };
   const lidDeg = frame.lid ?? ${DESK_LID};
   setLid(lidDeg);
-  setStage(stageOf(state), t);
+  setStage(stageOf(state), ipadOf(state), t);
   laptop.updateMatrixWorld(true);
   for (const [id, k] of keys) {
     let amount = 0;
