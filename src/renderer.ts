@@ -156,6 +156,9 @@ interface Attention {
   y: number;
 }
 
+/** How long a hand on camera takes to reach a shortcut's keys before they go down (modifiers first). */
+const KEY_REACH_MS = 270;
+
 /** The smallest a window can be, frame aside. */
 const MIN_WINDOW = [200, 120] as const;
 
@@ -537,17 +540,17 @@ class Engine {
   }
 
   /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
-  private noteChord(chord: string, at: number, hold: number, withLabel: boolean): void {
+  private noteChord(chord: string, at: number, hold: number, withLabel: boolean, from = at): void {
     if (!this.sceneShown()) return;
     const resolved = resolveChord(chord, this.deskLayout);
     if ("missing" in resolved) {
       throw new Error(`reelscript: press("${chord}"): the ${this.deskOpts.laptop === "mac" ? "Mac" : "PC"} keyboard on the desk has no "${resolved.missing}" key`);
     }
-    this.keyEvents.push({ at, hold, keys: assignFingers(resolved.keys, this.deskLayout), label: withLabel ? resolved.label : undefined });
+    this.keyEvents.push({ at, hold, keys: assignFingers(resolved.keys, this.deskLayout), label: withLabel ? resolved.label : undefined, from });
   }
 
   /** Text typed from `firstAt`, a character every `msPerChar`, for the hands. A character the laptop can't type is a warning, once. */
-  private noteTyped(text: string, firstAt: number, msPerChar: number): void {
+  private noteTyped(text: string, firstAt: number, msPerChar: number, from = firstAt): void {
     if (!this.sceneShown()) return;
     const hold = Math.min(70, Math.max(30, msPerChar * 0.7));
     Array.from(text).forEach((ch, i) => {
@@ -559,7 +562,7 @@ class Engine {
         }
         return;
       }
-      this.keyEvents.push({ at: firstAt + i * msPerChar, hold, keys: assignFingers(keys, this.deskLayout) });
+      this.keyEvents.push({ at: firstAt + i * msPerChar, hold, keys: assignFingers(keys, this.deskLayout), from });
     });
   }
 
@@ -1072,8 +1075,8 @@ class Engine {
         }
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
         const chars = Array.from(action.text);
-        const firstAt = start + 80;
-        this.noteTyped(action.text, firstAt, msPerChar);
+        const firstAt = start + (this.sceneShown() ? KEY_REACH_MS : 80);
+        this.noteTyped(action.text, firstAt, msPerChar, start);
         let next = 0;
         const flush = async (upTo: number) => {
           let batch = "";
@@ -1094,12 +1097,23 @@ class Engine {
           throw new Error(`reelscript: keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`);
         }
         if (action.window) this.focus(w);
-        this.noteChord(action.key, start, 90, true);
         // A shortcut that edits text does what it does on a Mac, as the page believes it's on one (see macKeys).
         const mac = w.kind === "browser" && process.platform !== "darwin" ? macShortcut(action.key) : null;
-        if (mac) await pressMacShortcut(w.page, w.cdp, mac);
-        else await w.page.keyboard.press(asTyped(action.key));
-        return { end: start + 100 };
+        const send = () => (mac ? pressMacShortcut(w.page, w.cdp, mac) : w.page.keyboard.press(asTyped(action.key)));
+        if (!this.sceneShown()) {
+          await send();
+          return { end: start + 100 };
+        }
+        // On camera, the hand gets there first and the page reacts as the key goes down, never before.
+        const at = start + KEY_REACH_MS;
+        this.noteChord(action.key, at, 90, true, start);
+        let sent = false;
+        const flush = async (t: number) => {
+          if (sent || t < at) return;
+          sent = true;
+          await send();
+        };
+        return { end: at + 100, onFrame: flush, onEnd: () => flush(Infinity) };
       }
       case "wait":
         return { end: start + action.ms };
@@ -1282,17 +1296,28 @@ class Engine {
         const text = action.kind === "editor.openFile" ? action.path : action.command;
         const chars = Array.from(text);
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
-        const typeStart = start + 350;
+        // On camera, the palette's shortcut goes down once the hand has got there, and the rest follows.
+        const opensAt = start + (this.sceneShown() ? KEY_REACH_MS : 0);
+        const typeStart = opensAt + 350;
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
-        this.noteChord(action.kind === "editor.openFile" ? "Meta+P" : "F1", start, 90, true);
-        this.noteTyped(text, typeStart, msPerChar);
-        this.noteChord("Enter", enterAt, 80, false);
-        await w.page.keyboard.press(action.kind === "editor.openFile" ? "Meta+P" : "F1");
+        const shortcut = action.kind === "editor.openFile" ? "Meta+P" : "F1";
+        this.noteChord(shortcut, opensAt, 90, true, start);
+        this.noteTyped(text, typeStart, msPerChar, start);
+        this.noteChord("Enter", enterAt, 80, false, start);
+        let opened = false;
+        const open = async (t: number) => {
+          if (opened || t < opensAt) return;
+          opened = true;
+          await w.page.keyboard.press(shortcut);
+        };
+        await open(start);
         let next = 0;
         let entered = false;
         const isFile = action.kind === "editor.openFile";
         const flush = async (t: number) => {
+          await open(t);
+          if (!opened) return;
           let batch = "";
           while (next < chars.length && typeStart + next * msPerChar <= t) batch += chars[next++];
           if (batch) await w.page.keyboard.type(batch);
@@ -1385,11 +1410,11 @@ class Engine {
         if (!events) throw new Error("reelscript: terminal events missing (internal)");
         const chars = Array.from(action.command);
         const msPerChar = 60000 / ((action.wpm ?? DEFAULTS.typeWpm) * 5);
-        const typeStart = start + 120;
+        const typeStart = start + (this.sceneShown() ? KEY_REACH_MS : 120);
         const typeEnd = typeStart + chars.length * msPerChar;
         const outStart = typeEnd + 60;
-        this.noteTyped(action.command, typeStart, msPerChar);
-        this.noteChord("Enter", typeEnd, 80, false);
+        this.noteTyped(action.command, typeStart, msPerChar, start);
+        this.noteChord("Enter", typeEnd, 80, false, start);
         const lastOut = events.length ? outStart + events[events.length - 1][0] : outStart;
         const text = events.map((e) => e[1]).join("");
         const endsWithNewline = !text || /\n$/.test(text);

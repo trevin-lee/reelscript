@@ -203,7 +203,7 @@ demo.wait(2000);
 demo.desk.out();                      // and flies back to the flat desktop
 ```
 
-The desk is a laptop under a lamp, with the demo on its screen and two hands on its keys, drawn in 3D a frame at a time like everything else, so it renders the same every time. `createDemo({ desk })` sets it up once: `laptop` is `"mac"` (silver, ⌘, a Mac's key names) or `"pc"` (dark, Ctrl, Alt); `hands: false` leaves the hands out; `handColor` and `surface` are CSS colours for the skin and the desk.
+The desk is a laptop under a lamp, with the demo on its screen and two hands on its keys, drawn in 3D a frame at a time like everything else, so it renders the same every time. `createDemo({ desk })` sets it up once: `laptop` is `"mac"` (silver, ⌘, a Mac's key names) or `"pc"` (dark, Ctrl, Alt, where the script's `Meta` shows as Ctrl, as the same shortcut is on a PC); `hands: false` leaves the hands out; `handColor`, `sleeve` and `surface` are CSS colours for the skin, the sleeves and the desk.
 
 `keyboard.open()` shows it as a panel over the keys. While the panel is open, every key the demo presses or types plays on it: `press()`, `type()`, a terminal command as it's typed, and the editor's Quick Open and Command Palette. A chord shows as a label under the keys (`labels: false` leaves it out). The panel comes to the front but never takes typing: keys still go to the window that had them. It's placed, moved and closed like any window. A key the laptop hasn't got (`press("Meta+F13")`) fails at the line while the panel is open, and a character it can't type (`é`) is a warning, since the viewer would be shown nothing.
 
@@ -371,7 +371,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` or `"now"` gives the real time. |
 | `timezone` | `"UTC"` | IANA timezone for the page and the menu bar. |
 | `session` | none | A saved login from `reelscript login`, relative to the script. |
-| `desk` | `{ laptop: "mac" }` | The desk behind the keyboard window and the desk views: `laptop` `"mac"` or `"pc"`, `hands` (default true), `handColor` and `surface` as CSS colours. |
+| `desk` | `{ laptop: "mac" }` | The desk behind the keyboard window and the desk views: `laptop` `"mac"` or `"pc"`, `hands` (default true), `handColor`, `sleeve` and `surface` as CSS colours. |
 | `wallpaper` | the theme's gradient | A CSS colour or gradient, or an image file (relative to the script), covering the macOS theme's desktop. |
 | `address` | none | `(url) => string`, rewriting what the browser's address pill shows. A local page (`goto("./app.html")`) shows a blank pill, and `address` gets its `file://` URL: `address: () => "app.acme.com"` names a site. |
 | `menubar` | `{ app: "reelscript" }` | The macOS menu bar's text: `app`, and `clockText` for what its clock shows, which is the demo's `clock` unless you set it. `false` removes the bar. |

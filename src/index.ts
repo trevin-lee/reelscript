@@ -166,7 +166,7 @@ function invalidOption(o: DemoOptions): string | null {
     const d = o.desk as DeskOptions;
     if (d.laptop !== undefined && !KEYBOARD_LAYOUTS.includes(d.laptop)) return `unknown desk laptop ${shown(d.laptop)} (use "mac" or "pc")`;
     if (d.hands !== undefined && typeof d.hands !== "boolean") return `desk hands must be true or false, not ${shown(d.hands)}`;
-    for (const k of ["handColor", "surface"] as const) {
+    for (const k of ["handColor", "sleeve", "surface"] as const) {
       if (d[k] !== undefined && (typeof d[k] !== "string" || !/^(#[0-9a-f]{3,8}|[a-z]+|rgba?\(.*\)|hsla?\(.*\))$/i.test(d[k]!))) return `desk ${k} must be a CSS colour, not ${shown(d[k])}`;
     }
   }
@@ -300,7 +300,7 @@ const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
   desk: true, wallpaper: true,
 };
-const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, surface: true };
+const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, sleeve: true, surface: true };
 
 const CAMERA_FIELDS: { readonly [P in keyof FollowCamera]-?: true } = { scale: true, hold: true, holdMs: true };
 const MENUBAR_FIELDS: { readonly [P in keyof Exclude<Menubar, false>]-?: true } = { app: true, clockText: true, clock: true };

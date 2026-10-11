@@ -87,7 +87,13 @@ test("touch typing: each key has a hand and finger, and a chord's keys are sprea
   assert.deepEqual(spread("Shift+A"), ["r4:ShiftRight", "l4:a"]);
   assert.deepEqual(spread("Meta+A"), ["r0:MetaRight", "l4:a"]);
   assert.deepEqual(spread("Meta+Shift+A"), ["r4:ShiftRight", "r0:MetaRight", "l4:a"]);
-  // A PC has one Win key, so it stays with the left thumb even for a left-hand key.
-  assert.deepEqual(spread("Meta+A", pc), ["l0:MetaLeft", "l4:a"]);
+  // On a PC the script's ⌘ is Ctrl, the other hand's little finger.
+  assert.deepEqual(spread("Meta+A", pc), ["r4:ControlRight", "l4:a"]);
   assert.deepEqual(spread("Control+C", pc), ["r4:ControlRight", "l2:c"]);
+  assert.deepEqual(spread("Meta+Control+C", pc), ["r4:ControlRight", "l2:c"]);
+  // Two modifiers for one little finger: the next finger in takes the second.
+  assert.deepEqual(spread("Control+Shift+P"), ["l4:ControlLeft", "l3:ShiftLeft", "r4:p"]);
+  // The space bar goes to whichever thumb isn't on that side's modifiers.
+  assert.deepEqual(spread("Control+Space"), ["l4:ControlLeft", "r0:Space"]);
+  assert.deepEqual(spread("Meta+Space"), ["r0:MetaRight", "l0:Space"]);
 });

@@ -22,8 +22,10 @@ export interface DeskOptions {
   laptop?: KeyboardLayout;
   /** Show the hands. Default: true */
   hands?: boolean;
-  /** The hands' skin, a CSS color. Default: "#d9a784" */
+  /** The hands' skin, a CSS color. Default: "#f2c4a0" */
   handColor?: string;
+  /** The sleeves over the forearms, a CSS color. Default: "#5d6f8a" */
+  sleeve?: string;
   /** The desk's surface, a CSS color. Default: "#e4ddd3" */
   surface?: string;
 }
@@ -35,9 +37,11 @@ export interface KeyEvent {
   keys: Pressed[];
   /** The chord as a viewer reads it, shown under the keys by a keyboard window. */
   label?: string;
+  /** The earliest time a hand may start moving toward it: when the step that pressed it began. */
+  from?: number;
 }
 
-export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#d9a784", surface: "#e4ddd3" };
+export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#f2c4a0", sleeve: "#5d6f8a", surface: "#e4ddd3" };
 
 export interface DeskPageOptions extends Required<DeskOptions> {
   /** Show a chord's label (the keyboard window does; the desk views don't). */
@@ -132,6 +136,10 @@ lamp.shadow.normalBias = 0.04;
 lamp.shadow.camera.near = 10;
 lamp.shadow.camera.far = 90;
 scene.add(lamp, lamp.target);
+// A warm fill from the viewer's side, so skin in shadow stays warm instead of going grey-blue.
+const warmFill = new THREE.DirectionalLight(0xffe2c8, 0.6);
+warmFill.position.set(0, 12, 20);
+scene.add(warmFill);
 const rim = new THREE.DirectionalLight(0xbcd0ff, 0.7);
 rim.position.set(18, 14, -22);
 scene.add(rim);
@@ -205,34 +213,68 @@ pad.position.set(0, 0.012, KEYS_Z + D * U + 0.9 + padD / 2);
 pad.receiveShadow = true;
 scene.add(pad);
 
-// Legends, drawn once each into the keycap's top texture.
+// Legends, drawn once each into the keycap's top texture, in the bundled Inter: it must have loaded first,
+// or the canvas silently draws the default serif (Times). The layout follows the keyboard's own:
+// a MacBook's small lowercase words in a bottom corner and its modifiers' symbols in the opposite top
+// corner; a PC's words top-left.
+await Promise.all(["400", "500"].map((w) => document.fonts.load(w + " 32px Inter")));
+const FONT = (weight, size) => weight + " " + size + "px Inter, system-ui, sans-serif";
+const MAC_LEFT_MODS = new Set(["Fn", "ControlLeft", "AltLeft", "MetaLeft"]);
+const MAC_RIGHT_MODS = new Set(["MetaRight", "AltRight"]);
+const WORD_LEFT = new Set(["Tab", "CapsLock", "ShiftLeft", "Escape", "ControlLeft"]);
+const WORD_RIGHT = new Set(["Backspace", "Enter", "ShiftRight", "Delete", "ControlRight"]);
+// The globe on a MacBook's fn key, drawn as lines: an emoji would depend on the host's emoji font.
+function globe(g, cx, cy, r) {
+  g.save();
+  g.lineWidth = Math.max(1.2, r * 0.13);
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.ellipse(cx, cy, r * 0.45, r, 0, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(cx - r, cy); g.lineTo(cx + r, cy); g.stroke();
+  g.restore();
+}
 const legendCache = new Map();
 function legendTexture(cap, accent) {
   const k = cap.id + ":" + accent;
   if (legendCache.has(k)) return legendCache.get(k);
-  const px = 96;
+  const px = 128; // pixels per key unit
   const c = document.createElement("canvas");
   c.width = Math.round(px * cap.w); c.height = Math.round(px * cap.h);
   const g = c.getContext("2d");
   g.fillStyle = accent ? "#2f7cf6" : "#" + P.key.toString(16).padStart(6, "0");
   g.fillRect(0, 0, c.width, c.height);
-  g.fillStyle = accent ? "#ffffff" : P.legend;
-  g.textAlign = "center"; g.textBaseline = "middle";
-  const small = cap.legend.length > 2 && !/^F\d+$/.test(cap.legend);
-  const symbol = /^[⌘⌥⌃⇧🌐⊞]$/.test(cap.legend);
-  if (cap.shifted) {
-    g.font = "500 " + px * 0.26 + "px Inter"; g.fillText(cap.shifted, c.width / 2, c.height * 0.3);
-    g.font = "500 " + px * 0.3 + "px Inter"; g.fillText(cap.legend, c.width / 2, c.height * 0.68);
-  } else if (cap.sub) {
-    g.font = "500 " + px * (symbol ? 0.3 : 0.24) + "px Inter"; g.fillText(cap.legend, c.width / 2, c.height * 0.36);
-    g.font = "500 " + px * 0.16 + "px Inter"; g.fillText(cap.sub, c.width / 2, c.height * 0.76);
-  } else {
-    g.font = "500 " + px * (small ? 0.2 : cap.h < 0.9 ? 0.22 : 0.36) + "px Inter";
-    g.fillText(cap.legend, c.width / 2, c.height / 2 + (small ? 0 : 1));
+  g.fillStyle = g.strokeStyle = accent ? "#ffffff" : P.legend;
+  const W = c.width, H = c.height, pad = px * 0.12;
+  const word = (text, align, baseline, x, y, size) => {
+    g.font = FONT(400, size); g.textAlign = align; g.textBaseline = baseline; g.fillText(text, x, y);
+  };
+  const isWordKey = (cap.legend.length > 2 || cap.id === "Fn") && !/^F\d+$/.test(cap.legend);
+  if (cap.id === "Fn" && mac) {
+    globe(g, pad + px * 0.1, H - pad - px * 0.1, px * 0.09);
+    word("fn", "right", "top", W - pad, pad, px * 0.15);
+  } else if (mac && (MAC_LEFT_MODS.has(cap.id) || MAC_RIGHT_MODS.has(cap.id))) {
+    const left = MAC_LEFT_MODS.has(cap.id);
+    word(cap.legend, left ? "right" : "left", "top", left ? W - pad : pad, pad - px * 0.02, px * 0.2);
+    if (cap.sub) word(cap.sub, left ? "left" : "right", "bottom", left ? pad : W - pad, H - pad, px * 0.13);
+  } else if (cap.shifted) {
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.font = FONT(400, px * 0.2); g.fillText(cap.shifted, W / 2, H * 0.32);
+    g.font = FONT(400, px * 0.2); g.fillText(cap.legend, W / 2, H * 0.68);
+  } else if (/^F\d+$/.test(cap.legend) || (cap.id === "Escape" && mac)) {
+    word(cap.legend, mac && cap.id === "Escape" ? "left" : "center", mac && cap.id === "Escape" ? "bottom" : "middle",
+      mac && cap.id === "Escape" ? pad : W / 2, mac && cap.id === "Escape" ? H - pad * 0.6 : H / 2, px * 0.15);
+  } else if (isWordKey) {
+    const right = WORD_RIGHT.has(cap.id);
+    if (mac) word(cap.legend, right ? "right" : "left", "bottom", right ? W - pad : pad, H - pad, px * 0.14);
+    else word(cap.legend, "left", "top", pad, pad, px * 0.15);
+  } else if (cap.legend) {
+    g.textAlign = "center"; g.textBaseline = "middle";
+    const arrow = /^[▲▼◀▶]$/.test(cap.legend);
+    g.font = FONT(400, px * (arrow ? 0.14 : 0.26));
+    g.fillText(cap.legend, W / 2, H / 2 + px * 0.01);
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 8;
   legendCache.set(k, tex);
   return tex;
 }
@@ -289,12 +331,20 @@ hinge.position.set(0, -0.1, -BODY_D / 2 + 0.3);
 scene.add(hinge);
 
 // ---------------------------------------------------------------- hands: the model's joints are set one by one, from its rest pose
-const skin = new THREE.MeshStandardMaterial({ color: new THREE.Color(OPTS.handColor), roughness: 0.62, metalness: 0 });
-// The model: metres, fingers along -y, palm facing -x, thumb toward -z (the left hand mirrors in z).
-// On the keys: fingers forward (-Z), palm down (-Y), thumbs inward.
-const MODEL_TO_WORLD = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0));
+// Skin that reads warm and soft rather than waxy: a peach base, a reddish sheen where light grazes it,
+// and a warm floor so it never goes grey in shadow (the room light is cool).
+const skin = new THREE.MeshPhysicalMaterial({
+  color: new THREE.Color(OPTS.handColor), roughness: 0.55, metalness: 0,
+  sheen: 0.6, sheenColor: new THREE.Color("#ff9a7a"), sheenRoughness: 0.6,
+  emissive: new THREE.Color("#5a2a1a"), emissiveIntensity: 0.22,
+});
+const knit = new THREE.MeshStandardMaterial({ color: new THREE.Color(OPTS.sleeve), roughness: 0.92 });
+const MODEL_TO_WORLD = {
+  right: new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)),
+  left: new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0, 0)),
+};
 const HAND_SCALE = (1 / 0.019) * 0.8; // metres to key units, under life size so the keys show
-const PALM_NORMAL = new THREE.Vector3(-1, 0, 0);
+const PALM_NORMALS = { right: new THREE.Vector3(-1, 0, 0), left: new THREE.Vector3(1, 0, 0) };
 const CHAINS = [
   ["thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip"],
   ["index-finger-metacarpal", "index-finger-phalanx-proximal", "index-finger-phalanx-intermediate", "index-finger-phalanx-distal", "index-finger-tip"],
@@ -303,8 +353,79 @@ const CHAINS = [
   ["pinky-finger-metacarpal", "pinky-finger-phalanx-proximal", "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip"],
 ];
 const REST_CURL = [0.45, 0.42, 0.4, 0.42, 0.48];
-const HOVER_Y = 0.75;
+// The hands lie a little thumb side up and wrists low, as hands on a laptop do; not flat like paddles.
+// The sleeve's cuff: its radius, and where it starts along the forearm from the wrist bone (negative: over the hand), in m.
+const SLEEVE_CUFF = 0.034, SLEEVE_AT = -0.012;
+const ATTITUDE = { pitch: 0.15, roll: 0.18, yaw: 0.12 };
+// Fingertips rest on the keys; a finger about to press lifts this much above its key first.
+const REST_H = 0.1, LIFT = 0.35;
 const hands = {};
+
+// One level of Phong tessellation (Boubekeur & Alexa 2008) on a skinned, indexed geometry: each triangle
+// becomes four, with edge midpoints pulled toward the vertices' tangent planes, so the outline rounds.
+function phongSubdivide(geo, alpha = 0.75) {
+  const P = geo.attributes.position, N = geo.attributes.normal, UV = geo.attributes.uv;
+  const SI = geo.attributes.skinIndex, SW = geo.attributes.skinWeight, idx = geo.index.array;
+  const n0 = P.count;
+  // Smooth normals across UV seams (the same point, under different indices).
+  const key = (i) => P.getX(i).toFixed(5) + "," + P.getY(i).toFixed(5) + "," + P.getZ(i).toFixed(5);
+  const acc = new Map();
+  for (let i = 0; i < n0; i++) {
+    const a = acc.get(key(i)) ?? [0, 0, 0];
+    a[0] += N.getX(i); a[1] += N.getY(i); a[2] += N.getZ(i);
+    acc.set(key(i), a);
+  }
+  const pos = [], nor = [], uv = [], si = [], sw = [];
+  for (let i = 0; i < n0; i++) {
+    const a = acc.get(key(i)), l = Math.hypot(a[0], a[1], a[2]) || 1;
+    pos.push(P.getX(i), P.getY(i), P.getZ(i));
+    nor.push(a[0] / l, a[1] / l, a[2] / l);
+    uv.push(UV ? UV.getX(i) : 0, UV ? UV.getY(i) : 0);
+    si.push(SI.getX(i), SI.getY(i), SI.getZ(i), SI.getW(i));
+    sw.push(SW.getX(i), SW.getY(i), SW.getZ(i), SW.getW(i));
+  }
+  const mids = new Map();
+  let n = n0;
+  const mid = (a, b) => {
+    const k = a < b ? a + "_" + b : b + "_" + a;
+    if (mids.has(k)) return mids.get(k);
+    const m = [0, 1, 2].map((c) => (pos[a * 3 + c] + pos[b * 3 + c]) / 2);
+    const proj = (v) => {
+      const d = [0, 1, 2].reduce((t, c) => t + (m[c] - pos[v * 3 + c]) * nor[v * 3 + c], 0);
+      return m.map((x, c) => x - d * nor[v * 3 + c]);
+    };
+    const qa = proj(a), qb = proj(b);
+    for (let c = 0; c < 3; c++) pos.push((1 - alpha) * m[c] + (alpha * (qa[c] + qb[c])) / 2);
+    const nm = [0, 1, 2].map((c) => nor[a * 3 + c] + nor[b * 3 + c]), l = Math.hypot(nm[0], nm[1], nm[2]) || 1;
+    nor.push(nm[0] / l, nm[1] / l, nm[2] / l);
+    uv.push((uv[a * 2] + uv[b * 2]) / 2, (uv[a * 2 + 1] + uv[b * 2 + 1]) / 2);
+    // Skin weights: the two ends' blended, the four strongest kept.
+    const w = new Map();
+    for (const v of [a, b]) for (let c = 0; c < 4; c++) {
+      const j = si[v * 4 + c], ww = sw[v * 4 + c] * 0.5;
+      if (ww > 0) w.set(j, (w.get(j) ?? 0) + ww);
+    }
+    const top = [...w.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(0, 4);
+    const total = top.reduce((t, e) => t + e[1], 0) || 1;
+    for (let c = 0; c < 4; c++) { si.push(top[c] ? top[c][0] : 0); sw.push(top[c] ? top[c][1] / total : 0); }
+    mids.set(k, n);
+    return n++;
+  };
+  const out = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+    out.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(si, 4));
+  g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(sw, 4));
+  g.setIndex(out);
+  return g;
+}
 
 async function loadHand(side) {
   const gltf = await new GLTFLoader().loadAsync(HANDS_URL + side + ".glb");
@@ -312,27 +433,42 @@ async function loadHand(side) {
   const bones = {};
   model.traverse((o) => {
     if (o.isBone) bones[o.name] = o;
-    if (o.isMesh) { o.material = skin; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; }
+    if (o.isMesh) {
+      // The model is low-poly (~1,400 vertices): rounded once at load, its fingertips stop reading as faceted claws.
+      if (o.isSkinnedMesh) o.geometry = phongSubdivide(phongSubdivide(o.geometry));
+      o.material = skin; o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;
+    }
   });
   const chains = CHAINS.map((names) => {
     const joints = names.map((n) => ({ bone: bones[n], restPos: bones[n].position.clone(), restQuat: bones[n].quaternion.clone() }));
     const dir = joints[joints.length - 1].restPos.clone().sub(joints[1].restPos).normalize();
-    return { joints, dir, lateral: dir.clone().cross(PALM_NORMAL).normalize() };
+    return { joints, dir, lateral: dir.clone().cross(PALM_NORMALS[side]).normalize() };
   });
-  // The forearm, which the model stops short of: from the wrist toward the viewer.
-  const wrist = bones["wrist"].position;
-  const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.029, 0.26, 6, 16), skin);
-  arm.position.set(wrist.x - 0.004, wrist.y + 0.112, wrist.z + (side === "right" ? 0.004 : -0.004));
-  arm.castShadow = true;
-  model.add(arm);
   const root = new THREE.Group();
-  root.quaternion.setFromRotationMatrix(MODEL_TO_WORLD);
+  const s = side === "right" ? 1 : -1;
+  root.quaternion
+    .setFromEuler(new THREE.Euler(ATTITUDE.pitch, s * ATTITUDE.yaw, -s * ATTITUDE.roll, "YXZ"))
+    .multiply(new THREE.Quaternion().setFromRotationMatrix(MODEL_TO_WORLD[side]));
   root.scale.setScalar(HAND_SCALE);
   root.add(model);
   const holder = new THREE.Group(); // positioned; the root inside carries the model's orientation
   holder.add(root);
   scene.add(holder);
-  hands[side] = { side, sign: side === "right" ? 1 : -1, root: holder, chains };
+  holder.updateMatrixWorld(true);
+  // The forearm, which the model stops short of: a knit sleeve whose cuff swallows the wrist's open end, angled
+  // down and out toward a body in front of the laptop. The sleeve says "a person"; bare tubes the colour of the
+  // hands read as stumps, and any skin between hand and cuff shows the join.
+  const wrist = bones["wrist"].position.clone();
+  const toBody = new THREE.Vector3(s * 0.3, -0.14, 1).normalize().applyQuaternion(model.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+  const cuff = SLEEVE_CUFF, len = 0.32;
+  const profile = [[0, 0], [cuff - 0.004, 0], [cuff, 0.004], [cuff + 0.001, 0.012], [cuff, 0.02], [cuff + 0.002, 0.03], [0.041, len * 0.6], [0.045, len], [0, len]];
+  const sleeve = new THREE.Mesh(new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 40), knit);
+  sleeve.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toBody);
+  sleeve.position.copy(wrist).addScaledVector(toBody, SLEEVE_AT);
+  sleeve.castShadow = true;
+  sleeve.receiveShadow = true;
+  model.add(sleeve);
+  hands[side] = { side, sign: s, root: holder, chains, palm: PALM_NORMALS[side], memo: [] };
 }
 
 const _q = new THREE.Quaternion(), _axis = new THREE.Vector3(), _v = new THREE.Vector3();
@@ -342,7 +478,7 @@ function poseFinger(hand, f, curl, press, spread = 0) {
   const thumb = f === 0;
   const c = curl * (1 - press * 0.4);
   const angles = thumb
-    ? [0, 0.25 + press * 0.3, 0.3 + c * 0.7, 0]
+    ? [0.25, 0.25 + press * 0.3, 0.3 + c * 0.7, 0]
     : [0, 0.95 * c + press * 0.5, 1.0 * c, 0.55 * c, 0];
   const A = new THREE.Quaternion();
   let prevNew = chain.joints[0].restPos.clone();
@@ -355,7 +491,7 @@ function poseFinger(hand, f, curl, press, spread = 0) {
       A.premultiply(_q);
     }
     if (i === 1 && spread) {
-      _axis.copy(PALM_NORMAL).applyQuaternion(A);
+      _axis.copy(hand.palm).applyQuaternion(A);
       _q.setFromAxisAngle(_axis, spread);
       A.premultiply(_q);
     }
@@ -376,7 +512,8 @@ function placeHandFor(hand, f, target) {
 // Aim another finger of a placed hand at a key, by spreading at the knuckle and curling to reach.
 function aimFinger(hand, f, target, press) {
   let best = null;
-  for (let spread = -0.7; spread <= 0.7; spread += 0.14) {
+  const wide = f === 0 ? 1.4 : 0.7; // a thumb swings further than a finger spreads
+  for (let spread = -wide; spread <= wide + 1e-9; spread += wide / 5) {
     for (let curl = 0.05; curl <= 1.25; curl += 0.1) {
       poseFinger(hand, f, curl, press, spread);
       const tip = tipAt(hand, f);
@@ -384,7 +521,21 @@ function aimFinger(hand, f, target, press) {
       if (!best || err < best.err) best = { err, curl, spread };
     }
   }
+  // The grid's best, refined: a target that moves a little moves the finger a little, not a grid step.
+  const errAt = (curl, spread) => {
+    poseFinger(hand, f, curl, press, spread);
+    const tip = tipAt(hand, f);
+    return (tip.x - target.x) ** 2 + (tip.z - target.z) ** 2 + 0.35 * (tip.y - target.y) ** 2;
+  };
+  for (let step = 0.05; step > 0.002; step /= 2) {
+    for (const [dc, ds] of [[step, 0], [-step, 0], [0, step * 1.4], [0, -step * 1.4]]) {
+      const curl = Math.min(1.3, Math.max(0, best.curl + dc)), spread = Math.min(wide, Math.max(-wide, best.spread + ds));
+      const err = errAt(curl, spread);
+      if (err < best.err) best = { err, curl, spread };
+    }
+  }
   poseFinger(hand, f, best.curl, press, best.spread);
+  return best;
 }
 
 // ---------------------------------------------------------------- key events, as a function of time
@@ -399,67 +550,148 @@ function pressAmount(ev, key, t) {
   if (t <= up) return 1;
   return 1 - ease((t - up) / PRESS_EDGE);
 }
-function handState(side, t) {
-  let prev = null, cur = null, next = null;
+// Each hand has a home over its home row, fingers resting on a s d f / j k l ; and its thumb by the space bar.
+// The hand goes where its fingers can reach the keys it presses; the fingers do the last of it. Where the hand is and where each finger points are smooth functions of time through
+// the key events, so nothing jumps between frames, however fast the typing.
+const HOME_KEYS = { left: [null, "f", "d", "s", "a"], right: [null, "j", "k", "l", "Semicolon"] };
+const APPROACH = 150, REACH_MIN = 90, SETTLE = 450, HOME_AFTER = 700;
+const homeRoot = {};
+
+// Where a finger rests: over its home key, the thumb over the space bar, moving with the hand.
+function homeTarget(hand, f) {
+  let c;
+  if (f) c = keyPoint(hand, { id: HOME_KEYS[hand.side][f], finger: f });
+  else {
+    // The thumb: on the space bar, a little inside the index finger.
+    c = keyCenter("Space");
+    c.x = keyCenter(HOME_KEYS[hand.side][1]).x - hand.sign * 0.6 * U;
+  }
+  c.y += REST_H;
+  return c.add(hand.root.position).sub(homeRoot[hand.side]);
+}
+function placeHome(hand) {
+  for (let f = 0; f < 5; f++) poseFinger(hand, f, REST_CURL[f], 0);
+  const c = keyCenter(HOME_KEYS[hand.side][1]);
+  placeHandFor(hand, 1, new THREE.Vector3(c.x, c.y + REST_H + 0.15, c.z));
+  const root = hand.root.position.clone();
+  homeRoot[hand.side] = root;
+  // Where each fingertip is, from the hand, as it presses in its resting curl: what the hand is placed by.
+  hand.reach = [0, 1, 2, 3, 4].map((f) => {
+    poseFinger(hand, f, REST_CURL[f], 1);
+    const tip = tipAt(hand, f).sub(root);
+    poseFinger(hand, f, REST_CURL[f], 0);
+    return tip;
+  });
+}
+// Where on a key a finger presses: its centre, or on a wide key (the space bar, shift) the point nearest where the
+// finger is at home, so a thumb takes the space bar where it lies.
+function keyPoint(hand, k) {
+  const { cap } = keys.get(k.id);
+  const c = keyCenter(k.id);
+  if (!hand.reach) return c;
+  const half = Math.max(0, ux(cap.x + cap.w) - c.x - 0.45);
+  const x = homeRoot[hand.side].x + hand.reach[k.finger].x;
+  c.x = Math.min(c.x + half, Math.max(c.x - half, x));
+  return c;
+}
+// How far the hand shifts for an event: to where its fingers, pressing in their resting curl, are over their keys,
+// less the SLACK that the fingers themselves reach.
+const SLACK = 0.45;
+function shiftFor(hand, keys) {
+  const sum = new THREE.Vector3();
+  for (const k of keys) sum.add(keyPoint(hand, k).sub(hand.reach[k.finger]).sub(homeRoot[hand.side]));
+  sum.multiplyScalar(1 / keys.length).y = 0;
+  const len = sum.length();
+  return len > SLACK ? sum.multiplyScalar((len - SLACK) / len) : sum.set(0, 0, 0);
+}
+// The hand's own events, as windows: from when it may start toward them to when they let go.
+function windowsFor(side) {
+  const out = [];
   for (const ev of events) {
-    const mine = ev.keys.filter((k) => k.hand === side);
-    if (!mine.length) continue;
-    const start = ev.at - (mine.some((k) => k.modifier) ? MOD_LEAD : 0);
-    const end = ev.at + ev.hold + (mine.some((k) => k.modifier) ? MOD_TAIL : 0);
-    if (end + PRESS_EDGE < t) prev = { ev, mine, start, end };
-    else if (start - PRESS_EDGE <= t) { cur = { ev, mine, start, end }; break; }
-    else { next = { ev, mine, start, end }; break; }
+    const keys = ev.keys.filter((k) => k.hand === side);
+    if (!keys.length) continue;
+    const down = ev.at - (keys.some((k) => k.modifier) ? MOD_LEAD : 0);
+    const up = ev.at + ev.hold + (keys.some((k) => k.modifier) ? MOD_TAIL : 0);
+    out.push({ ev, keys, down, up, from: ev.from ?? -Infinity });
   }
-  if (cur) return { keys: cur.mine, ev: cur.ev, blend: 1, from: prev };
-  if (next) {
-    const travel = Math.min(260, Math.max(130, next.start - (prev ? prev.end : -Infinity)));
-    const moveStart = next.start - travel;
-    if (t >= moveStart) return { keys: next.mine, ev: next.ev, blend: ease((t - moveStart) / travel), from: prev };
-  }
-  if (prev) {
-    const since = t - prev.end;
-    if (since < RETURN_AFTER) return { keys: prev.mine, ev: prev.ev, blend: 1, from: null, resting: true };
-    if (since < RETURN_AFTER + RETURN_OVER) return { keys: prev.mine, ev: prev.ev, blend: 1 - ease((since - RETURN_AFTER) / RETURN_OVER), from: null, resting: true };
-  }
-  return null;
+  return out;
 }
-function homeKey(side) {
-  return side === "left" ? { id: "f", finger: 1 } : { id: "j", finger: 1 };
+// How far each of the hand's events has drawn it, at t: rising as the hand approaches, held, then giving way to
+// any later event as that one rises, and fading home once the hand has been idle a while. Every weight is a
+// continuous function of t, so blends of them are too, however the events overlap.
+function riseOf(w, t) {
+  const start = Math.max(w.down - APPROACH, w.from);
+  const at = Math.max(start + REACH_MIN, w.down - 30);
+  return ease((t - start) / (at - start));
 }
-function poseHome(hand) {
-  for (let f = 0; f < 5; f++) poseFinger(hand, f, REST_CURL[f], 0);
-  const home = homeKey(hand.side);
-  const c = keyCenter(home.id);
-  placeHandFor(hand, home.finger, new THREE.Vector3(c.x, c.y + HOVER_Y, c.z));
+function weightsAt(wins, t) {
+  return wins.map((w, i) => {
+    let b = riseOf(w, t) * (1 - ease((t - (w.up + HOME_AFTER)) / SETTLE));
+    for (let j = i + 1; j < wins.length && b > 0; j++) if (wins[j].down > w.down) b *= 1 - riseOf(wins[j], t);
+    return b;
+  });
 }
-function poseHandAt(hand, state, t) {
-  const primary = state.keys.find((k) => !k.modifier) ?? state.keys[0];
-  for (let f = 0; f < 5; f++) poseFinger(hand, f, REST_CURL[f], 0);
-  const press = state.resting ? 0 : pressAmount(state.ev, primary, t);
-  poseFinger(hand, primary.finger, REST_CURL[primary.finger], press);
-  const c = keyCenter(primary.id);
-  placeHandFor(hand, primary.finger, new THREE.Vector3(c.x, c.y + HOVER_Y * (1 - press) + 0.02 * press, c.z));
-  for (const k of state.keys) {
-    if (k === primary) continue;
-    const kc = keyCenter(k.id);
-    const kp = state.resting ? 0 : pressAmount(state.ev, k, t);
-    aimFinger(hand, k.finger, new THREE.Vector3(kc.x, kc.y + HOVER_Y * (1 - kp) + 0.02 * kp, kc.z), kp);
-  }
+// Where the hand is at t, as an offset from home, and how high it lifts to travel.
+function offsetAt(hand, wins, t) {
+  const weights = weightsAt(wins, t);
+  const shift = new THREE.Vector3();
+  let total = 0, lift = 0, prev = new THREE.Vector3();
+  wins.forEach((w, i) => {
+    const s = shiftFor(hand, w.keys);
+    const travel = s.distanceTo(prev);
+    prev = s;
+    if (!weights[i]) return;
+    shift.addScaledVector(s, weights[i]);
+    total += weights[i];
+    if (travel > 0.6) lift = Math.max(lift, Math.sin(riseOf(w, t) * Math.PI) * Math.min(0.4, travel * 0.15));
+  });
+  return { shift: shift.multiplyScalar(1 / Math.max(1, total)), lift };
+}
+// How much a finger is drawn toward a key of an event at t: rising as it approaches, held, falling after.
+function pull(w, k, t) {
+  const down = k.modifier ? w.ev.at - MOD_LEAD : w.ev.at;
+  const up = k.modifier ? w.ev.at + w.ev.hold + MOD_TAIL : w.ev.at + w.ev.hold;
+  const start = Math.max(down - APPROACH, w.from);
+  // A finger takes at least REACH_MIN to get there, even when its key comes sooner than that; it arrives late.
+  const there = Math.max(down, start + REACH_MIN), leaves = Math.max(up, there);
+  if (t <= start || t >= leaves + 120) return 0;
+  if (t < there) return ease((t - start) / (there - start));
+  return t <= leaves ? 1 : 1 - ease((t - leaves) / 120);
 }
 function placeHand(hand, t) {
-  const state = handState(hand.side, t);
-  if (!state) { poseHome(hand); return; }
-  poseHandAt(hand, state, t);
-  if (state.blend < 1) {
-    const to = hand.root.position.clone();
-    if (state.from) poseHandAt(hand, { keys: state.from.mine, ev: state.from.ev, resting: true }, t); else poseHome(hand);
-    const from = hand.root.position.clone();
-    poseHandAt(hand, state, t);
-    hand.root.position.lerpVectors(from, to, state.blend);
-    hand.root.position.y += Math.sin(state.blend * Math.PI) * 0.3;
+  const wins = windowsFor(hand.side);
+  for (let f = 0; f < 5; f++) poseFinger(hand, f, REST_CURL[f], 0);
+  const { shift, lift } = offsetAt(hand, wins, t);
+  hand.root.position.copy(homeRoot[hand.side]).add(shift);
+  hand.root.position.y += lift;
+  // Each finger: toward the keys pulling it, blended by how hard each pulls, else where it rests.
+  for (let f = 0; f < 5; f++) {
+    let total = 0, press = 0;
+    const toward = new THREE.Vector3();
+    for (const w of wins) for (const k of w.keys) {
+      if (k.finger !== f) continue;
+      const amount = pull(w, k, t);
+      if (!amount) continue;
+      const p = pressAmount(w.ev, k, t);
+      const c = keyPoint(hand, k);
+      toward.addScaledVector(new THREE.Vector3(c.x, c.y + REST_H + LIFT * (1 - p) - 0.12 * p, c.z), amount);
+      press += p * amount;
+      total += amount;
+    }
+    const home = homeTarget(hand, f);
+    const from = home;
+    const norm = Math.max(1, total);
+    const target = from.clone().multiplyScalar(1 - Math.min(1, total)).addScaledVector(toward, Math.min(1, total) / total || 0);
+    press /= norm;
+    // A finger whose target and press haven't moved keeps last frame's pose rather than searching again.
+    const memoKey = target.x.toFixed(3) + "," + target.y.toFixed(3) + "," + target.z.toFixed(3) + "," + press.toFixed(3) + "," +
+      hand.root.position.x.toFixed(3) + "," + hand.root.position.y.toFixed(3) + "," + hand.root.position.z.toFixed(3);
+    const m = hand.memo[f];
+    if (m && m.key === memoKey) { poseFinger(hand, f, m.curl, press, m.spread); continue; }
+    const got = aimFinger(hand, f, target, press);
+    hand.memo[f] = { key: memoKey, curl: got.curl, spread: got.spread };
   }
 }
-
 // ---------------------------------------------------------------- cameras
 // The screen's centre, normal and up, in the world, for the views that frame it.
 function screenFrame() {
@@ -490,7 +722,7 @@ function viewPose(name) {
   }
   if (name === "side") return { pos: new THREE.Vector3(34, 5, 2), at: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 1, 0), fov: 28 };
   // keyboard: over the hands, keys filling the width, the screen's foot above
-  return { pos: new THREE.Vector3(0, 17, 9), at: new THREE.Vector3(0, 0.3, -2.4), up: new THREE.Vector3(0, 1, 0), fov: 32 };
+  return { pos: new THREE.Vector3(0, 19.5, 10.7), at: new THREE.Vector3(0, 0.3, -2.4), up: new THREE.Vector3(0, 1, 0), fov: 32 };
 }
 function setCamera(view) {
   const a = viewPose(view.from ?? "flat"), b = viewPose(view.to ?? "flat");
@@ -537,10 +769,12 @@ function resize(w, h) {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-const ready = Promise.all([document.fonts.load("16px Inter").catch(() => {}), ...(OPTS.hands ? [loadHand("left"), loadHand("right")] : [])]);
+const ready = Promise.all([document.fonts.load("16px Inter").catch(() => {}), ...(OPTS.hands ? [loadHand("left"), loadHand("right")] : [])]).then(() => {
+  for (const h of Object.values(hands)) placeHome(h);
+});
 window.__rsDesk = {
   ready,
-  _debug: { REST_CURL, hands },
+  _debug: { REST_CURL, hands, THREE, keyCenter, keys },
   resize,
   // The screen's picture, a data URL; resolves once it shows.
   setScreen(url) {

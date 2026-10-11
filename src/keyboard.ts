@@ -100,7 +100,7 @@ function build(name: KeyboardLayout): Layout {
   const mac = name === "mac";
   const keys: KeyCap[] = [];
   let y = 0;
-  keys.push(...row(y, FN_ROW_H, [["Escape", "esc", 1.5], ...FKEYS, mac ? ["TouchId", "", 1] : ["Delete", "Del", 1]]));
+  keys.push(...row(y, FN_ROW_H, [["Escape", mac ? "esc" : "Esc", 1.5], ...FKEYS, mac ? ["TouchId", "", 1] : ["Delete", "Del", 1]]));
   y += FN_ROW_H;
   keys.push(...row(y, ROW_H, [...NUMBER_ROW, ["Backspace", mac ? "delete" : "Backspace", 1.5]]));
   y += ROW_H;
@@ -198,7 +198,8 @@ export function resolveChord(chord: string, lay: Layout): Chord | { missing: str
   for (const p of parts) {
     const id = ALIASES[p];
     if (!id || !/^(Shift|Control|Alt|Meta)Left$/.test(id)) return { missing: p };
-    mods.add(id);
+    // The demo's shortcuts are a Mac's (see the README's desktop): ⌘ on a PC is Ctrl.
+    mods.add(id === "MetaLeft" && lay.name === "pc" ? "ControlLeft" : id);
   }
   let mainId: string | null;
   if (main.length === 1 && main in SHIFTED) {
@@ -296,7 +297,7 @@ export interface Pressed {
  */
 export function assignFingers(keys: KeyPress[], lay: Layout): Pressed[] {
   const main = keys.find((k) => !k.modifier) ?? keys[keys.length - 1];
-  const [mainHand, mainFinger] = fingerFor(main.id);
+  let [mainHand, mainFinger] = fingerFor(main.id);
   const has = (id: string) => lay.keys.some((k) => k.id === id);
   const taken = new Set<string>([`${mainHand}${mainFinger}`]);
   const out: Pressed[] = [];
@@ -318,6 +319,14 @@ export function assignFingers(keys: KeyPress[], lay: Layout): Pressed[] {
         [hand, finger] = fingerFor(swap);
       }
     }
+    // A modifier on the space bar's hand (⌃Space, Win+Space): the space bar goes to the other thumb.
+    if (main.id === "Space" && hand === mainHand && !taken.has(`${mainHand === "left" ? "right" : "left"}0`)) {
+      taken.delete(`${mainHand}0`);
+      mainHand = mainHand === "left" ? "right" : "left";
+      taken.add(`${mainHand}0`);
+    }
+    // Still taken (⌃⇧ on one side): the next finger in toward the index takes it.
+    while (taken.has(`${hand}${finger}`) && finger > 1) finger--;
     taken.add(`${hand}${finger}`);
     out.push({ id, hand, finger, modifier: true });
   }
