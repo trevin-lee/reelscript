@@ -26,7 +26,7 @@ import {
   type TermEvent,
 } from "./terminal.js";
 import { EditorServer, editorStyles, editorTitle } from "./editor.js";
-import { DESK_DEFAULTS, DESK_URL, deskAsset, deskPageHtml, type DeskOptions, type DeskView, type KeyEvent } from "./desk.js";
+import { DESK_DEFAULTS, DESK_LID, DESK_URL, deskAsset, deskPageHtml, type DeskOptions, type DeskShot, type DeskState, type KeyEvent } from "./desk.js";
 import { assignFingers, layout as keyboardLayout, resolveChar, resolveChord, type Layout } from "./keyboard.js";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
@@ -248,7 +248,9 @@ class Engine {
   private deskFed = new Map<string, number>();
   /** The page that draws a desk view as the whole frame, opened at the first one. */
   private deskPage: { page: Page; cdp: CDPSession } | null = null;
-  private deskAnim: { from: DeskView; to: DeskView; start: number; dur: number; ease: Ease } | null = null;
+  private deskAnim: { from: DeskState; to: DeskShot; start: number; dur: number; ease: Ease } | null = null;
+  /** The lid moving (or moved) to an angle, in degrees; null while it's where it starts. */
+  private lidAnim: { from: number; to: number; start: number; dur: number; ease: Ease } | null = null;
   private keyboardLabels = true;
   private unshownKeys = new Set<string>();
 
@@ -536,7 +538,7 @@ class Engine {
 
   /** Whether keys pressed now show on the desk: a keyboard window is open, or a desk view is on. */
   private sceneShown(): boolean {
-    return this.windows.has("keyboard") || (this.deskAnim !== null && this.deskAnim.to !== "flat");
+    return this.windows.has("keyboard") || (this.deskAnim !== null && this.deskAnim.to.view !== "flat");
   }
 
   /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
@@ -566,18 +568,25 @@ class Engine {
     });
   }
 
-  /** The desk view at `t`: which presets it's between, and how far; null before any. */
-  private deskViewState(t: number): { from: DeskView; to: DeskView; amount: number } | null {
+  /** The desk view at `t`: the shot it's on, or how far it is between two; null before any. */
+  private deskViewState(t: number): DeskState | null {
     if (!this.deskAnim) return null;
     const a = this.deskAnim;
-    return { from: a.from, to: a.to, amount: progress(t, a.start, a.dur, a.ease) };
+    const amount = progress(t, a.start, a.dur, a.ease);
+    return amount >= 1 ? a.to : { from: a.from, to: a.to, amount };
   }
 
-  /** Hand a desk page the screen's picture and the key events it hasn't had, and draw it at `t` from `view`. */
+  /** The lid's angle at `t`, in degrees. */
+  private lidAt(t: number): number {
+    const a = this.lidAnim;
+    return a ? a.from + (a.to - a.from) * progress(t, a.start, a.dur, a.ease) : DESK_LID;
+  }
+
+  /** Hand a desk page the screen's picture and the key events it hasn't had, and draw it at `t` in `state`. */
   private async deskRender(
     page: Page,
     t: number,
-    view: { from?: DeskView; to: DeskView; amount?: number },
+    state: DeskState,
     screen: { data: Buffer; width: number; height: number; channels: 3 | 4 } | null,
     key: string,
     lossless: boolean,
@@ -591,9 +600,10 @@ class Engine {
     const fed = this.deskFed.get(key) ?? 0;
     const events = this.keyEvents.slice(fed);
     this.deskFed.set(key, this.keyEvents.length);
+    const frame = { state, lid: this.lidAt(t) };
     await page.evaluate(
-      ([t, events, view]) => (window as unknown as { __rsDesk: { render: (t: number, e: unknown[], v: unknown) => void } }).__rsDesk.render(t, events, view),
-      [t, events, view] as const,
+      ([t, events, frame]) => (window as unknown as { __rsDesk: { render: (t: number, e: unknown[], f: unknown) => void } }).__rsDesk.render(t, events, frame),
+      [t, events, frame] as const,
     );
   }
 
@@ -1348,10 +1358,16 @@ class Engine {
       }
       case "desk.to":
       case "desk.out": {
-        // Like a zoom: it runs alongside what follows. A new one starts from the view the last was heading for.
-        const to: DeskView = action.kind === "desk.to" ? action.view : "flat";
-        const from: DeskView = this.deskAnim ? this.deskAnim.to : "flat";
+        // Like a zoom: it runs alongside what follows. A new one starts from where the last one had got to.
+        const to: DeskShot =
+          action.kind === "desk.to" ? { view: action.view, orbit: action.orbit, tilt: action.tilt, distance: action.distance, hands: action.hands } : { view: "flat" };
+        const from: DeskState = this.deskViewState(start) ?? { view: "flat" };
         this.deskAnim = { from, to, start, dur: action.duration ?? DEFAULTS.deskDuration, ease: action.ease ?? "smooth" };
+        return null;
+      }
+      case "desk.lid": {
+        // Alongside what follows too, from the angle it's at.
+        this.lidAnim = { from: this.lidAt(start), to: action.degrees, start, dur: action.duration ?? DEFAULTS.deskDuration, ease: action.ease ?? "smooth" };
         return null;
       }
       case "window.place": {
@@ -1618,7 +1634,8 @@ class Engine {
     const zoom = this.zoomAnim ? this.zoomAnim.start + this.zoomAnim.dur : 0;
     const follow = this.follow && this.attention ? this.attention.at + this.follow.hold + 900 : 0;
     const desk = this.deskAnim ? this.deskAnim.start + this.deskAnim.dur : 0;
-    return Math.max(zoom, this.narrationEnd, follow, desk);
+    const lid = this.lidAnim ? this.lidAnim.start + this.lidAnim.dur : 0;
+    return Math.max(zoom, this.narrationEnd, follow, desk, lid);
   }
 
   /** Advance continuous state (cursor, zoom) to time t. */
@@ -1759,7 +1776,7 @@ class Engine {
       .toBuffer({ resolveWithObject: true });
     if (keyboard) {
       // The panel films the desk with the desktop so far on the laptop's screen, then sits on top of it.
-      await this.deskRender(keyboard.page, t, { to: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false);
+      await this.deskRender(keyboard.page, t, { view: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false);
       const panel = await this.contentOverlay(keyboard);
       ({ data: sceneData } = await sharp(sceneData, { raw: { width: W, height: H, channels: 4 } }).composite([panel]).raw().toBuffer({ resolveWithObject: true }));
     }
@@ -1813,7 +1830,8 @@ class Engine {
     if (overlays.length) pipeline = pipeline.composite(overlays);
     const flat: Buffer = await pipeline.removeAlpha().raw().toBuffer();
     const view = this.deskViewState(t);
-    if (!view || (view.amount <= 0 && view.from === "flat") || (view.amount >= 1 && view.to === "flat")) return flat;
+    const isFlat = (s: DeskState): boolean => ("view" in s ? s.view === "flat" : s.amount <= 0 ? isFlat(s.from) : s.amount >= 1 && isFlat(s.to));
+    if (!view || isFlat(view)) return flat;
     // A desk view: the frame so far is what's on the laptop's screen, and the desk is the frame.
     if (!this.deskPage) {
       const page = await this.context.newPage();

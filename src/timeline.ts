@@ -20,7 +20,8 @@ export type Action =
   | { kind: "cursor.click"; button?: "left" | "right"; duration?: number; /** How to answer an alert, confirm or prompt the click opens. */ dialog?: "accept" | "dismiss" }
   | { kind: "zoom.to"; target: Target; scale?: number; duration?: number; ease?: Ease; window?: string; within?: "window" }
   | { kind: "zoom.out"; duration?: number; ease?: Ease }
-  | { kind: "desk.to"; view: DeskView; duration?: number; ease?: Ease }
+  | { kind: "desk.to"; view: DeskView; duration?: number; ease?: Ease; orbit?: number; tilt?: number; distance?: number; hands?: boolean }
+  | { kind: "desk.lid"; degrees: number; duration?: number; ease?: Ease }
   | { kind: "desk.out"; duration?: number; ease?: Ease }
   | { kind: "keyboard.open"; labels?: boolean; x?: number; y?: number; width?: number; height?: number }
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }

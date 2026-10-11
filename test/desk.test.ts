@@ -47,17 +47,31 @@ test("the keyboard window and the desk views queue like any window and view, and
   const d = createDemo({ desk: { laptop: "pc", hands: false, handColor: "#c8a080", surface: "rgb(30, 30, 34)" }, wallpaper: "#101418" });
   d.keyboard.open({ labels: false, x: 10, y: 20 });
   d.desk.to("desk", { duration: 500 });
+  d.desk.to("float", { orbit: -30, tilt: 10, distance: 1.2 });
+  d.desk.to("desk", { hands: false });
+  d.desk.lid(0, { duration: 900 });
   d.desk.out();
   d.keyboard.place({ width: 400 });
   d.keyboard.close();
   assert.deepEqual(d.getTimeline(), [
     { kind: "keyboard.open", labels: false, x: 10, y: 20 },
     { kind: "desk.to", view: "desk", duration: 500 },
+    { kind: "desk.to", view: "float", orbit: -30, tilt: 10, distance: 1.2 },
+    { kind: "desk.to", view: "desk", hands: false },
+    { kind: "desk.lid", degrees: 0, duration: 900 },
     { kind: "desk.out" },
     { kind: "window.place", window: "keyboard", width: 400 },
     { kind: "window.close", window: "keyboard" },
   ]);
-  assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "desk", "keyboard"\)/);
+  assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "desk", "keyboard", "float"\)/);
+  assert.throws(() => d.desk.to("desk", { tilt: 90 }), /tilt must be degrees from -80 to 80, not 90/);
+  assert.throws(() => d.desk.to("desk", { distance: 0 }), /distance must be a number above 0/);
+  assert.throws(() => d.desk.to("desk", { orbit: "left" as never }), /orbit must be a number/);
+  assert.throws(() => d.desk.to("desk", { hands: "no" as never }), /hands must be true or false/);
+  assert.throws(() => d.desk.out({ orbit: 10 } as never), /orbit/);
+  assert.throws(() => d.desk.lid(150), /degrees must be from 0 \(shut\) to 135/);
+  assert.throws(() => d.desk.lid(undefined as never), /degrees/);
+  assert.throws(() => createDemo({ desk: { backdrop: "nope nope" } }), /desk backdrop must be a CSS colour/);
   assert.throws(() => d.press("a", { window: "keyboard" as never }), /unknown window "keyboard"/);
   assert.throws(() => d.desk.to("desk", { duration: -1 }), /duration must be a number, 0 or more/);
   assert.throws(() => createDemo({ desk: { laptop: "amiga" as never } }), /unknown desk laptop "amiga" \(use "mac" or "pc"\)/);
@@ -153,4 +167,45 @@ test("the wallpaper is a colour, a gradient, or an image relative to the script;
   const bad = await run(["check", "s.ts"], dir);
   assert.equal(bad.code, 1);
   assert.match(bad.output, /there's no wallpaper image at [^\n]*nope\.png[\s\S]*s\.ts:2[^\n]*\(createDemo\)/);
+});
+
+test("desk views: a flight begun mid-flight carries on from where it was, float shows the demo on both devices, and the lid closes over it", { timeout: 600_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-float-"));
+  // A page in one loud colour, so the screens are easy to count.
+  demo(
+    dir,
+    `const demo = createDemo({ viewport: [360, 240], fps: 30 });\ndemo.browser.goto("data:text/html,<body style='background:%23e0218a;margin:0'>");\n` +
+      `demo.wait(300);\ndemo.desk.to("desk", { duration: 1000 });\ndemo.wait(500);\ndemo.desk.to("float", { duration: 1000 });\ndemo.wait(1600);\n` +
+      `demo.desk.lid(0, { duration: 600 });\ndemo.wait(900);\nawait demo.render("out.mp4");`,
+  );
+  const r = await run(["render", "s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+  mkdirSync(join(dir, "f"));
+  execFileSync(resolveFfmpeg(), ["-v", "error", "-i", "out.mp4", join("f", "%04d.png")], { cwd: dir });
+  const files = (await import("node:fs")).readdirSync(join(dir, "f")).sort();
+  const frames = await Promise.all(files.map((f) => pixels(join(dir, "f", f))));
+  const whole = { left: 0, top: 0, width: frames[0].width, height: frames[0].height };
+  // Nothing jumps: each step between frames is in line with the steps beside it (the old flight restarted from
+  // where the first was heading, a jump of a whole shot).
+  const steps = frames.slice(1).map((f, i) => diff(frames[i], f, whole));
+  for (let i = 1; i < steps.length - 1; i++) {
+    assert.ok(steps[i] <= 1.8 * Math.max(steps[i - 1], steps[i + 1]) + 1.5, `frame ${i + 1} jumps: ${steps.slice(i - 1, i + 2).map((s) => s.toFixed(1)).join(", ")}`);
+  }
+  // The float view settled (before the lid moves): the backdrop round the edges, the page's colour on two screens.
+  const magenta = (p: (typeof frames)[0], from: number, to: number) => {
+    let n = 0;
+    for (let y = 0; y < p.height; y++) for (let x = Math.round(p.width * from); x < Math.round(p.width * to); x++) {
+      const i = (y * p.width + x) * p.channels;
+      if (p.data[i] > 170 && p.data[i + 1] < 90 && p.data[i + 2] > 90 && p.data[i + 2] < 190) n++;
+    }
+    return n / (p.width * p.height);
+  };
+  const settled = frames[Math.round(30 * (0.3 + 0.5 + 1.6)) - 2], shut = frames[frames.length - 1];
+  const corner = settled.data.subarray(0, 3);
+  assert.ok(corner[0] > 150 && Math.abs(corner[0] - corner[2]) < 30, `the float view's backdrop is a light grey, not ${[...corner]}`);
+  assert.ok(magenta(settled, 0, 0.55) > 0.04, "the laptop's screen shows the demo");
+  assert.ok(magenta(settled, 0.6, 1) > 0.04, "the iPad's screen shows the demo");
+  // Shut, the laptop's screen is gone; the iPad's is still there.
+  assert.ok(magenta(shut, 0, 0.5) < 0.01, "the laptop's screen is hidden by its lid");
+  assert.ok(magenta(shut, 0.6, 1) > 0.04, "the iPad still shows the demo");
 });

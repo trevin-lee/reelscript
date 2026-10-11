@@ -28,6 +28,8 @@ export interface DeskOptions {
   sleeve?: string;
   /** The desk's surface, a CSS color. Default: "#e4ddd3" */
   surface?: string;
+  /** The float view's backdrop, a CSS color; it's drawn as a soft gradient around it. Default: "#dfe3ea" */
+  backdrop?: string;
 }
 
 /** A key event the scene animates: the keys, who presses them, when the main key goes down, and for how long. */
@@ -41,7 +43,7 @@ export interface KeyEvent {
   from?: number;
 }
 
-export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#f2c4a0", sleeve: "#5d6f8a", surface: "#e4ddd3" };
+export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#f2c4a0", sleeve: "#5d6f8a", surface: "#e4ddd3", backdrop: "#dfe3ea" };
 
 export interface DeskPageOptions extends Required<DeskOptions> {
   /** Show a chord's label (the keyboard window does; the desk views don't). */
@@ -50,9 +52,26 @@ export interface DeskPageOptions extends Required<DeskOptions> {
   aspect: number;
 }
 
-/** Camera presets, and "flat": the screen filling the frame exactly, where a desk view starts from. */
-export type DeskView = "flat" | "screen" | "desk" | "keyboard";
-export const DESK_VIEWS: DeskView[] = ["screen", "desk", "keyboard"];
+/**
+ * Camera presets, and "flat": the screen filling the frame exactly, where a desk view starts from. "float" is a
+ * different stage: no desk, the laptop and an iPad floating in a studio void.
+ */
+export type DeskView = "flat" | "screen" | "desk" | "keyboard" | "float";
+export const DESK_VIEWS: DeskView[] = ["screen", "desk", "keyboard", "float"];
+
+/** A shot: a view, the camera moved around it (degrees around, degrees up, times as far), and whether the hands are in it. */
+export interface DeskShot {
+  view: DeskView;
+  orbit?: number;
+  tilt?: number;
+  distance?: number;
+  hands?: boolean;
+}
+/** What the desk page draws: a shot, or part of the way between two (the first itself a flight, when one began mid-flight). */
+export type DeskState = DeskShot | { from: DeskState; to: DeskState; amount: number };
+/** The lid's angle when nothing has moved it, in degrees: 0 is shut. */
+export const DESK_LID = 107;
+export const DESK_LID_MAX = 135;
 
 /** Where the page lives; its Three.js and hand models are served under it too. */
 export const DESK_URL = "http://desk.reelscript/";
@@ -168,7 +187,7 @@ function grain(color) {
   t.anisotropy = 4;
   return t;
 }
-const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.85 }));
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.85, transparent: true }));
 desk.rotation.x = -Math.PI / 2;
 desk.position.set(0, -DECK_H - 0.2, -20);
 desk.receiveShadow = true;
@@ -191,6 +210,10 @@ function roundedRect(w, d, r) {
   s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
   return s;
 }
+// Everything that is the laptop, so it can be lifted off the desk and turned as one in the float view. Positions
+// inside it (the keys, the hands) are the laptop's own, the same as the world's while it sits on the desk.
+const laptop = new THREE.Group();
+scene.add(laptop);
 const bodyMat = new THREE.MeshStandardMaterial({ color: P.body, roughness: 0.55, metalness: mac ? 0.45 : 0.1 });
 const bodyGeo = new THREE.ExtrudeGeometry(roundedRect(BODY_W, BODY_D, 0.6), { depth: DECK_H, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3 });
 bodyGeo.rotateX(-Math.PI / 2);
@@ -198,20 +221,20 @@ bodyGeo.translate(0, -DECK_H - 0.1, 0);
 const body = new THREE.Mesh(bodyGeo, bodyMat);
 body.receiveShadow = true;
 body.castShadow = true;
-scene.add(body);
+laptop.add(body);
 // The well the keys sit in.
 const well = new THREE.Mesh(new THREE.PlaneGeometry(W * U + 0.25, D * U + 0.25), new THREE.MeshStandardMaterial({ color: P.bodyEdge, roughness: 0.95 }));
 well.rotation.x = -Math.PI / 2;
 well.position.set(0, -0.06, KEYS_Z + (D * U) / 2);
 well.receiveShadow = true;
-scene.add(well);
+laptop.add(well);
 // Trackpad.
 const padW = mac ? 7.6 : 6.2, padD = mac ? 4.9 : 3.9;
 const pad = new THREE.Mesh(new THREE.PlaneGeometry(padW, padD), new THREE.MeshStandardMaterial({ color: P.trackpad, roughness: 0.35, metalness: mac ? 0.3 : 0.05 }));
 pad.rotation.x = -Math.PI / 2;
 pad.position.set(0, 0.012, KEYS_Z + D * U + 0.9 + padD / 2);
 pad.receiveShadow = true;
-scene.add(pad);
+laptop.add(pad);
 
 // Legends, drawn once each into the keycap's top texture, in the bundled Inter: it must have loaded first,
 // or the canvas silently draws the default serif (Times). The layout follows the keyboard's own:
@@ -288,7 +311,7 @@ for (const cap of LAYOUT.keys) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.position.set(ux(cap.x + cap.w / 2), KEY_H / 2, keyZ(cap.y + cap.h / 2));
-  scene.add(mesh);
+  laptop.add(mesh);
   keys.set(cap.id, { mesh, cap, matTop, matLit });
 }
 function keyCenter(id) {
@@ -301,11 +324,13 @@ const SCREEN_W = BODY_W - (mac ? 1.4 : 1.8);
 const SCREEN_H = SCREEN_W / OPTS.aspect;
 const BEZEL = mac ? 0.5 : 0.7;
 const LID_W = BODY_W, LID_H = SCREEN_H + BEZEL * 2 + (mac ? 0.3 : 0.6), LID_T = 0.42;
-const OPEN = Math.PI / 2 + 0.3; // 107°
 const lid = new THREE.Group();
 lid.position.set(0, -0.1, -BODY_D / 2 + 0.3);
-lid.rotation.x = -(OPEN - Math.PI / 2);
-scene.add(lid);
+function setLid(degrees) {
+  lid.rotation.x = Math.PI / 2 - (degrees * Math.PI) / 180;
+}
+setLid(${DESK_LID});
+laptop.add(lid);
 const lidGeo = new THREE.ExtrudeGeometry(roundedRect(LID_W, LID_H, 0.6), { depth: LID_T, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 2 });
 lidGeo.translate(0, LID_H / 2, -LID_T - 0.08);
 const lidMesh = new THREE.Mesh(lidGeo, bodyMat);
@@ -328,7 +353,136 @@ lid.add(screen);
 const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, LID_W - 2, 24), new THREE.MeshStandardMaterial({ color: P.bodyEdge, roughness: 0.6, metalness: 0.4 }));
 hinge.rotation.z = Math.PI / 2;
 hinge.position.set(0, -0.1, -BODY_D / 2 + 0.3);
-scene.add(hinge);
+laptop.add(hinge);
+
+// ---------------------------------------------------------------- the studio: the float view's stage
+// A void in the backdrop colour, lighter above and deeper below, with the devices' shadows soft on a floor
+// far beneath them. It fades in over the room as the desk fades out.
+const BACKDROP = new THREE.Color(OPTS.backdrop);
+const ROOM = new THREE.Color(0x15161a);
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(320, 48, 24),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, transparent: true,
+    uniforms: {
+      top: { value: BACKDROP.clone().lerp(new THREE.Color(0xffffff), 0.35) },
+      bottom: { value: BACKDROP.clone().multiplyScalar(0.55) },
+      opacity: { value: 0 },
+    },
+    vertexShader: "varying vec3 p; void main() { p = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: "uniform vec3 top; uniform vec3 bottom; uniform float opacity; varying vec3 p; void main() { gl_FragColor = vec4(mix(bottom, top, smoothstep(-0.45, 0.55, p.y)), opacity);\n#include <colorspace_fragment>\n}",
+  }),
+);
+sky.renderOrder = -1;
+scene.add(sky);
+// A soft shadow under each device, as in a product shot: a blurred ellipse on a floor far below, not the lamp's
+// hard shadow, which would show the floor's edge.
+const blobTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 256;
+  const g = c.getContext("2d");
+  const r = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  r.addColorStop(0, "rgba(0,0,0,1)");
+  r.addColorStop(0.45, "rgba(0,0,0,0.55)");
+  r.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = r;
+  g.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(c);
+})();
+function blob(w, d) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ map: blobTex, color: BACKDROP.clone().multiplyScalar(0.25), transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.visible = false;
+  scene.add(m);
+  return m;
+}
+const FLOOR_Y = -14;
+const shadows = { laptop: blob(36, 30), ipad: blob(24, 18) };
+
+// The iPad, landscape: an 11-inch iPad Pro in key units (19 mm), the laptop's metal on the back, black glass on the
+// front, and the same picture as the laptop's screen, cut to its own shape.
+const IPAD_W = 13.4, IPAD_H = 9.6, IPAD_T = 0.33, IPAD_BEZEL = 0.5;
+const ipad = new THREE.Group();
+ipad.visible = false;
+scene.add(ipad);
+{
+  const shell = new THREE.ExtrudeGeometry(roundedRect(IPAD_W, IPAD_H, 0.95), { depth: IPAD_T, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 3, curveSegments: 16 });
+  shell.translate(0, 0, -IPAD_T - 0.05);
+  const back = new THREE.Mesh(shell, bodyMat);
+  back.castShadow = true;
+  ipad.add(back);
+  const glass = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(IPAD_W - 0.04, IPAD_H - 0.04, 0.92), 16), new THREE.MeshStandardMaterial({ color: 0x050506, roughness: 0.12, metalness: 0.2 }));
+  glass.position.z = 0.012;
+  ipad.add(glass);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.07, 16), new THREE.MeshStandardMaterial({ color: 0x1b1d24, roughness: 0.2 }));
+  lens.position.set(0, IPAD_H / 2 - IPAD_BEZEL / 2, 0.016);
+  ipad.add(lens);
+}
+const IPAD_SW = IPAD_W - IPAD_BEZEL * 2, IPAD_SH = IPAD_H - IPAD_BEZEL * 2;
+const ipadTex = new THREE.Texture();
+ipadTex.colorSpace = THREE.SRGBColorSpace;
+ipadTex.minFilter = THREE.LinearFilter;
+ipadTex.generateMipmaps = false;
+// The demo's picture, cut to the iPad's screen from the middle: as much as fills it, nothing stretched.
+{
+  const img = OPTS.aspect, scr = IPAD_SW / IPAD_SH;
+  if (img > scr) { ipadTex.repeat.set(scr / img, 1); ipadTex.offset.set((1 - scr / img) / 2, 0); }
+  else { ipadTex.repeat.set(1, img / scr); ipadTex.offset.set(0, (1 - img / scr) / 2); }
+}
+const ipadScreenMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+const ipadScreen = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(IPAD_SW, IPAD_SH, 0.45), 12), ipadScreenMat);
+{
+  // ShapeGeometry's UVs are its coordinates; make them 0..1 across the screen.
+  const uv = ipadScreen.geometry.attributes.uv, pos = ipadScreen.geometry.attributes.position;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / IPAD_SW + 0.5, pos.getY(i) / IPAD_SH + 0.5);
+}
+ipadScreen.position.z = 0.02;
+ipad.add(ipadScreen);
+
+// Where each device floats, and how it turns: the laptop to the left, three-quarters on; the iPad in front of it
+// to the right, tipped back. Each drifts a little, slowly, out of step with the other.
+const FLOAT = {
+  laptop: { pos: new THREE.Vector3(-5.5, 3.5, -4), rot: new THREE.Euler(0.12, 0.42, 0.04, "YXZ") },
+  ipad: { pos: new THREE.Vector3(11.5, 1.5, 6), rot: new THREE.Euler(-0.3, -0.42, -0.06, "YXZ") },
+  // Where the iPad comes from as the stage changes: below and in front, out of the shot.
+  ipadFrom: new THREE.Vector3(16, -14, 16),
+};
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qi = new THREE.Quaternion();
+// Set the stage at t: 0 is the desk, 1 the studio, with the devices in between.
+function setStage(stage, t) {
+  const e = ease(stage);
+  const drift = (period, phase, size) => Math.sin(((t / period) + phase) * Math.PI * 2) * size * e;
+  laptop.position.copy(FLOAT.laptop.pos).multiplyScalar(e);
+  laptop.position.y += drift(6400, 0, 0.35);
+  _qa.setFromEuler(FLOAT.laptop.rot);
+  laptop.quaternion.identity().slerp(_qa, e);
+  laptop.rotateY(drift(9000, 0.3, 0.02));
+  ipad.visible = stage > 0.001;
+  // The iPad arrives in the second half of the change, so it doesn't cross the laptop on the way.
+  const ie = ease(Math.min(1, Math.max(0, stage * 1.6 - 0.6)));
+  ipad.position.lerpVectors(FLOAT.ipadFrom, FLOAT.ipad.pos, ie);
+  ipad.position.y += drift(5200, 0.45, 0.3);
+  _qb.setFromEuler(FLOAT.ipad.rot);
+  _qi.setFromEuler(new THREE.Euler(-1.1, -0.9, 0, "YXZ"));
+  ipad.quaternion.copy(_qi).slerp(_qb, ie);
+  ipad.rotateX(drift(7600, 0.1, 0.015));
+  desk.visible = stage < 0.999;
+  desk.material.opacity = 1 - e;
+  desk.material.depthWrite = e === 0; // fading, it mustn't hide the shadows on the floor below it
+  sky.visible = stage > 0.001;
+  sky.material.uniforms.opacity.value = e;
+  // Each shadow under its device, fainter the higher it drifts.
+  for (const [name, obj] of [["laptop", laptop], ["ipad", ipad]]) {
+    const sh = shadows[name];
+    sh.visible = stage > 0.001;
+    sh.position.set(obj.position.x, FLOOR_Y, obj.position.z);
+    sh.material.opacity = 0.32 * e * (name === "ipad" ? Math.min(1, Math.max(0, stage * 1.6 - 0.6)) : 1);
+  }
+  scene.background.copy(ROOM);
+  scene.fog.color.copy(ROOM).lerp(BACKDROP.clone().multiplyScalar(0.8), e);
+  scene.fog.near = 45 + 200 * e;
+  scene.fog.far = 130 + 300 * e;
+}
 
 // ---------------------------------------------------------------- hands: the model's joints are set one by one, from its rest pose
 // Skin that reads warm and soft rather than waxy: a peach base, a reddish sheen where light grazes it,
@@ -453,7 +607,7 @@ async function loadHand(side) {
   root.add(model);
   const holder = new THREE.Group(); // positioned; the root inside carries the model's orientation
   holder.add(root);
-  scene.add(holder);
+  laptop.add(holder);
   holder.updateMatrixWorld(true);
   // The forearm, which the model stops short of: a knit sleeve whose cuff swallows the wrist's open end, angled
   // down and out toward a body in front of the laptop. The sleeve says "a person"; bare tubes the colour of the
@@ -499,10 +653,11 @@ function poseFinger(hand, f, curl, press, spread = 0) {
     j.bone.quaternion.copy(A).multiply(j.restQuat);
   }
 }
+// A fingertip, in the laptop's space (the keys'), wherever the laptop is.
 function tipAt(hand, f) {
   hand.root.updateMatrixWorld(true);
   const chain = hand.chains[f];
-  return chain.joints[chain.joints.length - 1].bone.getWorldPosition(_v.clone());
+  return laptop.worldToLocal(chain.joints[chain.joints.length - 1].bone.getWorldPosition(_v.clone()));
 }
 function placeHandFor(hand, f, target) {
   hand.root.position.set(0, 0, 0);
@@ -721,30 +876,82 @@ function viewPose(name) {
     return { pos: new THREE.Vector3(-4, 19, 26), at: new THREE.Vector3(0, 4.5, -2.5), up: new THREE.Vector3(0, 1, 0), fov: 30 };
   }
   if (name === "side") return { pos: new THREE.Vector3(34, 5, 2), at: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 1, 0), fov: 28 };
+  if (name === "float") return { pos: new THREE.Vector3(5, 13, 58), at: new THREE.Vector3(2.5, 2.5, 0), up: new THREE.Vector3(0, 1, 0), fov: 30 };
   // keyboard: over the hands, keys filling the width, the screen's foot above
   return { pos: new THREE.Vector3(0, 19.5, 10.7), at: new THREE.Vector3(0, 0.3, -2.4), up: new THREE.Vector3(0, 1, 0), fov: 32 };
 }
-function setCamera(view) {
-  const a = viewPose(view.from ?? "flat"), b = viewPose(view.to ?? "flat");
-  const p = ease(view.amount ?? 1);
-  camera.position.lerpVectors(a.pos, b.pos, p);
-  camera.up.lerpVectors(a.up, b.up, p).normalize();
-  camera.fov = a.fov + (b.fov - a.fov) * p;
+// A shot's pose: its view's, with the camera moved around what it looks at: orbit degrees around (to the right),
+// tilt degrees up, and distance times as far.
+const Y = new THREE.Vector3(0, 1, 0);
+function shotPose(shot) {
+  const p = viewPose(shot.view);
+  if (shot.view === "flat") return p;
+  const off = p.pos.clone().sub(p.at);
+  if (shot.orbit) off.applyAxisAngle(Y, (shot.orbit * Math.PI) / 180);
+  if (shot.tilt) {
+    // Up or down, short of straight over or under.
+    const len = off.length(), now = Math.asin(off.y / len);
+    const to = Math.max(-1.45, Math.min(1.45, now + (shot.tilt * Math.PI) / 180));
+    const flat = Math.hypot(off.x, off.z) || 1;
+    off.set((off.x / flat) * Math.cos(to) * len, Math.sin(to) * len, (off.z / flat) * Math.cos(to) * len);
+  }
+  if (shot.distance) off.multiplyScalar(shot.distance);
+  p.pos.copy(p.at).add(off);
+  return p;
+}
+// A state's numbers, blended through its flights: amounts arrive eased (by the renderer), so they're used as they are.
+function stageOf(state) {
+  if (state.from) return stageOf(state.from) + (stageOf(state.to) - stageOf(state.from)) * state.amount;
+  return state.view === "float" ? 1 : 0;
+}
+function awayOf(state) {
+  if (state.from) return awayOf(state.from) + (awayOf(state.to) - awayOf(state.from)) * state.amount;
+  return state.view === "float" || state.hands === false ? 1 : 0;
+}
+function poseOf(state) {
+  if (!state.from) return shotPose(state);
+  const a = poseOf(state.from), b = poseOf(state.to), p = state.amount;
+  return {
+    pos: a.pos.lerp(b.pos, p),
+    at: a.at.lerp(b.at, p),
+    up: a.up.lerp(b.up, p).normalize(),
+    fov: a.fov + (b.fov - a.fov) * p,
+  };
+}
+function setCamera(state) {
+  const p = poseOf(state);
+  camera.position.copy(p.pos);
+  camera.up.copy(p.up);
+  camera.fov = p.fov;
   camera.updateProjectionMatrix();
-  camera.lookAt(_v.lerpVectors(a.at, b.at, p));
+  camera.lookAt(p.at);
 }
 
 // ---------------------------------------------------------------- render
 const label = document.getElementById("label");
 let screenShown = false;
-function render(t, view) {
+// Where hands that leave go: back toward the body and down, out of every shot.
+const AWAY = new THREE.Vector3(0, -6, 30);
+function render(t, frame) {
+  const state = frame.state ?? { view: "keyboard" };
+  const lidDeg = frame.lid ?? ${DESK_LID};
+  setLid(lidDeg);
+  setStage(stageOf(state), t);
+  laptop.updateMatrixWorld(true);
   for (const [id, k] of keys) {
     let amount = 0;
     for (const ev of events) for (const key of ev.keys) if (key.id === id) amount = Math.max(amount, pressAmount(ev, key, t));
     k.mesh.position.y = KEY_H / 2 - KEY_TRAVEL * amount;
     k.mesh.material[2] = amount > 0.5 ? k.matLit : k.matTop;
   }
-  if (OPTS.hands) for (const h of Object.values(hands)) placeHand(h, t);
+  // The hands leave for a shot without them, for the float view, and as the lid comes down onto the keys.
+  const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35))));
+  if (OPTS.hands) for (const h of Object.values(hands)) {
+    h.root.visible = away < 0.999;
+    if (!h.root.visible) continue;
+    placeHand(h, t);
+    h.root.position.addScaledVector(AWAY, away); // the whole hand, holding its pose
+  }
   let shown = null, opacity = 0;
   if (OPTS.labels) {
     for (const ev of events) {
@@ -760,8 +967,9 @@ function render(t, view) {
   label.style.opacity = String(opacity);
   const { centre, normal } = screenFrame();
   glow.position.copy(centre).addScaledVector(normal, 6);
-  glow.intensity = screenShown ? 45 : 0;
-  setCamera(view);
+  // The screen lights what's in front of it, less as the lid closes and none on the studio's stage.
+  glow.intensity = screenShown ? 45 * Math.min(1, lidDeg / 90) * (1 - stageOf(state)) : 0;
+  setCamera(state);
   renderer.render(scene, camera);
 }
 function resize(w, h) {
@@ -786,6 +994,11 @@ window.__rsDesk = {
         screenMat.map = screenTex;
         screenMat.color.set(0xffffff);
         screenMat.needsUpdate = true;
+        ipadTex.image = img;
+        ipadTex.needsUpdate = true;
+        ipadScreenMat.map = ipadTex;
+        ipadScreenMat.color.set(0xffffff);
+        ipadScreenMat.needsUpdate = true;
         screenShown = true;
         resolve();
       };
@@ -793,9 +1006,10 @@ window.__rsDesk = {
       img.src = url;
     });
   },
-  render(t, newEvents, view) {
+  // Draw the frame at t: the key events not given before, and { state, lid } (a DeskState, the lid in degrees).
+  render(t, newEvents, frame) {
     for (const ev of newEvents) events.push(ev);
-    render(t, view ?? { to: "keyboard" });
+    render(t, frame ?? {});
   },
 };
 resize(window.innerWidth, window.innerHeight);

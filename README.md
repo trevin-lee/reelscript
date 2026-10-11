@@ -192,7 +192,7 @@ A recording as wide as your own terminal needs a window as big: give `open()` a 
 
 See [examples/terminal.ts](examples/terminal.ts).
 
-## Keyboard view and desk shots
+## Keyboard view, desk and device shots
 
 ```ts
 demo.keyboard.open();                 // a panel, lower right: the laptop's keys with the hands on them
@@ -203,11 +203,21 @@ demo.wait(2000);
 demo.desk.out();                      // and flies back to the flat desktop
 ```
 
-The desk is a laptop under a lamp, with the demo on its screen and two hands on its keys, drawn in 3D a frame at a time like everything else, so it renders the same every time. `createDemo({ desk })` sets it up once: `laptop` is `"mac"` (silver, ⌘, a Mac's key names) or `"pc"` (dark, Ctrl, Alt, where the script's `Meta` shows as Ctrl, as the same shortcut is on a PC); `hands: false` leaves the hands out; `handColor`, `sleeve` and `surface` are CSS colours for the skin, the sleeves and the desk.
+The desk is a laptop under a lamp, with the demo on its screen and two hands on its keys, drawn in 3D a frame at a time like everything else, so it renders the same every time. `createDemo({ desk })` sets it up once: `laptop` is `"mac"` (silver, ⌘, a Mac's key names) or `"pc"` (dark, Ctrl, Alt, where the script's `Meta` shows as Ctrl, as the same shortcut is on a PC); `hands: false` leaves the hands out; `handColor`, `sleeve`, `surface` and `backdrop` are CSS colours for the skin, the sleeves, the desk and the float view's studio.
 
 `keyboard.open()` shows it as a panel over the keys. While the panel is open, every key the demo presses or types plays on it: `press()`, `type()`, a terminal command as it's typed, and the editor's Quick Open and Command Palette. A chord shows as a label under the keys (`labels: false` leaves it out). The panel comes to the front but never takes typing: keys still go to the window that had them. It's placed, moved and closed like any window. A key the laptop hasn't got (`press("Meta+F13")`) fails at the line while the panel is open, and a character it can't type (`é`) is a warning, since the viewer would be shown nothing.
 
-`desk.to(view)` flies the whole frame to the desk, like a zoom, alongside the actions that follow: `"screen"` (the laptop's screen, a little from the side), `"desk"` (the laptop and the hands) or `"keyboard"` (over the keys). The flat desktop, with everything on it, is what's on the laptop's screen, so the flight starts from the frame as it was; close the keyboard window first if you don't want the panel on the laptop's screen too. `desk.out()` flies back. Both take `duration` (default 1400) and `ease`. The hands press keys in the desk views too. See [examples/keyboard.ts](examples/keyboard.ts).
+`desk.to(view)` flies the whole frame to the desk, like a zoom, alongside the actions that follow: `"screen"` (the laptop's screen, a little from the side), `"desk"` (the laptop and the hands), `"keyboard"` (over the keys) or `"float"` (the laptop and an iPad floating in a studio, both showing the demo). The flat desktop, with everything on it, is what's on the laptop's screen, so the flight starts from the frame as it was; close the keyboard window first if you don't want the panel on the laptop's screen too. `desk.out()` flies back. Both take `duration` (default 1400) and `ease`; a flight begun while another is under way carries on from where that one had got to. The hands press keys in the desk views too.
+
+```ts
+demo.desk.to("float");                                // the MacBook and the iPad, floating
+demo.desk.to("float", { orbit: 35, tilt: 8 });        // the camera swings round them
+demo.desk.lid(0, { duration: 1200 });                 // the lid shuts...
+demo.desk.lid(110);                                   // ...and opens
+demo.desk.to("desk", { hands: false });               // the laptop alone on its desk
+```
+
+A view takes the camera somewhere else with `orbit` (degrees round what it looks at, to the right; negative to the left), `tilt` (degrees up, or down, from -80 to 80) and `distance` (times as far); `hands: false` sends the hands out of the shot, and they're never in `"float"`. The iPad shows the same picture as the laptop, cut to its screen from the middle. `desk.lid(degrees)` moves the lid, from 0 (shut) to 135, alongside what follows; it starts at 107, and the hands leave the keys as it comes down. `desk.backdrop` is the studio's colour. See [examples/keyboard.ts](examples/keyboard.ts) and [examples/devices.ts](examples/devices.ts).
 
 The hands are the WebXR generic hand models (MIT, see [assets/hands](assets/hands)), posed by reelscript. The laptop's screen takes the desktop's aspect ratio, whatever `desktop` size is set.
 
@@ -355,7 +365,8 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.editor.openFile(path, { wpm })`, `demo.editor.command(name, { wpm })` | Quick Open (⌘P) or the Command Palette (F1), typed visibly at `wpm` (default 300). Fails if VS Code finds no match. |
 | `demo.editor.type(text, { wpm })` | Bring the editor forward and type at its caret, at `wpm` (default 300). If the keyboard is elsewhere (the Explorer after clicking a file), it goes to the open file first; with no file open, it fails. Auto-closing brackets and auto-indent are off, so typed code lands as written. |
 | `demo.keyboard.open({ labels, x, y, width, height })` | Open the keyboard window: the desk's keys with the hands on them, as a panel (lower right, 42% of the desktop wide, by default). Every key pressed or typed while it's open plays on it; a chord shows as a label unless `labels: false`. It never takes typing. |
-| `demo.desk.to(view, { duration, ease })`, `demo.desk.out({ duration, ease })` | Fly the frame to a view of the desk (`"screen"`, `"desk"`, `"keyboard"`) and back, alongside following actions (`duration` 1400, `ease` `smooth` by default). |
+| `demo.desk.to(view, { duration, ease, orbit, tilt, distance, hands })`, `demo.desk.out({ duration, ease })` | Fly the frame to a view of the desk (`"screen"`, `"desk"`, `"keyboard"`, `"float"`) and back, alongside following actions (`duration` 1400, `ease` `smooth` by default). `orbit` and `tilt` move the camera round the view in degrees, `distance` times as far; `hands: false` leaves the hands out of the shot. |
+| `demo.desk.lid(degrees, { duration, ease })` | Move the laptop's lid, from 0 (shut) to 135; it starts at 107. Alongside following actions (`duration` 1400). |
 | `demo.editor.file(name)`, `demo.editor.tab(name)` | Selectors for an Explorer row and an editor tab, by the file's exact name, or the folder it's directly in and its name (`"src/app.ts"`) when two files share a name. A row is on screen only once its folder is expanded. |
 | `.focus()`, `.place({ x, y, width, height })`, `.close()` on `browser`, `terminal`, `editor` | Bring forward, move or resize (`x, y` is the frame's corner on the desktop; `width, height` the content size), or take off the desktop; a closed window can be opened again. |
 
@@ -371,7 +382,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `clock` | `"2025-09-23T09:41:00"` | The moment the demo happens at: a `Date`, or an ISO string, read in `timezone` unless it has an offset. `new Date()` or `"now"` gives the real time. |
 | `timezone` | `"UTC"` | IANA timezone for the page and the menu bar. |
 | `session` | none | A saved login from `reelscript login`, relative to the script. |
-| `desk` | `{ laptop: "mac" }` | The desk behind the keyboard window and the desk views: `laptop` `"mac"` or `"pc"`, `hands` (default true), `handColor`, `sleeve` and `surface` as CSS colours. |
+| `desk` | `{ laptop: "mac" }` | The desk behind the keyboard window and the desk views: `laptop` `"mac"` or `"pc"`, `hands` (default true), `handColor`, `sleeve`, `surface` and `backdrop` as CSS colours. |
 | `wallpaper` | the theme's gradient | A CSS colour or gradient, or an image file (relative to the script), covering the macOS theme's desktop. |
 | `address` | none | `(url) => string`, rewriting what the browser's address pill shows. A local page (`goto("./app.html")`) shows a blank pill, and `address` gets its `file://` URL: `address: () => "app.acme.com"` names a site. |
 | `menubar` | `{ app: "reelscript" }` | The macOS menu bar's text: `app`, and `clockText` for what its clock shows, which is the demo's `clock` unless you set it. `false` removes the bar. |

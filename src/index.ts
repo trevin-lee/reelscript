@@ -15,7 +15,7 @@ import type { Ease } from "./easing.js";
 import type { Menubar, ThemeName } from "./theme.js";
 import { checkOutputFormat, type GifOptions } from "./encoder.js";
 import { KOKORO_VOICES, type TtsEngine } from "./tts.js";
-import { DESK_VIEWS, type DeskOptions, type DeskView } from "./desk.js";
+import { DESK_LID_MAX, DESK_VIEWS, type DeskOptions, type DeskView } from "./desk.js";
 import { KEYBOARD_LAYOUTS } from "./keyboard.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
@@ -68,9 +68,9 @@ function invalidChoice(action: Action): string | null {
 }
 
 /** Number options by what they allow: rates and sizes, durations, and positions. */
-const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height"];
+const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height", "distance"];
 const AT_LEAST_0 = ["ms", "duration", "hold", "holdMs", "settle", "maxGap", "maxGapMs", "timeout"];
-const ANY_NUMBER = ["x", "y", "by", "to"];
+const ANY_NUMBER = ["x", "y", "by", "to", "orbit"];
 // No cap at all: every silence in a recording kept as it was.
 const MAY_BE_INFINITE = ["maxGap", "maxGapMs"];
 
@@ -92,6 +92,11 @@ function invalidNumber(options: object): string | null {
   }
   if (o.exitCode !== undefined && !(Number.isInteger(o.exitCode) && (o.exitCode as number) >= 0 && (o.exitCode as number) <= 255)) {
     return `exitCode must be an exit code (0 to 255), not ${shown(o.exitCode)}`;
+  }
+  // A camera tilted past straight over (or under) what it looks at would turn over; a lid opens so far.
+  if (o.tilt !== undefined && !(typeof o.tilt === "number" && o.tilt >= -80 && o.tilt <= 80)) return `tilt must be degrees from -80 to 80, not ${shown(o.tilt)}`;
+  if (o.degrees !== undefined && !(typeof o.degrees === "number" && o.degrees >= 0 && o.degrees <= DESK_LID_MAX)) {
+    return `degrees must be from 0 (shut) to ${DESK_LID_MAX} (as far as a MacBook opens), not ${shown(o.degrees)}`;
   }
   if (o.status !== undefined && !(Number.isInteger(o.status) && (o.status as number) >= 100 && (o.status as number) <= 599)) {
     return `status must be an HTTP status code, not ${shown(o.status)}`;
@@ -121,6 +126,9 @@ function invalidValue(options: object): string | null {
   const o = options as Record<string, unknown>;
   for (const k of TEXT) {
     if (o[k] !== undefined && typeof o[k] !== "string") return `${k} must be text, not ${JSON.stringify(o[k])}`;
+  }
+  for (const k of ["hands", "labels"]) {
+    if (o[k] !== undefined && typeof o[k] !== "boolean") return `${k} must be true or false, not ${JSON.stringify(o[k])}`;
   }
   if (o.prompt !== undefined && typeof o.prompt !== "boolean" && typeof o.prompt !== "string") {
     return `prompt must be true, false, or the prompt's text, not ${JSON.stringify(o.prompt)}`;
@@ -166,7 +174,7 @@ function invalidOption(o: DemoOptions): string | null {
     const d = o.desk as DeskOptions;
     if (d.laptop !== undefined && !KEYBOARD_LAYOUTS.includes(d.laptop)) return `unknown desk laptop ${shown(d.laptop)} (use "mac" or "pc")`;
     if (d.hands !== undefined && typeof d.hands !== "boolean") return `desk hands must be true or false, not ${shown(d.hands)}`;
-    for (const k of ["handColor", "sleeve", "surface"] as const) {
+    for (const k of ["handColor", "sleeve", "surface", "backdrop"] as const) {
       if (d[k] !== undefined && (typeof d[k] !== "string" || !/^(#[0-9a-f]{3,8}|[a-z]+|rgba?\(.*\)|hsla?\(.*\))$/i.test(d[k]!))) return `desk ${k} must be a CSS colour, not ${shown(d[k])}`;
     }
   }
@@ -221,7 +229,8 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "cursor.click": { button: true, duration: true, dialog: true },
   "zoom.to": { target: true, scale: true, duration: true, ease: true, window: true, within: true },
   "zoom.out": { duration: true, ease: true },
-  "desk.to": { view: true, duration: true, ease: true },
+  "desk.to": { view: true, duration: true, ease: true, orbit: true, tilt: true, distance: true, hands: true },
+  "desk.lid": { degrees: true, duration: true, ease: true },
   "desk.out": { duration: true, ease: true },
   "keyboard.open": { labels: true, x: true, y: true, width: true, height: true },
   type: { target: true, text: true, wpm: true, window: true },
@@ -272,6 +281,7 @@ const REQUIRED: Partial<Record<Action["kind"], string[]>> = {
   "cursor.moveTo": ["target"],
   "zoom.to": ["target"],
   "desk.to": ["view"],
+  "desk.lid": ["degrees"],
   type: ["text"],
   press: ["key"],
   wait: ["ms"],
@@ -300,7 +310,7 @@ const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
   desk: true, wallpaper: true,
 };
-const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, sleeve: true, surface: true };
+const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, sleeve: true, surface: true, backdrop: true };
 
 const CAMERA_FIELDS: { readonly [P in keyof FollowCamera]-?: true } = { scale: true, hold: true, holdMs: true };
 const MENUBAR_FIELDS: { readonly [P in keyof Exclude<Menubar, false>]-?: true } = { app: true, clockText: true, clock: true };
@@ -444,10 +454,21 @@ export interface KeyboardOptions {
   labels?: boolean;
 }
 
-export interface DeskViewOptions {
-  /** Flight time, ms. Default: 1400 */
+export interface DeskMoveOptions {
+  /** How long it takes, ms. Default: 1400 */
   duration?: number;
   ease?: Ease;
+}
+
+export interface DeskViewOptions extends DeskMoveOptions {
+  /** Degrees the camera swings around what the view looks at, to the right; negative to the left. Default: 0 */
+  orbit?: number;
+  /** Degrees the camera rises (or, negative, drops) from the view's own angle, -80 to 80. Default: 0 */
+  tilt?: number;
+  /** How far the camera is, times the view's own distance. Default: 1 */
+  distance?: number;
+  /** Whether the hands are in the shot; they're never in "float". Default: the desk's hands */
+  hands?: boolean;
 }
 
 export interface MoveOptions {
@@ -748,16 +769,29 @@ class Desk {
 
   /**
    * Fly to a view of the desk: "screen" (the laptop's screen, a little from
-   * the side), "desk" (the laptop and the hands) or "keyboard" (over the
-   * keys). Runs alongside following actions, like a zoom.
+   * the side), "desk" (the laptop and the hands), "keyboard" (over the
+   * keys), or "float" (the laptop and an iPad floating in a studio, both
+   * showing the demo). `orbit`, `tilt` and `distance` move the camera around
+   * the view; `hands: false` sends the hands out of the shot. Runs alongside
+   * following actions, like a zoom.
    */
   to(view: DeskView, opts: DeskViewOptions = {}): void {
     this.demo._push({ kind: "desk.to", view }, opts);
   }
 
   /** Fly back to the flat desktop. */
-  out(opts: DeskViewOptions = {}): void {
+  out(opts: DeskMoveOptions = {}): void {
     this.demo._push({ kind: "desk.out" }, opts);
+  }
+
+  /**
+   * Move the laptop's lid to an angle, in degrees: 0 is shut, 107 where it
+   * starts, 135 as far as it opens. The hands leave the keys as it comes
+   * down. Runs alongside following actions; it shows in the desk views and
+   * the keyboard window.
+   */
+  lid(degrees: number, opts: DeskMoveOptions = {}): void {
+    this.demo._push({ kind: "desk.lid", degrees }, opts);
   }
 }
 
