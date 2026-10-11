@@ -116,6 +116,7 @@ canvas { display: block; width: 100vw; height: 100vh; }
 <script type="module">
 import * as THREE from "three";
 import { GLTFLoader } from "${DESK_URL}three/examples/jsm/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "${DESK_URL}three/examples/jsm/environments/RoomEnvironment.js";
 const LAYOUT = ${JSON.stringify(layout(opts.laptop))};
 const OPTS = ${JSON.stringify(opts)};
 const HANDS_URL = ${JSON.stringify(`${DESK_URL}hands/`)};
@@ -149,9 +150,11 @@ renderer.setPixelRatio(SUPERSAMPLE);
 const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Neutral, as product shots are graded: colours (the aluminium, the skin) stay what they are, where ACES warms and
+// desaturates them.
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 0.92;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -159,23 +162,39 @@ scene.background = new THREE.Color(0x15161a);
 scene.fog = new THREE.Fog(0x15161a, 45, 130);
 const camera = new THREE.PerspectiveCamera(30, OPTS.aspect, 0.1, 400);
 
-// ---------------------------------------------------------------- light: a lamp to the left, the room, and the screen's glow
-scene.add(new THREE.HemisphereLight(0xd8e4ff, 0x4a4035, 0.55));
-const lamp = new THREE.SpotLight(0xffd9a8, 900, 120, 0.7, 0.9, 1.6);
-lamp.position.set(-26, 34, 14);
-lamp.target.position.set(2, 0, -2);
-lamp.castShadow = true;
-lamp.shadow.mapSize.set(2048, 2048);
-lamp.shadow.bias = -0.0004;
-lamp.shadow.normalBias = 0.04;
-lamp.shadow.camera.near = 10;
-lamp.shadow.camera.far = 90;
-scene.add(lamp, lamp.target);
+// ---------------------------------------------------------------- light: a soft key from the upper left, a room to reflect, and the screen's glow
+// The room is three.js's own studio interior, blurred into an environment: what the aluminium and the keys reflect,
+// and a soft light from every side, so metal reads as metal rather than flat grey.
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.5;
+  pmrem.dispose();
+}
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x4a4035, 0.25));
+// The key light: warm, from the upper left and in front, with soft shadows (a broad light, not a spot's cone).
+const key = new THREE.DirectionalLight(0xfff0de, 1.5);
+key.position.set(-20, 32, 18);
+key.target.position.set(0, 0, -2);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -26; key.shadow.camera.right = 26;
+key.shadow.camera.top = 26; key.shadow.camera.bottom = -26;
+key.shadow.camera.near = 5; key.shadow.camera.far = 90;
+key.shadow.bias = -0.0003;
+key.shadow.normalBias = 0.03;
+scene.add(key, key.target);
+// The lamp's pool: a broad, soft-edged spot over the laptop, so the desk is brightest round it and darkens away.
+const pool = new THREE.SpotLight(0xffe6c8, 170, 140, 0.85, 1, 1.4);
+pool.position.set(-10, 42, 10);
+pool.target.position.set(0, 0, -1);
+scene.add(pool, pool.target);
 // A warm fill from the viewer's side, so skin in shadow stays warm instead of going grey-blue.
-const warmFill = new THREE.DirectionalLight(0xffe2c8, 0.6);
+const warmFill = new THREE.DirectionalLight(0xffe2c8, 0.35);
 warmFill.position.set(0, 12, 20);
 scene.add(warmFill);
-const rim = new THREE.DirectionalLight(0xbcd0ff, 0.7);
+// A cool rim from behind and to the right, to draw the lid's edge and the hands' outline against the room.
+const rim = new THREE.DirectionalLight(0xc8d8ff, 1.0);
 rim.position.set(18, 14, -22);
 scene.add(rim);
 const glow = new THREE.PointLight(0xdfe8ff, 0, 30, 1.8); // the screen, lighting the keys and hands
@@ -203,7 +222,8 @@ function grain(color) {
   t.anisotropy = 4;
   return t;
 }
-const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.85, transparent: true }));
+// Matte: it takes little from the room, so the lamp's pool round the laptop is what lights it, falling off to the edges.
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.9, transparent: true, envMapIntensity: 0.25 }));
 desk.rotation.x = -Math.PI / 2;
 desk.position.set(0, BASE_BOTTOM - 0.01, -20);
 desk.receiveShadow = true;
@@ -237,6 +257,12 @@ const bodyMat = new THREE.MeshStandardMaterial({ color: P.body, roughness: 0.45,
 // edge, where the model has the lid upright: the lid's angle is then a turn about the hinge from 90°.
 const HINGE = new THREE.Vector3(0, -0.065, -1.262).multiplyScalar(MODEL_SCALE);
 const LID_MATERIALS = new Set(["Aluminum_-_Satin", "Glass_Clear", "Steel_-_Satin", "Steel_-_Satin_NONE"]);
+// The display: a 16-inch MacBook Pro's, 345.6 by 223.4 mm (16:10.3), a thin black border inside the lid's rim, its
+// middle 1.24 dm up the lid from the hinge. The lid is stretched (or squashed) up its height to the demo's aspect,
+// so the demo fills the display edge to edge as a Mac's own desktop would; past what a lid could pass for, the
+// picture fits inside the display instead.
+const DISPLAY_W = 3.456, DISPLAY_H = 2.234, DISPLAY_MID = 1.24 + 0.065;
+const LID_STRETCH = Math.min(1.35, Math.max(0.75, DISPLAY_W / DISPLAY_H / OPTS.aspect));
 const lid = new THREE.Group();
 lid.position.copy(HINGE);
 // The model's hinge is below the deck, where the open lid's foot is; shut, the lid would sink into the body. So the
@@ -261,17 +287,18 @@ laptop.add(lid);
     m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.set(1, 1, 1);
     m.castShadow = true;
     m.receiveShadow = true;
-    // Satin metal without a room to reflect reads dark: less metal, a little smoother. The PC is the same body, dark.
-    if (m.material.metalness > 0.2) { m.material.metalness = 0.3; m.material.roughness = 0.42; }
+    // Satin aluminium: metal, a little rough, reflecting the room. The PC is the same body, dark.
+    if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.34; }
     if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") m.material.color.setHex(0x55585e);
     if (LID_MATERIALS.has(name)) {
       m.geometry.translate(-HINGE.x, -HINGE.y, -HINGE.z);
+      m.geometry.scale(1, LID_STRETCH, 1);
       lid.add(m);
     } else laptop.add(m);
   }
 }
 // From the hinge to the lid's top edge.
-const LID_H = (2.393 + 0.065) * MODEL_SCALE;
+const LID_H = (2.393 + 0.065) * MODEL_SCALE * LID_STRETCH;
 
 // Legends, drawn once each into the keycap's top texture, in the bundled Inter: it must have loaded first,
 // or the canvas silently draws the default serif (Times). The layout follows the keyboard's own:
@@ -374,7 +401,7 @@ function keyCenter(id) {
 
 // The screen: the model's display area on the lid (in decimetres, the lid upright), and the demo's picture in it at
 // the demo's own aspect, as large as fits, the panel's black round it where the shapes differ.
-const DISPLAY = { w: 3.46 * MODEL_SCALE, h: 2.19 * MODEL_SCALE, y: (1.265 + 0.065) * MODEL_SCALE, z: 0.006 * MODEL_SCALE };
+const DISPLAY = { w: DISPLAY_W * MODEL_SCALE, h: DISPLAY_H * MODEL_SCALE * LID_STRETCH, y: DISPLAY_MID * MODEL_SCALE * LID_STRETCH, z: 0.006 * MODEL_SCALE };
 const SCREEN_W = Math.min(DISPLAY.w, DISPLAY.h * OPTS.aspect);
 const SCREEN_H = SCREEN_W / OPTS.aspect;
 const screenTex = new THREE.Texture();
@@ -389,6 +416,13 @@ const screenMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: fal
 const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, SCREEN_H), screenMat);
 screen.position.set(0, DISPLAY.y, DISPLAY.z);
 lid.add(screen);
+// The camera's notch at the top of the display, as on the real one. It fades in as the view leaves the flat frame,
+// which is the desktop exactly and has none.
+const notchMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, toneMapped: false });
+const NOTCH_W = 0.32 * MODEL_SCALE, NOTCH_H = 0.065 * MODEL_SCALE;
+const notch = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(NOTCH_W, NOTCH_H * 2, NOTCH_H * 0.55), 8), notchMat);
+notch.position.set(0, DISPLAY.y + SCREEN_H / 2, DISPLAY.z + 0.004);
+lid.add(notch);
 
 // ---------------------------------------------------------------- the studio: the float view's stage
 // A void in the backdrop colour, lighter above and deeper below, with the devices' shadows soft on a floor
@@ -959,6 +993,11 @@ function shotPose(shot) {
   return p;
 }
 // A state's numbers, blended through its flights: amounts arrive eased (by the renderer), so they're used as they are.
+// How much of the state is the flat frame.
+function flatOf(state) {
+  if (state.from) return flatOf(state.from) + (flatOf(state.to) - flatOf(state.from)) * state.amount;
+  return state.view === "flat" ? 1 : 0;
+}
 function stageOf(state) {
   if (state.from) return stageOf(state.from) + (stageOf(state.to) - stageOf(state.from)) * state.amount;
   return state.view === "float" ? 1 : 0;
@@ -1007,6 +1046,7 @@ function render(t, frame) {
   const lidDeg = frame.lid ?? ${DESK_LID};
   setLid(lidDeg);
   setStage(stageOf(state), ipadOf(state), t);
+  notchMat.opacity = Math.min(1, (1 - flatOf(state)) * 6);
   laptop.updateMatrixWorld(true);
   for (const [id, k] of keys) {
     let amount = 0;
