@@ -1281,6 +1281,11 @@ class Engine {
         const url = this.editorServer.url();
         await w.page.goto(url, { waitUntil: "load" });
         await w.page.waitForSelector(".monaco-workbench .editor-group-container", { timeout: 60_000 });
+        // VS Code first draws a stand-in light theme ("vs" alone), then the configured one, whose class is made from
+        // its theme file's path ("vscode-theme-defaults-themes-dark_modern-json"). Film from the configured one.
+        await w.page
+          .waitForFunction(() => [...(document.querySelector(".monaco-workbench")?.classList ?? [])].some((c) => /-(json|tmtheme)$/i.test(c)), null, { timeout: 30_000 })
+          .catch(() => {});
         await w.page.addStyleTag({ content: editorStyles(action.notifications ?? false) });
         await w.page.evaluate(() => Promise.all([document.fonts.load('14px "JetBrains Mono"'), document.fonts.load('13px "Inter"')]));
         await w.page.waitForTimeout(600);

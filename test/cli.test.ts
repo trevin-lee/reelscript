@@ -130,7 +130,7 @@ test("cache: names match warmup, and a custom code-server binary doesn't break t
   assert.equal(clear.code, 0, clear.output);
 });
 
-test("editor: type lands in the editor, it reopens on a new workspace, and stopping leaves no processes", { timeout: 240_000 }, async () => {
+test("editor: it opens on its configured theme, type lands in the editor, it reopens on a new workspace, and stopping leaves no processes", { timeout: 240_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-cli-"));
   mkdirSync(join(dir, "other"));
   writeFileSync(join(dir, "other", "notes.txt"), "second workspace\n");
@@ -138,6 +138,11 @@ test("editor: type lands in the editor, it reopens on a new workspace, and stopp
   script(dir, "s.ts", `const demo = createDemo({ viewport: [1000, 640], fps: 30 });
 await demo.browser.goto("data:text/html,<input id=a>");
 await demo.editor.open({ workspace: ${JSON.stringify(acme)} });
+await demo.call(async ({ page }) => {
+  // Filming starts on the configured theme, not VS Code's light stand-in ("vs" alone) that it draws first.
+  const themed = await page!.evaluate(\`[...document.querySelector(".monaco-workbench").classList].some((c) => /-(json|tmtheme)$/i.test(c))\`);
+  if (!themed) throw new Error("editor.open returned before VS Code applied its theme");
+});
 await demo.editor.openFile("app.ts");
 await demo.browser.focus();
 await demo.editor.type("ZZZ");

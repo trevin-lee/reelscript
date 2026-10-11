@@ -12,6 +12,7 @@
 - The hands are the WebXR generic hand models (MIT, in assets/hands), posed by reelscript; Three.js is a new dependency.
 - `examples/keyboard.ts`; ⌘N opens the sample app's New project dialog, and Enter in the name field creates the project.
 - The drawn caret sits after the last character in a field sized to its text (`field-sizing: content`), where it was drawn a line below, centred under centred text.
+- The editor opens on its configured theme: on a busy machine the first frames could show VS Code's light stand-in theme, which it draws before loading the configured one, then flash to dark.
 - A script that calls `render()` without `await` is waited for anyway: its render finishes, and a failure prints as reelscript's, at the line, where it was Node's unhandled-rejection dump.
 
 ## 0.5.2
