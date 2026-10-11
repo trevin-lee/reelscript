@@ -12,6 +12,7 @@
 - The hands rest on the home row with their thumbs over the space bar, in sleeves, and move without jumping: the hand goes where its fingers can reach the keys and the fingers do the rest, so every key pressed has a finger on it. With the keyboard shown, a key is pressed once the finger has reached it (270 ms after the step starts).
 - `createDemo({ wallpaper })`: the macOS theme's desktop as a CSS colour or gradient, or an image file relative to the script.
 - The hands are the WebXR generic hand models (MIT, in assets/hands), posed by reelscript; Three.js is a new dependency.
+- The laptop is a model of a 16-inch MacBook Pro ("MacBook Pro 16" 2021" by rtql8d, CC-BY 4.0, in assets/macbook), with low, rounded keys in its keyboard well and a full-height function row, as on the real one. The desk scene is drawn at twice the size and scaled down, and the demo's picture on the screens is mipmapped, so edges are smooth and the text on the screen stays legible.
 - `examples/keyboard.ts`; ⌘N opens the sample app's New project dialog, and Enter in the name field creates the project.
 - The drawn caret sits after the last character in a field sized to its text (`field-sizing: content`), where it was drawn a line below, centred under centred text.
 - The editor opens on its configured theme: on a busy machine the first frames could show VS Code's light stand-in theme, which it draws before loading the configured one, then flash to dark.

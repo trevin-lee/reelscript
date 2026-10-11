@@ -1,0 +1,11 @@
+macbook.glb is based on "MacBook Pro 16" 2021"
+(https://sketchfab.com/3d-models/macbook-pro-16-2021-8ac16bda501c4bcc8ba93ac3eb63a8e1)
+by rtql8d (https://sketchfab.com/rtql8d), licensed under CC-BY-4.0
+(http://creativecommons.org/licenses/by/4.0/).
+
+Changes made for reelscript:
+- The keyboard painted on the casing texture is replaced by a plain dark well
+  (reelscript draws its own key caps over it).
+- The lid's back is a plain aluminium colour (its texture, with a logo, removed).
+- The screen's picture is removed (reelscript shows the demo there).
+- Packed as one binary glTF (GLB) and unused data pruned.

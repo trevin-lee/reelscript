@@ -219,7 +219,7 @@ demo.desk.to("desk", { hands: false });               // the laptop alone on its
 
 A view takes the camera somewhere else with `orbit` (degrees round what it looks at, to the right; negative to the left), `tilt` (degrees up, or down, from -80 to 80) and `distance` (times as far); `hands: false` sends the hands out of the shot, and they're never in `"float"`. Between two shots of the same view the camera travels round through the angles between, so `desk.to("float", { orbit: 360 })` after `desk.to("float")` is a full turn. The iPad shows the same picture as the laptop, cut to its screen from the middle; `ipad: false` leaves it out, with the laptop alone in the middle of the shot. `desk.lid(degrees)` moves the lid, from 0 (shut) to 135, alongside what follows; it starts at 107, and the hands leave the keys as it comes down. `desk.backdrop` is the studio's colour. See [examples/keyboard.ts](examples/keyboard.ts), [examples/devices.ts](examples/devices.ts) and [examples/spin.ts](examples/spin.ts).
 
-The hands are the WebXR generic hand models (MIT, see [assets/hands](assets/hands)), posed by reelscript. The laptop's screen takes the desktop's aspect ratio, whatever `desktop` size is set.
+The laptop is based on "MacBook Pro 16" 2021" by [rtql8d](https://sketchfab.com/rtql8d) (CC-BY 4.0, see [assets/macbook](assets/macbook)), with reelscript's own keys on it; the PC is the same body, dark. The hands are the WebXR generic hand models (MIT, see [assets/hands](assets/hands)), posed by reelscript. The laptop's screen takes the desktop's aspect ratio, whatever `desktop` size is set.
 
 ## Narration
 

@@ -86,6 +86,9 @@ export function deskAsset(pathname: string): { body: Buffer; contentType: string
     if (rel.includes("..")) return null;
     return { body: readFileSync(join(dir, rel)), contentType: "text/javascript" };
   }
+  if (pathname === "/macbook.glb") {
+    return { body: readFileSync(new URL("../assets/macbook/macbook.glb", import.meta.url)), contentType: "model/gltf-binary" };
+  }
   if (/^\/hands\/(left|right)\.glb$/.test(pathname)) {
     return { body: readFileSync(new URL(`../assets/hands/${pathname.slice(7)}`, import.meta.url)), contentType: "model/gltf-binary" };
   }
@@ -103,7 +106,7 @@ export function deskPageHtml(opts: DeskPageOptions): string {
   html = `<!doctype html><html><head><meta charset="utf-8"><style>
 @font-face { font-family: "Inter"; font-weight: 100 900; src: url(data:font/ttf;base64,${font}) format("truetype"); }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: Inter, system-ui, sans-serif; }
-canvas { display: block; }
+canvas { display: block; width: 100vw; height: 100vh; }
 #label { position: absolute; left: 50%; top: 7%; transform: translateX(-50%); padding: .35em .85em; border-radius: 999px;
   background: rgba(20,20,24,.84); color: #fff; font-size: 18px; font-weight: 600; letter-spacing: .04em; white-space: nowrap;
   opacity: 0; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
@@ -116,6 +119,7 @@ import { GLTFLoader } from "${DESK_URL}three/examples/jsm/loaders/GLTFLoader.js"
 const LAYOUT = ${JSON.stringify(layout(opts.laptop))};
 const OPTS = ${JSON.stringify(opts)};
 const HANDS_URL = ${JSON.stringify(`${DESK_URL}hands/`)};
+const MACBOOK_URL = ${JSON.stringify(`${DESK_URL}macbook.glb`)};
 ${SCENE}
 </script></body></html>`;
   pageCache.set(key, html);
@@ -124,7 +128,13 @@ ${SCENE}
 
 const SCENE = String.raw`
 const U = 1; // one key unit, 19 mm
-const KEY_H = 0.34, KEY_TRAVEL = 0.14, DECK_H = 0.55, MARGIN = 0.6;
+// The laptop is a model of a 16-inch MacBook Pro (assets/macbook), in decimetres; the scene is in key units.
+const MODEL_SCALE = 100 / 19;
+// Its body, in key units: the deck's top is y = 0, the feet at BASE_BOTTOM; the hinge is at the back.
+const BODY_W = 3.558 * MODEL_SCALE, BODY_D = 2.481 * MODEL_SCALE, BASE_BOTTOM = -0.141 * MODEL_SCALE;
+// Key caps as a MacBook's: low, rounded, a little apart, in the well; they go down a touch further than a real key's
+// millimetre, so a press shows.
+const KEY_H = 0.1, KEY_TRAVEL = 0.07, KEY_GAP = 0.14, KEY_R = 0.13;
 const mac = LAYOUT.name === "mac";
 const P = mac
   ? { body: 0xc9cacf, bodyEdge: 0xb6b7bc, key: 0x2a2a2d, keySide: 0x1f1f22, legend: "#f2f2f4", bezel: 0x0a0a0b, trackpad: 0xbfc0c5 }
@@ -132,7 +142,11 @@ const P = mac
 const ACCENT = 0x2f7cf6;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(1);
+// Drawn at SUPERSAMPLE times the size and shown at the page's: the browser's scaling down averages each pixel's
+// samples, on top of the 4x multisampling, so thin edges (key gaps, the bezel, the lid's rim) don't step.
+const SUPERSAMPLE = 2;
+renderer.setPixelRatio(SUPERSAMPLE);
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -191,14 +205,14 @@ function grain(color) {
 }
 const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.85, transparent: true }));
 desk.rotation.x = -Math.PI / 2;
-desk.position.set(0, -DECK_H - 0.2, -20);
+desk.position.set(0, BASE_BOTTOM - 0.01, -20);
 desk.receiveShadow = true;
 scene.add(desk);
 
 // ---------------------------------------------------------------- the laptop
 const W = LAYOUT.width, D = LAYOUT.height;
-const BODY_W = W * U + MARGIN * 2 + 1.6, BODY_D = D * U + MARGIN * 2 + (mac ? 6.2 : 5.4); // room for the trackpad
-const KEYS_Z = -(BODY_D / 2) + MARGIN + 0.9; // where the key block starts (its far edge), from the body's centre
+// The key block sits in the model's keyboard well: centred across, its middle at the well's.
+const KEYS_Z = -0.424 * MODEL_SCALE - (D * U) / 2; // the block's far edge
 const ux = (x) => (x - W / 2) * U;
 const keyZ = (y) => KEYS_Z + y * U;
 
@@ -216,27 +230,48 @@ function roundedRect(w, d, r) {
 // inside it (the keys, the hands) are the laptop's own, the same as the world's while it sits on the desk.
 const laptop = new THREE.Group();
 scene.add(laptop);
-const bodyMat = new THREE.MeshStandardMaterial({ color: P.body, roughness: 0.55, metalness: mac ? 0.45 : 0.1 });
-const bodyGeo = new THREE.ExtrudeGeometry(roundedRect(BODY_W, BODY_D, 0.6), { depth: DECK_H, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3 });
-bodyGeo.rotateX(-Math.PI / 2);
-bodyGeo.translate(0, -DECK_H - 0.1, 0);
-const body = new THREE.Mesh(bodyGeo, bodyMat);
-body.receiveShadow = true;
-body.castShadow = true;
-laptop.add(body);
-// The well the keys sit in.
-const well = new THREE.Mesh(new THREE.PlaneGeometry(W * U + 0.25, D * U + 0.25), new THREE.MeshStandardMaterial({ color: P.bodyEdge, roughness: 0.95 }));
-well.rotation.x = -Math.PI / 2;
-well.position.set(0, -0.06, KEYS_Z + (D * U) / 2);
-well.receiveShadow = true;
-laptop.add(well);
-// Trackpad.
-const padW = mac ? 7.6 : 6.2, padD = mac ? 4.9 : 3.9;
-const pad = new THREE.Mesh(new THREE.PlaneGeometry(padW, padD), new THREE.MeshStandardMaterial({ color: P.trackpad, roughness: 0.35, metalness: mac ? 0.3 : 0.05 }));
-pad.rotation.x = -Math.PI / 2;
-pad.position.set(0, 0.012, KEYS_Z + D * U + 0.9 + padD / 2);
-pad.receiveShadow = true;
-laptop.add(pad);
+// The iPad's back, in the laptop's metal.
+const bodyMat = new THREE.MeshStandardMaterial({ color: P.body, roughness: 0.45, metalness: mac ? 0.35 : 0.1 });
+
+// The model, its parts baked into key units. The lid's parts (by their materials) go on a hinge at the body's back
+// edge, where the model has the lid upright: the lid's angle is then a turn about the hinge from 90°.
+const HINGE = new THREE.Vector3(0, -0.065, -1.262).multiplyScalar(MODEL_SCALE);
+const LID_MATERIALS = new Set(["Aluminum_-_Satin", "Glass_Clear", "Steel_-_Satin", "Steel_-_Satin_NONE"]);
+const lid = new THREE.Group();
+lid.position.copy(HINGE);
+// The model's hinge is below the deck, where the open lid's foot is; shut, the lid would sink into the body. So the
+// hinge rises as the lid comes past upright, until shut the lid lies on the keys.
+const HINGE_LIFT = 0.1 * MODEL_SCALE;
+function setLid(degrees) {
+  lid.rotation.x = Math.PI / 2 - (degrees * Math.PI) / 180;
+  lid.position.y = HINGE.y + HINGE_LIFT * Math.min(1, Math.max(0, (90 - degrees) / 90));
+}
+setLid(${DESK_LID});
+laptop.add(lid);
+{
+  const model = (await new GLTFLoader().loadAsync(MACBOOK_URL)).scene;
+  model.updateMatrixWorld(true);
+  const parts = [];
+  model.traverse((o) => { if (o.isMesh) parts.push(o); });
+  for (const m of parts) {
+    const name = m.material.name;
+    if (name === "Glass_Clear") continue; // a pale film over the screen, which would wash the demo out
+    m.geometry.applyMatrix4(m.matrixWorld);
+    m.geometry.scale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+    m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.set(1, 1, 1);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    // Satin metal without a room to reflect reads dark: less metal, a little smoother. The PC is the same body, dark.
+    if (m.material.metalness > 0.2) { m.material.metalness = 0.3; m.material.roughness = 0.42; }
+    if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") m.material.color.setHex(0x55585e);
+    if (LID_MATERIALS.has(name)) {
+      m.geometry.translate(-HINGE.x, -HINGE.y, -HINGE.z);
+      lid.add(m);
+    } else laptop.add(m);
+  }
+}
+// From the hinge to the lid's top edge.
+const LID_H = (2.393 + 0.065) * MODEL_SCALE;
 
 // Legends, drawn once each into the keycap's top texture, in the bundled Inter: it must have loaded first,
 // or the canvas silently draws the default serif (Times). The layout follows the keyboard's own:
@@ -299,20 +334,36 @@ function legendTexture(cap, accent) {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
+  tex.anisotropy = MAX_ANISO;
   legendCache.set(k, tex);
   return tex;
 }
 const keys = new Map();
+// A cap's shape: a rounded rectangle, raised, its top's texture across the whole cap. One per size.
+const capGeos = new Map();
+function capGeometry(w, d) {
+  const k = w.toFixed(3) + "x" + d.toFixed(3);
+  if (capGeos.has(k)) return capGeos.get(k);
+  const geo = new THREE.ExtrudeGeometry(roundedRect(w, d, Math.min(KEY_R, w / 3, d / 3)), {
+    depth: KEY_H - 0.03, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.025, bevelSegments: 2, curveSegments: 6,
+  });
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0.03, 0);
+  const pos = geo.attributes.position, uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) / w + 0.5, 0.5 - pos.getZ(i) / d);
+  capGeos.set(k, geo);
+  return geo;
+}
 for (const cap of LAYOUT.keys) {
-  const w = cap.w * U - 0.1, d = cap.h * U - 0.1;
-  const matSide = new THREE.MeshStandardMaterial({ color: P.keySide, roughness: 0.85 });
-  const matTop = new THREE.MeshStandardMaterial({ map: legendTexture(cap, false), roughness: 0.7 });
-  const matLit = new THREE.MeshStandardMaterial({ map: legendTexture(cap, true), roughness: 0.6, emissive: ACCENT, emissiveIntensity: 0.3 });
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, KEY_H, d), [matSide, matSide, matTop, matSide, matSide, matSide]);
+  const w = cap.w * U - KEY_GAP, d = cap.h * U - KEY_GAP;
+  const matSide = new THREE.MeshStandardMaterial({ color: P.keySide, roughness: 0.8 });
+  const matTop = new THREE.MeshStandardMaterial({ map: legendTexture(cap, false), roughness: 0.62 });
+  const matLit = new THREE.MeshStandardMaterial({ map: legendTexture(cap, true), roughness: 0.55, emissive: ACCENT, emissiveIntensity: 0.3 });
+  // ExtrudeGeometry's groups: 0 the faces (the top, and the bottom no one sees), 1 the sides.
+  const mesh = new THREE.Mesh(capGeometry(w, d), [matTop, matSide]);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
-  mesh.position.set(ux(cap.x + cap.w / 2), KEY_H / 2, keyZ(cap.y + cap.h / 2));
+  mesh.position.set(ux(cap.x + cap.w / 2), 0, keyZ(cap.y + cap.h / 2));
   laptop.add(mesh);
   keys.set(cap.id, { mesh, cap, matTop, matLit });
 }
@@ -321,41 +372,23 @@ function keyCenter(id) {
   return new THREE.Vector3(ux(k.cap.x + k.cap.w / 2), KEY_H, keyZ(k.cap.y + k.cap.h / 2));
 }
 
-// The lid, hinged at the body's back edge, open a little past upright; the screen fits the demo's aspect exactly.
-const SCREEN_W = BODY_W - (mac ? 1.4 : 1.8);
+// The screen: the model's display area on the lid (in decimetres, the lid upright), and the demo's picture in it at
+// the demo's own aspect, as large as fits, the panel's black round it where the shapes differ.
+const DISPLAY = { w: 3.46 * MODEL_SCALE, h: 2.19 * MODEL_SCALE, y: (1.265 + 0.065) * MODEL_SCALE, z: 0.006 * MODEL_SCALE };
+const SCREEN_W = Math.min(DISPLAY.w, DISPLAY.h * OPTS.aspect);
 const SCREEN_H = SCREEN_W / OPTS.aspect;
-const BEZEL = mac ? 0.5 : 0.7;
-const LID_W = BODY_W, LID_H = SCREEN_H + BEZEL * 2 + (mac ? 0.3 : 0.6), LID_T = 0.42;
-const lid = new THREE.Group();
-lid.position.set(0, -0.1, -BODY_D / 2 + 0.3);
-function setLid(degrees) {
-  lid.rotation.x = Math.PI / 2 - (degrees * Math.PI) / 180;
-}
-setLid(${DESK_LID});
-laptop.add(lid);
-const lidGeo = new THREE.ExtrudeGeometry(roundedRect(LID_W, LID_H, 0.6), { depth: LID_T, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 2 });
-lidGeo.translate(0, LID_H / 2, -LID_T - 0.08);
-const lidMesh = new THREE.Mesh(lidGeo, bodyMat);
-lidMesh.castShadow = true;
-lidMesh.receiveShadow = true;
-lid.add(lidMesh);
-const bezel = new THREE.Mesh(new THREE.PlaneGeometry(LID_W - 0.5, LID_H - 0.5), new THREE.MeshStandardMaterial({ color: P.bezel, roughness: 0.3, metalness: 0.1 }));
-bezel.position.set(0, LID_H / 2, 0.015);
-lid.add(bezel);
 const screenTex = new THREE.Texture();
 screenTex.colorSpace = THREE.SRGBColorSpace;
-screenTex.minFilter = THREE.LinearFilter;
+// Mipmapped and anisotropic: the demo's text stays legible when the screen is small or seen at an angle, where a
+// plain linear filter skips texels and the text breaks up.
+screenTex.minFilter = THREE.LinearMipmapLinearFilter;
+screenTex.anisotropy = MAX_ANISO;
 screenTex.magFilter = THREE.LinearFilter;
-screenTex.generateMipmaps = false;
+screenTex.generateMipmaps = true;
 const screenMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
 const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, SCREEN_H), screenMat);
-screen.position.set(0, BEZEL + SCREEN_H / 2 + (mac ? 0.15 : 0.3), 0.03);
+screen.position.set(0, DISPLAY.y, DISPLAY.z);
 lid.add(screen);
-// A hinge bar.
-const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, LID_W - 2, 24), new THREE.MeshStandardMaterial({ color: P.bodyEdge, roughness: 0.6, metalness: 0.4 }));
-hinge.rotation.z = Math.PI / 2;
-hinge.position.set(0, -0.1, -BODY_D / 2 + 0.3);
-laptop.add(hinge);
 
 // ---------------------------------------------------------------- the studio: the float view's stage
 // A void in the backdrop colour, lighter above and deeper below, with the devices' shadows soft on a floor
@@ -423,8 +456,9 @@ scene.add(ipad);
 const IPAD_SW = IPAD_W - IPAD_BEZEL * 2, IPAD_SH = IPAD_H - IPAD_BEZEL * 2;
 const ipadTex = new THREE.Texture();
 ipadTex.colorSpace = THREE.SRGBColorSpace;
-ipadTex.minFilter = THREE.LinearFilter;
-ipadTex.generateMipmaps = false;
+ipadTex.minFilter = THREE.LinearMipmapLinearFilter;
+ipadTex.anisotropy = MAX_ANISO;
+ipadTex.generateMipmaps = true;
 // The demo's picture, cut to the iPad's screen from the middle: as much as fills it, nothing stretched.
 {
   const img = OPTS.aspect, scr = IPAD_SW / IPAD_SH;
@@ -444,7 +478,7 @@ ipad.add(ipadScreen);
 // Where each device floats, and how it turns: the laptop to the left, three-quarters on; the iPad in front of it
 // to the right, tipped back. Each drifts a little, slowly, out of step with the other.
 const FLOAT = {
-  laptop: { pos: new THREE.Vector3(-5.5, 3.5, -4), rot: new THREE.Euler(0.12, 0.42, 0.04, "YXZ") },
+  laptop: { pos: new THREE.Vector3(-4.5, 3.5, -4), rot: new THREE.Euler(0.12, 0.42, 0.04, "YXZ") },
   ipad: { pos: new THREE.Vector3(11.5, 1.5, 6), rot: new THREE.Euler(-0.3, -0.42, -0.06, "YXZ") },
   // Where the iPad comes from as the stage changes: below and in front, out of the shot.
   ipadFrom: new THREE.Vector3(16, -14, 16),
@@ -457,7 +491,7 @@ const FLOAT = {
 function laptopMiddle() {
   const a = lid.rotation.x;
   const topY = lid.position.y + LID_H * Math.cos(a), topZ = lid.position.z + LID_H * Math.sin(a);
-  const yMin = -DECK_H - 0.2, yMax = Math.max(topY, KEY_H);
+  const yMin = BASE_BOTTOM, yMax = Math.max(topY, KEY_H);
   const zMin = Math.min(-BODY_D / 2, topZ), zMax = BODY_D / 2;
   return new THREE.Vector3(0, (yMin + yMax) / 2, (zMin + zMax) / 2);
 }
@@ -893,13 +927,13 @@ function viewPose(name) {
     return { pos, at: centre.clone().addScaledVector(up, -SCREEN_H * 0.08), up: new THREE.Vector3(0, 1, 0), fov };
   }
   if (name === "desk") {
-    return { pos: new THREE.Vector3(-4, 19, 26), at: new THREE.Vector3(0, 4.5, -2.5), up: new THREE.Vector3(0, 1, 0), fov: 30 };
+    return { pos: new THREE.Vector3(-4.5, 21.5, 30), at: new THREE.Vector3(0, 4.6, -3), up: new THREE.Vector3(0, 1, 0), fov: 30 };
   }
   if (name === "side") return { pos: new THREE.Vector3(34, 5, 2), at: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 1, 0), fov: 28 };
   if (name === "float") {
     // Alone, the laptop is framed closer.
     const at = floatTarget(floatIpad);
-    const pos = at.clone().add(new THREE.Vector3(2.5, 10.5, 58).multiplyScalar(0.8 + 0.2 * floatIpad));
+    const pos = at.clone().add(new THREE.Vector3(2.5, 10.5, 58).multiplyScalar(0.8 + 0.3 * floatIpad));
     return { pos, at, up: new THREE.Vector3(0, 1, 0), fov: 30 };
   }
   // keyboard: over the hands, keys filling the width, the screen's foot above
@@ -977,8 +1011,8 @@ function render(t, frame) {
   for (const [id, k] of keys) {
     let amount = 0;
     for (const ev of events) for (const key of ev.keys) if (key.id === id) amount = Math.max(amount, pressAmount(ev, key, t));
-    k.mesh.position.y = KEY_H / 2 - KEY_TRAVEL * amount;
-    k.mesh.material[2] = amount > 0.5 ? k.matLit : k.matTop;
+    k.mesh.position.y = -KEY_TRAVEL * amount;
+    k.mesh.material[0] = amount > 0.5 ? k.matLit : k.matTop;
   }
   // The hands leave for a shot without them, for the float view, and as the lid comes down onto the keys.
   const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35))));

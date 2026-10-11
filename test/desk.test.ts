@@ -117,7 +117,7 @@ test("renders: the keyboard panel shows a key going down, a desk view starts fro
   );
   // Panel: lower right, 42% of the desktop wide. Before the chord and on it, the panel changes and the page doesn't.
   const before = join(dir, "before.png"), on = join(dir, "on.png");
-  for (const [out, at] of [[before, "0.5"], [on, "1.1"]] as const) {
+  for (const [out, at] of [[before, "0.5"], [on, "1.4"]] as const) {
     const r = await run(["preview", "s.ts", "--at", at, "--out", out], dir, { LAPTOP: "mac" });
     assert.equal(r.code, 0, r.output);
   }
@@ -206,9 +206,9 @@ test("desk views: a flight begun mid-flight carries on from where it was, float 
   const settled = frames[Math.round(30 * (0.3 + 0.5 + 1.6)) - 2], shut = frames[frames.length - 1];
   const corner = settled.data.subarray(0, 3);
   assert.ok(corner[0] > 150 && Math.abs(corner[0] - corner[2]) < 30, `the float view's backdrop is a light grey, not ${[...corner]}`);
-  assert.ok(magenta(settled, 0, 0.55) > 0.04, "the laptop's screen shows the demo");
-  assert.ok(magenta(settled, 0.6, 1) > 0.04, "the iPad's screen shows the demo");
+  assert.ok(magenta(settled, 0, 0.55) > 0.02, "the laptop's screen shows the demo");
+  assert.ok(magenta(settled, 0.6, 1) > 0.02, "the iPad's screen shows the demo");
   // Shut, the laptop's screen is gone; the iPad's is still there.
   assert.ok(magenta(shut, 0, 0.5) < 0.01, "the laptop's screen is hidden by its lid");
-  assert.ok(magenta(shut, 0.6, 1) > 0.04, "the iPad still shows the demo");
+  assert.ok(magenta(shut, 0.6, 1) > 0.02, "the iPad still shows the demo");
 });

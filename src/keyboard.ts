@@ -37,7 +37,8 @@ export interface Layout {
 }
 
 const ROW_H = 1;
-const FN_ROW_H = 0.62;
+// Full height, as on the 2021 MacBook Pro and since: the six rows fill the desk model's keyboard well.
+const FN_ROW_H = 1;
 
 type Spec = [id: string, legend: string, w?: number, extra?: { shifted?: string; sub?: string; h?: number; y?: number }];
 

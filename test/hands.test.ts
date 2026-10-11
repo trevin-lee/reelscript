@@ -16,6 +16,7 @@ async function deskPage(laptop: "mac" | "pc"): Promise<{ page: Page; close: () =
     return route.fulfill({ status: 200, contentType: "text/html", body: deskPageHtml({ ...DESK_DEFAULTS, laptop, labels: true, aspect: 1.5 }) });
   });
   await page.goto(DESK_URL);
+  await page.waitForFunction(() => "__rsDesk" in window);
   await page.evaluate(() => (window as any).__rsDesk.ready);
   return { page, close: () => browser.close() };
 }

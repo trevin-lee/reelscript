@@ -525,8 +525,20 @@ class Engine {
       const asset = deskAsset(new URL(route.request().url()).pathname);
       return asset ? route.fulfill({ status: 200, contentType: asset.contentType, body: asset.body }) : route.fulfill({ status: 200, contentType: "text/html", body: html });
     });
+    // The scene sets itself up (the laptop and hands models load) before it offers __rsDesk; an error on the way is
+    // the page's, said as it was rather than as a wait that ran out.
+    let failed: Error | null = null;
+    const onError = (e: Error) => (failed ??= e);
+    page.on("pageerror", onError);
     await page.goto(DESK_URL, { waitUntil: "load" });
+    // Asked from here: the page's own timers and frames are the demo's clock, which isn't running.
+    for (const until = Date.now() + 60_000; !(await page.evaluate(() => "__rsDesk" in window)); ) {
+      if (failed) throw new Error(`reelscript: the desk scene didn't load: ${(failed as Error).message}`);
+      if (Date.now() > until) throw new Error("reelscript: the desk scene didn't load in 60 seconds");
+      await new Promise((r) => setTimeout(r, 50));
+    }
     await page.evaluate(() => (window as unknown as { __rsDesk: { ready: Promise<void> } }).__rsDesk.ready);
+    page.off("pageerror", onError);
     const size = page.viewportSize()!;
     await this.resizeDesk(page, size.width, size.height);
     this.deskFed.set(key, 0);
