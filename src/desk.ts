@@ -416,13 +416,42 @@ const screenMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: fal
 const screen = new THREE.Mesh(new THREE.PlaneGeometry(SCREEN_W, SCREEN_H), screenMat);
 screen.position.set(0, DISPLAY.y, DISPLAY.z);
 lid.add(screen);
-// The camera's notch at the top of the display, as on the real one. It fades in as the view leaves the flat frame,
-// which is the desktop exactly and has none.
+// The display's own shape, as on the real one: its top corners rounded, and the camera's notch in the middle of the top
+// edge, its bottom corners rounded and its sides curving out into the edge. Drawn as black over the picture's square
+// corners, and faded in as the view leaves the flat frame, which is the desktop exactly and has none of it.
 const notchMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, toneMapped: false });
-const NOTCH_W = 0.32 * MODEL_SCALE, NOTCH_H = 0.065 * MODEL_SCALE;
-const notch = new THREE.Mesh(new THREE.ShapeGeometry(roundedRect(NOTCH_W, NOTCH_H * 2, NOTCH_H * 0.55), 8), notchMat);
-notch.position.set(0, DISPLAY.y + SCREEN_H / 2, DISPLAY.z + 0.004);
-lid.add(notch);
+const displayMask = (() => {
+  const mm = MODEL_SCALE / 100; // a millimetre, in key units
+  const L = -SCREEN_W / 2, R = SCREEN_W / 2, T = SCREEN_H / 2, over = 0.6 * mm; // a little past the edge, onto the bezel
+  const corner = 7 * mm, notchW = 31 * mm, notchH = 6 * mm, bottomR = 2 * mm, shoulder = 1.2 * mm;
+  const shapes = [];
+  // The corners: the square corner, less a quarter circle.
+  for (const side of [-1, 1]) {
+    const s = new THREE.Shape(), x = side < 0 ? L : R, cx = x - side * corner, cy = T - corner;
+    s.moveTo(x + side * over, T + over);
+    s.lineTo(x + side * over, cy);
+    s.lineTo(x, cy);
+    s.absarc(cx, cy, corner, side < 0 ? Math.PI : 0, Math.PI / 2, side < 0);
+    s.lineTo(cx, T + over);
+    shapes.push(s);
+  }
+  // The notch, from its left shoulder round to its right.
+  const n = new THREE.Shape(), a = notchW / 2;
+  n.moveTo(-a - shoulder, T + over);
+  n.lineTo(-a - shoulder, T);
+  n.absarc(-a - shoulder, T - shoulder, shoulder, Math.PI / 2, 0, true);
+  n.lineTo(-a, T - notchH + bottomR);
+  n.absarc(-a + bottomR, T - notchH + bottomR, bottomR, Math.PI, Math.PI * 1.5, false);
+  n.lineTo(a - bottomR, T - notchH);
+  n.absarc(a - bottomR, T - notchH + bottomR, bottomR, Math.PI * 1.5, Math.PI * 2, false);
+  n.lineTo(a, T - shoulder);
+  n.absarc(a + shoulder, T - shoulder, shoulder, Math.PI, Math.PI / 2, true);
+  n.lineTo(a + shoulder, T + over);
+  shapes.push(n);
+  return new THREE.Mesh(new THREE.ShapeGeometry(shapes, 24), notchMat);
+})();
+displayMask.position.set(0, DISPLAY.y, DISPLAY.z + 0.004);
+lid.add(displayMask);
 
 // ---------------------------------------------------------------- the studio: the float view's stage
 // A void in the backdrop colour, lighter above and deeper below, with the devices' shadows soft on a floor
