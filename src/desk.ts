@@ -482,7 +482,7 @@ displayMask.position.set(0, DISPLAY.y, DISPLAY.z + 0.004);
 lid.add(displayMask);
 // The display's glass: a faint reflection of the room over the picture, as every photo of a screen has. Faded in
 // with the shape above, off in the flat frame.
-const glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.12, transparent: true, opacity: 0, depthWrite: false });
+const glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.45, transparent: true, opacity: 0, depthWrite: false });
 const glass = new THREE.Mesh(new THREE.PlaneGeometry(DISPLAY.w, DISPLAY.h), glassMat);
 glass.position.set(0, DISPLAY.y, DISPLAY.z + 0.008);
 lid.add(glass);
