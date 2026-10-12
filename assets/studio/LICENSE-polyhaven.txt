@@ -1,0 +1,8 @@
+From Poly Haven (https://polyhaven.com), released under CC0 (public domain):
+
+- loft.hdr: "Photo Studio Loft Hall" by Sergej Majboroda
+  https://polyhaven.com/a/photo_studio_loft_hall (1k HDR)
+- studio.hdr: "Studio Small 09" by Sergej Majboroda
+  https://polyhaven.com/a/studio_small_09 (1k HDR)
+- oak_diff.jpg, oak_nor.jpg, oak_rough.jpg: "Oak Veneer 01" by Jenelle van Heerden
+  https://polyhaven.com/a/oak_veneer_01 (1k colour and normal, roughness at 512 px; recompressed)

@@ -26,7 +26,7 @@ export interface DeskOptions {
   handColor?: string;
   /** The sleeves over the forearms, a CSS color. Default: "#5d6f8a" */
   sleeve?: string;
-  /** The desk's surface, a CSS color. Default: "#e4ddd3" */
+  /** The desk's surface: "oak" (a light oak veneer), or a CSS color for a plain one. Default: "oak" */
   surface?: string;
   /** The float view's backdrop, a CSS color; it's drawn as a soft gradient around it. Default: "#dfe3ea" */
   backdrop?: string;
@@ -43,7 +43,7 @@ export interface KeyEvent {
   from?: number;
 }
 
-export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#f2c4a0", sleeve: "#5d6f8a", surface: "#e4ddd3", backdrop: "#dfe3ea" };
+export const DESK_DEFAULTS = { laptop: "mac" as KeyboardLayout, hands: true, handColor: "#f2c4a0", sleeve: "#5d6f8a", surface: "oak", backdrop: "#dfe3ea" };
 
 export interface DeskPageOptions extends Required<DeskOptions> {
   /** Show a chord's label (the keyboard window does; the desk views don't). */
@@ -86,6 +86,12 @@ export function deskAsset(pathname: string): { body: Buffer; contentType: string
     if (rel.includes("..")) return null;
     return { body: readFileSync(join(dir, rel)), contentType: "text/javascript" };
   }
+  // The photographed light (Poly Haven, CC0): the rooms as HDR panoramas, and the desk's oak.
+  const studio = /^\/studio\/(loft\.hdr|studio\.hdr|oak_diff\.jpg|oak_nor\.jpg|oak_rough\.jpg)$/.exec(pathname);
+  if (studio) {
+    const body = readFileSync(new URL(`../assets/studio/${studio[1]}`, import.meta.url));
+    return { body, contentType: studio[1].endsWith(".hdr") ? "application/octet-stream" : "image/jpeg" };
+  }
   if (pathname === "/macbook.glb") {
     return { body: readFileSync(new URL("../assets/macbook/macbook.glb", import.meta.url)), contentType: "model/gltf-binary" };
   }
@@ -116,11 +122,12 @@ canvas { display: block; width: 100vw; height: 100vh; }
 <script type="module">
 import * as THREE from "three";
 import { GLTFLoader } from "${DESK_URL}three/examples/jsm/loaders/GLTFLoader.js";
-import { RoomEnvironment } from "${DESK_URL}three/examples/jsm/environments/RoomEnvironment.js";
+import { HDRLoader } from "${DESK_URL}three/examples/jsm/loaders/HDRLoader.js";
 const LAYOUT = ${JSON.stringify(layout(opts.laptop))};
 const OPTS = ${JSON.stringify(opts)};
 const HANDS_URL = ${JSON.stringify(`${DESK_URL}hands/`)};
 const MACBOOK_URL = ${JSON.stringify(`${DESK_URL}macbook.glb`)};
+const STUDIO_URL = ${JSON.stringify(`${DESK_URL}studio/`)};
 ${SCENE}
 </script></body></html>`;
   pageCache.set(key, html);
@@ -151,30 +158,42 @@ const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 renderer.setClearColor(0x000000, 0);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-// Neutral, as product shots are graded: colours (the aluminium, the skin) stay what they are, where ACES warms and
-// desaturates them.
+// Neutral, as product shots are graded: colours (the aluminium, the skin, black keys) stay what they are, with only
+// the brightest highlights rolled off.
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 0.92;
+renderer.toneMappingExposure = 0.95;
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x15161a);
-scene.fog = new THREE.Fog(0x15161a, 45, 130);
 const camera = new THREE.PerspectiveCamera(30, OPTS.aspect, 0.1, 400);
 
-// ---------------------------------------------------------------- light: a soft key from the upper left, a room to reflect, and the screen's glow
-// The room is three.js's own studio interior, blurred into an environment: what the aluminium and the keys reflect,
-// and a soft light from every side, so metal reads as metal rather than flat grey.
+// ---------------------------------------------------------------- light: photographed rooms, a key for shadows, and the screen's glow
+// Two real rooms, as HDR panoramas (Poly Haven, CC0), light the scene and are what the aluminium, the keys and the
+// skin reflect: a daylit loft for the desk, and a photo studio's softboxes for the float view. The desk's room is
+// also the backdrop, out of focus, as a camera this close to a laptop sees the room behind it.
+const ROOM_TURN = new THREE.Euler(0, 2.3, 0); // the loft's windows to the left, behind
+const rooms = {};
 {
+  const loader = new HDRLoader();
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.5;
+  for (const name of ["loft", "studio"]) {
+    const hdr = await loader.loadAsync(STUDIO_URL + name + ".hdr");
+    hdr.mapping = THREE.EquirectangularReflectionMapping;
+    rooms[name] = { picture: hdr, light: pmrem.fromEquirectangular(hdr).texture };
+  }
   pmrem.dispose();
 }
-scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x4a4035, 0.25));
-// The key light: warm, from the upper left and in front, with soft shadows (a broad light, not a spot's cone).
-const key = new THREE.DirectionalLight(0xfff0de, 1.5);
-key.position.set(-20, 32, 18);
+scene.environment = rooms.loft.light;
+scene.environmentRotation.copy(ROOM_TURN);
+scene.environmentIntensity = 0.7;
+scene.background = rooms.loft.picture;
+scene.backgroundRotation.copy(ROOM_TURN);
+scene.backgroundBlurriness = 0.1;
+scene.backgroundIntensity = 0.55;
+// The key: the windows' light, for the shadows a panorama can't cast. Soft, from the upper left.
+const key = new THREE.DirectionalLight(0xfff4e8, 1.3);
+key.position.set(-22, 30, 12);
 key.target.position.set(0, 0, -2);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -184,19 +203,6 @@ key.shadow.camera.near = 5; key.shadow.camera.far = 90;
 key.shadow.bias = -0.0003;
 key.shadow.normalBias = 0.03;
 scene.add(key, key.target);
-// The lamp's pool: a broad, soft-edged spot over the laptop, so the desk is brightest round it and darkens away.
-const pool = new THREE.SpotLight(0xffe6c8, 170, 140, 0.85, 1, 1.4);
-pool.position.set(-10, 42, 10);
-pool.target.position.set(0, 0, -1);
-scene.add(pool, pool.target);
-// A warm fill from the viewer's side, so skin in shadow stays warm instead of going grey-blue.
-const warmFill = new THREE.DirectionalLight(0xffe2c8, 0.35);
-warmFill.position.set(0, 12, 20);
-scene.add(warmFill);
-// A cool rim from behind and to the right, to draw the lid's edge and the hands' outline against the room.
-const rim = new THREE.DirectionalLight(0xc8d8ff, 1.0);
-rim.position.set(18, 14, -22);
-scene.add(rim);
 const glow = new THREE.PointLight(0xdfe8ff, 0, 30, 1.8); // the screen, lighting the keys and hands
 scene.add(glow);
 
@@ -222,10 +228,31 @@ function grain(color) {
   t.anisotropy = 4;
   return t;
 }
-// Matte: it takes little from the room, so the lamp's pool round the laptop is what lights it, falling off to the edges.
-const desk = new THREE.Mesh(new THREE.PlaneGeometry(400, 320), new THREE.MeshStandardMaterial({ map: grain(OPTS.surface), roughness: 0.9, transparent: true, envMapIntensity: 0.25 }));
-desk.rotation.x = -Math.PI / 2;
-desk.position.set(0, BASE_BOTTOM - 0.01, -20);
+// A table, 1.7 by 0.95 m and 3 cm thick, the laptop toward its front: light oak veneer (Poly Haven, CC0) with its
+// grain, sheen and roughness, or a plain colour with a faint grain when the desk's surface is one.
+const TABLE = { w: 90, d: 50, t: 1.6, z: -8 };
+const deskMat = new THREE.MeshStandardMaterial({ roughness: 0.9, transparent: true });
+if (OPTS.surface === "oak") {
+  const tex = new THREE.TextureLoader();
+  const map = (name, srgb) => {
+    const t = tex.load(STUDIO_URL + name);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    // A tile is about 30 cm of veneer; the grain runs along the table.
+    t.repeat.set(5.5, 3.1);
+    t.center.set(0.5, 0.5);
+    t.rotation = Math.PI / 2;
+    t.anisotropy = MAX_ANISO;
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  deskMat.map = map("oak_diff.jpg", true);
+  deskMat.roughnessMap = map("oak_rough.jpg", false);
+  deskMat.normalMap = map("oak_nor.jpg", false);
+  deskMat.normalScale.set(0.3, 0.3);
+  deskMat.roughness = 1;
+} else deskMat.map = grain(OPTS.surface);
+const desk = new THREE.Mesh(new THREE.BoxGeometry(TABLE.w, TABLE.t, TABLE.d), deskMat);
+desk.position.set(0, BASE_BOTTOM - 0.01 - TABLE.t / 2, TABLE.z);
 desk.receiveShadow = true;
 scene.add(desk);
 
@@ -288,7 +315,7 @@ laptop.add(lid);
     m.castShadow = true;
     m.receiveShadow = true;
     // Satin aluminium: metal, a little rough, reflecting the room. The PC is the same body, dark.
-    if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.34; }
+    if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.42; }
     if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") m.material.color.setHex(0x55585e);
     if (LID_MATERIALS.has(name)) {
       m.geometry.translate(-HINGE.x, -HINGE.y, -HINGE.z);
@@ -383,8 +410,9 @@ function capGeometry(w, d) {
 }
 for (const cap of LAYOUT.keys) {
   const w = cap.w * U - KEY_GAP, d = cap.h * U - KEY_GAP;
-  const matSide = new THREE.MeshStandardMaterial({ color: P.keySide, roughness: 0.8 });
-  const matTop = new THREE.MeshStandardMaterial({ map: legendTexture(cap, false), roughness: 0.62 });
+  const matSide = new THREE.MeshStandardMaterial({ color: P.keySide, roughness: 0.8, envMapIntensity: 0.45 });
+  // Matte black, with a faint sheen: the room shows in a key only at a glance.
+  const matTop = new THREE.MeshStandardMaterial({ map: legendTexture(cap, false), roughness: 0.72, envMapIntensity: 0.45 });
   const matLit = new THREE.MeshStandardMaterial({ map: legendTexture(cap, true), roughness: 0.55, emissive: ACCENT, emissiveIntensity: 0.3 });
   // ExtrudeGeometry's groups: 0 the faces (the top, and the bottom no one sees), 1 the sides.
   const mesh = new THREE.Mesh(capGeometry(w, d), [matTop, matSide]);
@@ -452,12 +480,17 @@ const displayMask = (() => {
 })();
 displayMask.position.set(0, DISPLAY.y, DISPLAY.z + 0.004);
 lid.add(displayMask);
+// The display's glass: a faint reflection of the room over the picture, as every photo of a screen has. Faded in
+// with the shape above, off in the flat frame.
+const glassMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.12, transparent: true, opacity: 0, depthWrite: false });
+const glass = new THREE.Mesh(new THREE.PlaneGeometry(DISPLAY.w, DISPLAY.h), glassMat);
+glass.position.set(0, DISPLAY.y, DISPLAY.z + 0.008);
+lid.add(glass);
 
 // ---------------------------------------------------------------- the studio: the float view's stage
 // A void in the backdrop colour, lighter above and deeper below, with the devices' shadows soft on a floor
 // far beneath them. It fades in over the room as the desk fades out.
 const BACKDROP = new THREE.Color(OPTS.backdrop);
-const ROOM = new THREE.Color(0x15161a);
 const sky = new THREE.Mesh(
   new THREE.SphereGeometry(320, 48, 24),
   new THREE.ShaderMaterial({
@@ -595,10 +628,8 @@ function setStage(stage, ipadAmount, t) {
     sh.position.set(obj.position.x, FLOOR_Y, obj.position.z);
     sh.material.opacity = 0.32 * e * (name === "ipad" ? ie : 1);
   }
-  scene.background.copy(ROOM);
-  scene.fog.color.copy(ROOM).lerp(BACKDROP.clone().multiplyScalar(0.8), e);
-  scene.fog.near = 45 + 200 * e;
-  scene.fog.far = 130 + 300 * e;
+  // The studio's softboxes light the float view; the loft, the desk. They change places halfway, mid-flight.
+  scene.environment = stage < 0.5 ? rooms.loft.light : rooms.studio.light;
 }
 
 // ---------------------------------------------------------------- hands: the model's joints are set one by one, from its rest pose
@@ -1076,6 +1107,7 @@ function render(t, frame) {
   setLid(lidDeg);
   setStage(stageOf(state), ipadOf(state), t);
   notchMat.opacity = Math.min(1, (1 - flatOf(state)) * 6);
+  glassMat.opacity = 0.07 * notchMat.opacity;
   laptop.updateMatrixWorld(true);
   for (const [id, k] of keys) {
     let amount = 0;
