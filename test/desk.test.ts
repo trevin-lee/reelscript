@@ -75,6 +75,12 @@ test("the keyboard window and the desk views queue like any window and view, and
   assert.throws(() => d.desk.lid(150), /degrees must be from 0 \(shut\) to 135/);
   assert.throws(() => d.desk.lid(undefined as never), /degrees/);
   assert.throws(() => createDemo({ desk: { backdrop: "nope nope" } }), /desk backdrop must be a CSS colour/);
+  // A colour is a real one: a typo the page would quietly ignore fails here.
+  assert.throws(() => createDemo({ desk: { handColor: "blurple" } }), /desk handColor must be a CSS colour, not "blurple"/);
+  assert.throws(() => createDemo({ desk: { surface: "walnut" } }), /desk surface must be a CSS colour \(or "oak"\)/);
+  assert.throws(() => createDemo({ wallpaper: "blurple" }), /wallpaper must be a CSS colour or gradient, or an image file's path/);
+  for (const ok of [{ desk: { surface: "oak", sleeve: "RebeccaPurple", backdrop: "oklch(70% 0.1 250)", handColor: "#c8a080" } }, { wallpaper: "linear-gradient(#000, #fff)" }, { wallpaper: "hsl(220 30% 20%)" }])
+    assert.doesNotThrow(() => createDemo(ok as never), JSON.stringify(ok));
   assert.throws(() => d.press("a", { window: "keyboard" as never }), /unknown window "keyboard"/);
   assert.throws(() => d.desk.to("desk", { duration: -1 }), /duration must be a number, 0 or more/);
   assert.throws(() => createDemo({ desk: { laptop: "amiga" as never } }), /unknown desk laptop "amiga" \(use "mac" or "pc"\)/);
@@ -94,10 +100,17 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   const ok = await run(["check", "--strict", "s.ts"], dir);
   assert.equal(ok.code, 0, ok.output);
 
-  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.press("Meta+Delete");\nawait demo.render("out.mp4");`);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.press("Meta+F13");\nawait demo.render("out.mp4");`);
   const missing = await run(["check", "s.ts"], dir);
   assert.equal(missing.code, 1);
-  assert.match(missing.output, /press\("Meta\+Delete"\): the Mac keyboard on the desk has no "Delete" key[\s\S]*s\.ts:5/);
+  assert.match(missing.output, /press\("Meta\+F13"\): the Mac keyboard on the desk has no "F13" key[\s\S]*s\.ts:5/);
+
+  // The panel stays in front, as it's drawn, even after another window is focused: a click under it lands on it.
+  const corner = `data:text/html,<button id=b style='position:fixed;right:4px;bottom:4px'>b</button>`;
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${corner}");\ndemo.keyboard.open();\ndemo.browser.focus();\ndemo.cursor.moveTo("#b");\ndemo.cursor.click();\nawait demo.render("out.mp4");`);
+  const covered = await run(["check", "s.ts"], dir);
+  assert.equal(covered.code, 1);
+  assert.match(covered.output, /would land on the keyboard window[^\n]*move it \(demo\.keyboard\.place\(\)\) or close it[\s\S]*s\.ts:7/);
 
   demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.press("Meta+Delete");\nawait demo.render("out.mp4");`);
   assert.equal((await run(["check", "s.ts"], dir)).code, 0, "with no keyboard window or desk view, any key goes");

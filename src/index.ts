@@ -67,6 +67,19 @@ function invalidChoice(action: Action): string | null {
   );
 }
 
+/** CSS's named colours, for telling a colour from a typo ("blurple"), which the page would quietly ignore. */
+const CSS_NAMED_COLOURS = new Set(
+  "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen transparent".split(" "),
+);
+/** Whether a string is a CSS colour: hex, a named colour, or a colour function (rgb(), hsl(), oklch(), ...). */
+function isCssColour(v: string): boolean {
+  return (
+    /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) ||
+    CSS_NAMED_COLOURS.has(v.toLowerCase()) ||
+    /^(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(.+\)$/i.test(v.trim())
+  );
+}
+
 /** Number options by what they allow: rates and sizes, durations, and positions. */
 const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height", "distance"];
 const AT_LEAST_0 = ["ms", "duration", "hold", "holdMs", "settle", "maxGap", "maxGapMs", "timeout"];
@@ -168,14 +181,22 @@ function invalidOption(o: DemoOptions): string | null {
   }
   const shown = (v: unknown) => (typeof v === "number" ? String(v) : JSON.stringify(v));
   if (o.theme === "bare" && o.wallpaper !== undefined) return `the bare theme draws no desktop, so wallpaper does nothing there (it's the macos theme's)`;
-  if (o.wallpaper !== undefined && typeof o.wallpaper !== "string") return `wallpaper must be a CSS colour or gradient, or an image file's path, not ${shown(o.wallpaper)}`;
+  if (
+    o.wallpaper !== undefined &&
+    (typeof o.wallpaper !== "string" ||
+      !(isCssColour(o.wallpaper) || /^(repeating-)?(linear|radial|conic)-gradient\(.+\)$/i.test(o.wallpaper.trim()) || /\.(png|jpe?g|webp|gif|avif)$/i.test(o.wallpaper)))
+  ) {
+    return `wallpaper must be a CSS colour or gradient, or an image file's path (.png, .jpg, .webp, .gif, .avif), not ${shown(o.wallpaper)}`;
+  }
   if (o.desk !== undefined) {
     if (typeof o.desk !== "object" || o.desk === null) return `desk must be an object of options, not ${shown(o.desk)}`;
     const d = o.desk as DeskOptions;
     if (d.laptop !== undefined && !KEYBOARD_LAYOUTS.includes(d.laptop)) return `unknown desk laptop ${shown(d.laptop)} (use "mac" or "pc")`;
     if (d.hands !== undefined && typeof d.hands !== "boolean") return `desk hands must be true or false, not ${shown(d.hands)}`;
     for (const k of ["handColor", "sleeve", "surface", "backdrop"] as const) {
-      if (d[k] !== undefined && (typeof d[k] !== "string" || !/^(#[0-9a-f]{3,8}|[a-z]+|rgba?\(.*\)|hsla?\(.*\))$/i.test(d[k]!))) return `desk ${k} must be a CSS colour, not ${shown(d[k])}`;
+      const v = d[k];
+      if (v === undefined || (k === "surface" && v === "oak")) continue;
+      if (typeof v !== "string" || !isCssColour(v)) return `desk ${k} must be a CSS colour${k === "surface" ? ' (or "oak")' : ""}, not ${shown(v)}`;
     }
   }
   if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
@@ -338,6 +359,19 @@ function editDistance(a: string, b: string): number {
 }
 
 /** Counts render/check/record calls so the CLI can tell a script that never rendered. */
+/** A render's promise that knows whether the script took its result: awaited it, or attached a handler. */
+class RenderRun<T> extends Promise<T> {
+  handled = false;
+  // Promises made from this one (by then, catch, finally) are plain ones.
+  static get [Symbol.species]() {
+    return Promise;
+  }
+  then<A = T, B = never>(onDone?: ((v: T) => A | PromiseLike<A>) | null, onFailed?: ((e: unknown) => B | PromiseLike<B>) | null): Promise<A | B> {
+    this.handled = true;
+    return super.then(onDone, onFailed);
+  }
+}
+
 function noteRun(kind: "render" | "check"): void {
   const g = globalThis as { __reelscript_runs?: { render: number; check: number } };
   g.__reelscript_runs ??= { render: 0, check: 0 };
@@ -1183,9 +1217,13 @@ export class Demo {
    */
   render(outPath: string): Promise<RenderResult> {
     // Not async: the script gets the run itself, which the CLI waits for, not a wrapper that would reject on its own.
-    const run = this.renderNow(outPath);
-    // The CLI waits for every run a script starts, so a render() that isn't awaited still finishes, and fails, in its turn.
-    const g = globalThis as { __reelscript_pending?: Promise<unknown>[] };
+    // The CLI waits for every run a script starts, so a render() that isn't awaited still finishes, and fails, in its
+    // turn. One the script awaits (or otherwise handles) is the script's to fail or to catch: a script that catches
+    // the error has dealt with it. A RenderRun notes whether the script took its result; its failure never surfaces
+    // as Node's unhandled-rejection dump, since the CLI or the script reports it.
+    const run = new RenderRun<RenderResult>((resolve, reject) => this.renderNow(outPath).then(resolve, reject));
+    Promise.prototype.then.call(run, undefined, () => {});
+    const g = globalThis as { __reelscript_pending?: RenderRun<unknown>[] };
     (g.__reelscript_pending ??= []).push(run);
     return run;
   }

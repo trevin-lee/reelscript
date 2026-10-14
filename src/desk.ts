@@ -1124,7 +1124,8 @@ function render(t, frame) {
     h.root.position.addScaledVector(AWAY, away); // the whole hand, holding its pose
   }
   let shown = null, opacity = 0;
-  if (OPTS.labels) {
+  // Labels: as the frame says (the keyboard window's setting, which can change while it's open), else the page's.
+  if (frame.labels ?? OPTS.labels) {
     for (const ev of events) {
       if (!ev.label) continue;
       const on = ev.at - MOD_LEAD - 80, off = ev.at + ev.hold + 700;

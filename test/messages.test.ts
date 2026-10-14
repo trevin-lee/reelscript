@@ -265,4 +265,10 @@ test("a render() the script didn't await is waited for, and its failure prints a
   const ok = await run(["render", "s.ts"], dir);
   assert.equal(ok.code, 0, ok.output);
   assert.ok(existsSync(join(dir, "out.mp4")), "the video was written before the CLI exited");
+  // A failure the script catches is the script's: it goes on, and the command succeeds.
+  demo(dir, `const demo = createDemo({ viewport: [300, 200], fps: 10, theme: "bare" });\ndemo.browser.goto("data:text/html,hi");\ndemo.cursor.moveTo("#nope");\ntry { await demo.render("out.mp4"); } catch (e) { console.log("handled: " + (e as Error).message.split("\\n")[0]); }`);
+  const caught = await run(["check", "s.ts"], dir);
+  assert.equal(caught.code, 0, caught.output);
+  assert.match(caught.output, /handled: reelscript: target "#nope" was not found/);
+  assert.equal(caught.output.match(/was not found/g)?.length, 1, "reported once, by the script");
 });

@@ -191,6 +191,9 @@ function keyId(name: string): string | null {
  * symbol ("A", "!") is Shift and the key, as Playwright types it. Returns
  * the name of a key the layout doesn't have instead.
  */
+/** The keys a laptop keyboard leaves out, and the key that is them with fn held. */
+const FN_SHARED: Record<string, string> = { PageUp: "ArrowUp", PageDown: "ArrowDown", Home: "ArrowLeft", End: "ArrowRight", Delete: "Backspace" };
+
 export function resolveChord(chord: string, lay: Layout): Chord | { missing: string } {
   const parts = chord.split("+");
   if (parts.length > 1 && parts[parts.length - 1] === "") parts.splice(-2, 2, "+"); // "Shift++" presses +
@@ -212,8 +215,14 @@ export function resolveChord(chord: string, lay: Layout): Chord | { missing: str
   } else {
     mainId = keyId(main);
   }
-  if (!mainId || !lay.keys.some((k) => k.id === mainId)) return { missing: main };
-  const order = ["ControlLeft", "AltLeft", "ShiftLeft", "MetaLeft"];
+  const has = (id: string) => lay.keys.some((k) => k.id === id);
+  // A key a laptop hasn't got is fn with the key it shares (PageDown is fn ↓ on a MacBook), as a person presses it.
+  if (mainId && !has(mainId) && mainId in FN_SHARED && has("Fn") && has(FN_SHARED[mainId])) {
+    mods.add("Fn");
+    mainId = FN_SHARED[mainId];
+  }
+  if (!mainId || !has(mainId)) return { missing: main };
+  const order = ["Fn", "ControlLeft", "AltLeft", "ShiftLeft", "MetaLeft"];
   const keys: KeyPress[] = [...mods].sort((a, b) => order.indexOf(a) - order.indexOf(b)).map((id) => ({ id, modifier: true }));
   keys.push({ id: mainId, modifier: false });
   return { keys, label: chordLabel(keys, lay) };
@@ -237,8 +246,8 @@ export function resolveChar(ch: string, lay: Layout): KeyPress[] | null {
   return keys;
 }
 
-const MAC_SYMBOLS: Record<string, string> = { ControlLeft: "⌃", AltLeft: "⌥", ShiftLeft: "⇧", MetaLeft: "⌘" };
-const PC_NAMES: Record<string, string> = { ControlLeft: "Ctrl", AltLeft: "Alt", ShiftLeft: "Shift", MetaLeft: "Win" };
+const MAC_SYMBOLS: Record<string, string> = { Fn: "fn", ControlLeft: "⌃", AltLeft: "⌥", ShiftLeft: "⇧", MetaLeft: "⌘" };
+const PC_NAMES: Record<string, string> = { Fn: "Fn", ControlLeft: "Ctrl", AltLeft: "Alt", ShiftLeft: "Shift", MetaLeft: "Win" };
 /** How a Mac writes a key in a shortcut; a PC writes its name. */
 const MAC_KEY_SYMBOLS: Record<string, string> = {
   Enter: "↩", Escape: "esc", Backspace: "⌫", Delete: "⌦", Tab: "⇥", Space: "space", CapsLock: "caps lock",

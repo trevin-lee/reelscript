@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import sharp from "sharp";
 
-const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop.
+const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop, with a keyboard view (hands pressing the keys) and 3D shots of the demo on a MacBook on a desk or floating with an iPad.
 
 Workflow for making a demo:
 1. Call reelscript_docs once to learn the API.
@@ -133,7 +133,7 @@ export async function serve(): Promise<void> {
     "reelscript_docs",
     {
       title: "reelscript API reference",
-      description: "The full reelscript README: concepts, the complete API, and examples of browser, terminal, editor, and narration demos.",
+      description: "The full reelscript README: concepts, the complete API, and examples of browser, terminal, editor, keyboard, desk and narration demos.",
       annotations: { readOnlyHint: true },
     },
     async () => ({ content: [text(readFileSync(new URL("../README.md", import.meta.url), "utf8"))] }),

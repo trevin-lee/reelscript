@@ -16,6 +16,9 @@
 - `examples/keyboard.ts`; ⌘N opens the sample app's New project dialog, and Enter in the name field creates the project.
 - The drawn caret sits after the last character in a field sized to its text (`field-sizing: content`), where it was drawn a line below, centred under centred text.
 - The editor opens on its configured theme: on a busy machine the first frames could show VS Code's light stand-in theme, which it draws before loading the configured one, then flash to dark.
+- A key a laptop leaves out shows as fn with the key it shares, as a person presses it: PageDown is fn ↓ on the MacBook (PageUp, Home, End and forward Delete too); a key the laptop hasn't got at all fails at the line. The keyboard window stays in front of the other windows, as it's drawn, and a click under it says so; `keyboard.open()` on the open panel changes its labels, and keeps them when it isn't given any.
+- Colour options are checked as CSS colours (hex, a named colour, or a colour function; and gradients for the wallpaper), so a typo ("blurple") fails at the createDemo line instead of quietly showing the wrong colour.
+- A `render()` failure the script catches is the script's: it goes on, and the command succeeds.
 - A script that calls `render()` without `await` is waited for anyway: its render finishes, and a failure prints as reelscript's, at the line, where it was Node's unhandled-rejection dump.
 
 ## 0.5.2

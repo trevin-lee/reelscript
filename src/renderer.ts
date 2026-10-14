@@ -602,6 +602,7 @@ class Engine {
     screen: { data: Buffer; width: number; height: number; channels: 3 | 4 } | null,
     key: string,
     lossless: boolean,
+    labels = false,
   ): Promise<void> {
     if (screen) {
       const image = sharp(screen.data, { raw: { width: screen.width, height: screen.height, channels: screen.channels } });
@@ -612,7 +613,7 @@ class Engine {
     const fed = this.deskFed.get(key) ?? 0;
     const events = this.keyEvents.slice(fed);
     this.deskFed.set(key, this.keyEvents.length);
-    const frame = { state, lid: this.lidAt(t) };
+    const frame = { state, lid: this.lidAt(t), labels };
     await page.evaluate(
       ([t, events, frame]) => (window as unknown as { __rsDesk: { render: (t: number, e: unknown[], f: unknown) => void } }).__rsDesk.render(t, events, frame),
       [t, events, frame] as const,
@@ -671,8 +672,10 @@ class Engine {
     }
   }
 
+  /** Back to front. The keyboard panel is always in front, as it's drawn: a click where it is lands on it. */
   private byZ(): Win[] {
-    return [...this.windows.values()].sort((a, b) => a.z - b.z);
+    const front = (w: Win) => (w.kind === "keyboard" ? 1 : 0);
+    return [...this.windows.values()].sort((a, b) => front(a) - front(b) || a.z - b.z);
   }
 
   /** Topmost window whose frame contains the desktop point. */
@@ -765,7 +768,10 @@ class Engine {
     if (!w || w.id !== aimed.window) {
       throw new Error(
         `reelscript: the click on ${named} would land on ${w ? `the ${w.id} window` : "the desktop"}, ` +
-          `which covers the ${aimed.window} window there; bring it forward first with demo.${aimed.window}.focus()`,
+          `which covers the ${aimed.window} window there; ` +
+          (w?.kind === "keyboard"
+            ? `the keyboard window stays in front, so move it (demo.keyboard.place()) or close it first`
+            : `bring it forward first with demo.${aimed.window}.focus()`),
       );
     }
     // A point names a place in the window, not an element, so landing in that window is all there is to check.
@@ -1363,7 +1369,8 @@ class Engine {
         return null;
       }
       case "keyboard.open": {
-        this.keyboardLabels = action.labels ?? true;
+        // Opening an open panel keeps what isn't given, as every window does; after close(), it starts over.
+        this.keyboardLabels = action.labels ?? (this.windows.has("keyboard") ? this.keyboardLabels : true);
         const w = await this.ensureWindow("keyboard", "keyboard", action);
         this.focus(w); // to the front; typing stays where it was
         return { end: start + 300 };
@@ -1788,7 +1795,7 @@ class Engine {
       .toBuffer({ resolveWithObject: true });
     if (keyboard) {
       // The panel films the desk with the desktop so far on the laptop's screen, then sits on top of it.
-      await this.deskRender(keyboard.page, t, { view: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false);
+      await this.deskRender(keyboard.page, t, { view: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false, this.keyboardLabels);
       const panel = await this.contentOverlay(keyboard);
       ({ data: sceneData } = await sharp(sceneData, { raw: { width: W, height: H, channels: 4 } }).composite([panel]).raw().toBuffer({ resolveWithObject: true }));
     }

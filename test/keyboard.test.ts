@@ -52,7 +52,11 @@ test("a Playwright key name or chord resolves to its keys, with modifiers held, 
   assert.deepEqual(chord("Shift++"), { ids: ["+ShiftLeft", "Equal"], label: "⇧ =" });
   assert.deepEqual(chord("Meta+F13"), { missing: "F13" });
   assert.deepEqual(chord("Hyper+K"), { missing: "Hyper" });
-  assert.deepEqual(chord("Meta+Delete", mac), { missing: "Delete" }, "a Mac's delete key is Backspace");
+  // A key a laptop leaves out is fn with the key it shares, as a person presses it.
+  assert.deepEqual(chord("PageDown", mac), { ids: ["+Fn", "ArrowDown"], label: "fn ↓" });
+  assert.deepEqual(chord("Home", mac), { ids: ["+Fn", "ArrowLeft"], label: "fn ←" });
+  assert.deepEqual(chord("Meta+Delete", mac), { ids: ["+Fn", "+MetaLeft", "Backspace"], label: "fn ⌘ ⌫" }, "forward delete is fn delete");
+  assert.deepEqual(chord("Delete", pc), { ids: ["Delete"], label: "Del" }, "a PC has its own Del key");
   const all = resolveChord("Control+Shift+Alt+Meta+K", mac);
   assert.ok(!("missing" in all));
   assert.equal(all.label, "⌃ ⌥ ⇧ ⌘ K", "modifiers in Apple's order");
