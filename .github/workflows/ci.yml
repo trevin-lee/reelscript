@@ -30,6 +30,10 @@ jobs:
         run: npm run build && node dist/cli.js check examples/*.ts
       - name: Render the example end to end
         run: npm run example
+      - name: Render frames of the desk (the keyboard view in a desk shot) and the float view (the laptop alone, turning)
+        run: |
+          node dist/cli.js preview examples/keyboard.ts --at 6.5 --out out/desk-frame.png
+          node dist/cli.js preview examples/spin.ts --at 2 --out out/float-frame.png
       - name: Render a frame of the editor example (downloads code-server once, then cached)
         run: node dist/cli.js preview examples/editor.ts --at 9 --out out/editor-frame.png
       - name: Render a frame of the extension example (loads examples/acme-ext into VS Code)
@@ -41,6 +45,8 @@ jobs:
             examples/out/basic.mp4
             out/editor-frame.png
             out/extension-frame.png
+            out/desk-frame.png
+            out/float-frame.png
           retention-days: 7
 
   # Container image. Built on every PR and push; pushed to GHCR from main as

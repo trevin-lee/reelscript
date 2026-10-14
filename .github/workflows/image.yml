@@ -51,6 +51,8 @@ jobs:
           docker run --rm -v "$PWD:/work" reelscript:test check examples/basic.ts examples/terminal.ts examples/editor.ts examples/keyboard.ts
           docker run --rm -v "$PWD:/work" reelscript:test render examples/terminal.ts --out smoke-${{ matrix.slug }}.mp4
           test -s smoke-${{ matrix.slug }}.mp4
+          docker run --rm -v "$PWD:/work" reelscript:test preview examples/keyboard.ts --at 6.5 --out smoke-desk-${{ matrix.slug }}.png
+          test -s smoke-desk-${{ matrix.slug }}.png
           docker run --rm reelscript:test --version
       - uses: docker/login-action@v3
         if: inputs.push

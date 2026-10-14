@@ -73,6 +73,10 @@ test("the keyboard window and the desk views queue like any window and view, and
   assert.throws(() => d.desk.to("float", { ipad: 0 as never }), /ipad must be true or false/);
   assert.throws(() => d.desk.out({ orbit: 10 } as never), /orbit/);
   assert.throws(() => d.desk.lid(150), /degrees must be from 0 \(shut\) to 135/);
+  // Nothing is quietly ignored: an iPad outside "float", hands the desk hasn't got, focus on a window that takes no typing.
+  assert.throws(() => d.desk.to("desk", { ipad: false }), /ipad is for the "float" view/);
+  assert.throws(() => createDemo({ desk: { hands: false } }).desk.to("desk", { hands: true }), /hands: true needs the desk's hands/);
+  assert.equal((d.keyboard as unknown as { focus?: unknown }).focus, undefined, "the keyboard window has no focus()");
   assert.throws(() => d.desk.lid(undefined as never), /degrees/);
   assert.throws(() => createDemo({ desk: { backdrop: "nope nope" } }), /desk backdrop must be a CSS colour/);
   // A colour is a real one: a typo the page would quietly ignore fails here.
@@ -104,6 +108,12 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   const missing = await run(["check", "s.ts"], dir);
   assert.equal(missing.code, 1);
   assert.match(missing.output, /press\("Meta\+F13"\): the Mac keyboard on the desk has no "F13" key[\s\S]*s\.ts:5/);
+
+  // Keys pressed with the lid down are under it: a warning at each such line.
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);
+  const shut = await run(["check", "s.ts"], dir);
+  assert.equal(shut.code, 0, shut.output);
+  assert.match(shut.output, /the laptop's lid is down \(0°\), so the keys pressed here are under it[\s\S]*s\.ts:6/);
 
   // The panel stays in front, as it's drawn, even after another window is focused: a click under it lands on it.
   const corner = `data:text/html,<button id=b style='position:fixed;right:4px;bottom:4px'>b</button>`;

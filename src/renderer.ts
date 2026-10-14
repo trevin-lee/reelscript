@@ -252,6 +252,8 @@ class Engine {
   /** The lid moving (or moved) to an angle, in degrees; null while it's where it starts. */
   private lidAnim: { from: number; to: number; start: number; dur: number; ease: Ease } | null = null;
   private keyboardLabels = true;
+  /** Lines already warned that their keys are under a shut lid. */
+  private lidShutWarned = new Set<string>();
   private unshownKeys = new Set<string>();
 
   constructor(
@@ -560,13 +562,23 @@ class Engine {
     if ("missing" in resolved) {
       throw new Error(`reelscript: press("${chord}"): the ${this.deskOpts.laptop === "mac" ? "Mac" : "PC"} keyboard on the desk has no "${resolved.missing}" key`);
     }
+    this.lidShutWarning(at);
     this.keyEvents.push({ at, hold, keys: assignFingers(resolved.keys, this.deskLayout), label: withLabel ? resolved.label : undefined, from });
+  }
+
+  /** Keys pressed with the lid down are under it, shown to no one: said at the line, as a character the laptop can't type is. */
+  private lidShutWarning(at: number): void {
+    const deg = this.lidAt(at);
+    if (deg >= 45 || this.lidShutWarned.has(this.at)) return;
+    this.lidShutWarned.add(this.at);
+    warn(`the laptop's lid is down (${Math.round(deg)}°), so the keys pressed here are under it and not shown; open it first with demo.desk.lid()\n  at ${this.at}`);
   }
 
   /** Text typed from `firstAt`, a character every `msPerChar`, for the hands. A character the laptop can't type is a warning, once. */
   private noteTyped(text: string, firstAt: number, msPerChar: number, from = firstAt): void {
     if (!this.sceneShown()) return;
     const hold = Math.min(70, Math.max(30, msPerChar * 0.7));
+    this.lidShutWarning(firstAt);
     Array.from(text).forEach((ch, i) => {
       const keys = resolveChar(ch, this.deskLayout);
       if (!keys) {

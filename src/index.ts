@@ -60,7 +60,7 @@ function invalidChoice(action: Action): string | null {
     value !== undefined && !allowed.includes(value as string) ? `unknown ${name} ${JSON.stringify(value)} (use ${allowed.map((x) => `"${x}"`).join(", ")})` : null;
   return (
     one("ease", a.ease, EASES) ??
-    one("window", a.window, action.kind.startsWith("window.") ? [...WINDOWS, "keyboard"] : WINDOWS) ??
+    one("window", a.window, action.kind === "window.place" || action.kind === "window.close" ? [...WINDOWS, "keyboard"] : WINDOWS) ??
     (action.kind === "desk.to" ? one("view", a.view, DESK_VIEWS) : null) ??
     (action.kind === "zoom.to" ? one("within", a.within, ["window"]) : null) ??
     (action.kind === "cursor.click" ? one("button", a.button, ["left", "right"]) ?? one("dialog", a.dialog, ["accept", "dismiss"]) : null)
@@ -700,16 +700,12 @@ class Zoom {
   }
 }
 
-class Win {
+/** A window on the desktop: placed and closed like any. */
+class Panel {
   constructor(
     protected demo: Demo,
     readonly id: "browser" | "terminal" | "editor" | "keyboard",
   ) {}
-
-  /** Bring this window to the front and direct typing to it. */
-  focus(): void {
-    this.demo._push({ kind: "window.focus", window: this.id });
-  }
 
   /** Take this window off the desktop. Focus passes to the topmost window left. It can be opened again later. */
   close(): void {
@@ -719,6 +715,14 @@ class Win {
   /** Move or resize this window. */
   place(geometry: WindowGeometry): void {
     this.demo._push({ kind: "window.place", window: this.id }, geometry);
+  }
+}
+
+/** A window that takes typing, so it can be focused. (The keyboard window can't: it's always in front, and takes none.) */
+class Win extends Panel {
+  /** Bring this window to the front and direct typing to it. */
+  focus(): void {
+    this.demo._push({ kind: "window.focus", window: this.id });
   }
 }
 
@@ -783,7 +787,7 @@ class TerminalWindow extends Win {
   }
 }
 
-class KeyboardWindow extends Win {
+class KeyboardWindow extends Panel {
   constructor(demo: Demo) {
     super(demo, "keyboard");
   }
@@ -791,8 +795,8 @@ class KeyboardWindow extends Win {
   /**
    * Open the keyboard window: the desk's keyboard with the hands on it, as a
    * panel on the desktop (lower right, unless placed). While it's open, every
-   * key the demo presses or types plays on it. It comes to the front but never
-   * takes typing: keys still go to the window that had them.
+   * key the demo presses or types plays on it. It stays in front of the other
+   * windows but never takes typing: keys still go to the window that had them.
    */
   open(opts: KeyboardOptions & WindowGeometry = {}): void {
     this.demo._push({ kind: "keyboard.open" }, opts);
@@ -966,6 +970,10 @@ export class Demo {
   private cantApply(a: Action): string | null {
     const o = a as Record<string, unknown>;
     const bare = this.options.theme === "bare";
+    if (a.kind === "desk.to") {
+      if (a.ipad !== undefined && a.view !== "float") return `ipad is for the "float" view, where the iPad is; there's none in "${a.view}"`;
+      if (a.hands && this.options.desk?.hands === false) return `hands: true needs the desk's hands, which createDemo({ desk: { hands: false } }) left out`;
+    }
     if (a.kind === "terminal.open") {
       if (bare && a.title !== undefined) return `the bare theme draws no title bar, so title does nothing there`;
       const prompt = typeof a.prompt === "string" ? a.prompt : this.term ? this.termOpened : undefined;

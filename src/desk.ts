@@ -1,6 +1,8 @@
 /**
- * The desk: a laptop on a desk under a lamp, the demo on its screen, and two
- * hands on its keys, drawn in 3D (Three.js in a Chromium page). The keyboard
+ * The desk: a laptop (a MacBook Pro model, assets/macbook) on an oak table in
+ * a daylit room, the demo on its screen and two hands on its keys, or the
+ * laptop and an iPad floating in a photo studio, drawn in 3D (Three.js in a
+ * Chromium page) and lit by photographed rooms (assets/studio). The keyboard
  * window films it from over the keys; the desk views film it as the whole
  * frame. Everything it draws is a function of the key events it's been given,
  * the screen it's been handed, and the time it's asked for, so a frame is the
@@ -316,7 +318,12 @@ laptop.add(lid);
     m.receiveShadow = true;
     // Satin aluminium: metal, a little rough, reflecting the room. The PC is the same body, dark.
     if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.42; }
-    if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") m.material.color.setHex(0x55585e);
+    if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") {
+      // The PC: a dark, matte body, which stays dark in the studio's light rather than reflecting it as silver.
+      m.material.color.setHex(0x2c2e33);
+      m.material.metalness = 0.25;
+      m.material.roughness = 0.55;
+    }
     if (LID_MATERIALS.has(name)) {
       m.geometry.translate(-HINGE.x, -HINGE.y, -HINGE.z);
       m.geometry.scale(1, LID_STRETCH, 1);
@@ -463,7 +470,8 @@ const displayMask = (() => {
     s.lineTo(cx, T + over);
     shapes.push(s);
   }
-  // The notch, from its left shoulder round to its right.
+  // The notch, from its left shoulder round to its right: a MacBook's; the PC has none.
+  if (!mac) return new THREE.Mesh(new THREE.ShapeGeometry(shapes, 24), notchMat);
   const n = new THREE.Shape(), a = notchW / 2;
   n.moveTo(-a - shoulder, T + over);
   n.lineTo(-a - shoulder, T);
@@ -506,7 +514,7 @@ const sky = new THREE.Mesh(
 );
 sky.renderOrder = -1;
 scene.add(sky);
-// A soft shadow under each device, as in a product shot: a blurred ellipse on a floor far below, not the lamp's
+// A soft shadow under each device, as in a product shot: a blurred ellipse on a floor far below, not the key light's
 // hard shadow, which would show the floor's edge.
 const blobTex = (() => {
   const c = document.createElement("canvas");
@@ -1103,7 +1111,10 @@ let screenShown = false;
 const AWAY = new THREE.Vector3(0, -6, 30);
 function render(t, frame) {
   const state = frame.state ?? { view: "keyboard" };
-  const lidDeg = frame.lid ?? ${DESK_LID};
+  // The flat frame is the screen square on, so the lid is open for it: a flight to or from the flat desktop opens a
+  // lower lid as it comes to the screen, and lowers it again as it leaves.
+  const asked = frame.lid ?? ${DESK_LID};
+  const lidDeg = asked + (Math.max(asked, ${DESK_LID}) - asked) * ease(flatOf(state));
   setLid(lidDeg);
   setStage(stageOf(state), ipadOf(state), t);
   notchMat.opacity = Math.min(1, (1 - flatOf(state)) * 6);
