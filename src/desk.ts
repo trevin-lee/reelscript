@@ -1022,6 +1022,14 @@ function viewPose(name) {
     return { pos: centre.clone().addScaledVector(normal, dist), at: centre.clone(), up: up.clone(), fov };
   }
   if (name === "screen") {
+    // Aimed at where the screen is when it's up: a lid below upright would aim it down into the desk, against the lid.
+    const asLid = lid.rotation.x, asY = lid.position.y;
+    if (lid.rotation.x > 0) setLid(90);
+    const upright = screenFrame();
+    lid.rotation.x = asLid;
+    lid.position.y = asY;
+    lid.updateMatrixWorld(true);
+    const { centre, normal, up } = upright;
     const fov = 30;
     const dist = (SCREEN_H / 2 / Math.tan((fov * Math.PI) / 360)) * 1.32;
     const side = new THREE.Vector3().crossVectors(up, normal).normalize();
@@ -1061,11 +1069,6 @@ function shotPose(shot) {
   return p;
 }
 // A state's numbers, blended through its flights: amounts arrive eased (by the renderer), so they're used as they are.
-// How much of the state looks at the screen: the flat frame, or the "screen" view.
-function screenOf(state) {
-  if (state.from) return screenOf(state.from) + (screenOf(state.to) - screenOf(state.from)) * state.amount;
-  return state.view === "flat" || state.view === "screen" ? 1 : 0;
-}
 // How much of the state is the flat frame.
 function flatOf(state) {
   if (state.from) return flatOf(state.from) + (flatOf(state.to) - flatOf(state.from)) * state.amount;
@@ -1121,10 +1124,10 @@ let screenShown = false;
 const AWAY = new THREE.Vector3(0, 1.5, 36);
 function render(t, frame) {
   const state = frame.state ?? { view: "keyboard" };
-  // The flat frame and the "screen" view look at the screen, so the lid is open for them: a flight to or from either
-  // opens a lower lid as it comes to the screen, and lowers it again as it leaves.
+  // The flat frame is the screen square on, so the lid is open for it: a flight to or from the flat desktop opens a
+  // lower lid as it comes to the screen, and lowers it again as it leaves. Every other view shows the lid as asked.
   const asked = frame.lid ?? ${DESK_LID};
-  const lidDeg = asked + (Math.max(asked, ${DESK_LID}) - asked) * ease(screenOf(state));
+  const lidDeg = asked + (Math.max(asked, ${DESK_LID}) - asked) * ease(flatOf(state));
   setLid(lidDeg);
   setStage(stageOf(state), ipadOf(state), t);
   notchMat.opacity = Math.min(1, (1 - flatOf(state)) * 6);
@@ -1137,8 +1140,15 @@ function render(t, frame) {
     k.mesh.material[0] = amount > 0.5 ? k.matLit : k.matTop;
   }
   // The hands leave for a shot without them, for the float view, and as the lid comes down onto the keys.
-  // Away too while the laptop is off the desk (they come back once it has nearly landed, not dangling under it).
-  const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35)), Math.min(1, stageOf(state) / 0.25)));
+  // Away too while the laptop is off the desk (they come back once it has nearly landed, not dangling under it), and
+  // when the camera comes right up to them: a hand against the lens is a blur, not a shot.
+  setCamera(state);
+  let nearCamera = 0;
+  for (const side of Object.keys(homeRoot)) {
+    const d = camera.position.distanceTo(laptop.localToWorld(homeRoot[side].clone()));
+    nearCamera = Math.max(nearCamera, Math.min(1, Math.max(0, (9 - d) / 4)));
+  }
+  const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35)), Math.min(1, stageOf(state) / 0.25), nearCamera));
   if (OPTS.hands) for (const h of Object.values(hands)) {
     h.root.visible = away < 0.999;
     if (!h.root.visible) continue;
@@ -1163,7 +1173,6 @@ function render(t, frame) {
   glow.position.copy(centre).addScaledVector(normal, 6);
   // The screen lights what's in front of it, less as the lid closes and none on the studio's stage.
   glow.intensity = screenShown ? 45 * Math.min(1, lidDeg / 90) * (1 - stageOf(state)) : 0;
-  setCamera(state);
   renderer.render(scene, camera);
 }
 function resize(w, h) {

@@ -66,7 +66,8 @@ test("the keyboard window and the desk views queue like any window and view, and
     { kind: "window.close", window: "keyboard" },
   ]);
   assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "desk", "keyboard", "float"\)/);
-  assert.throws(() => d.desk.to("desk", { tilt: 90 }), /tilt must be degrees from -80 to 80, not 90/);
+  assert.throws(() => d.desk.to("desk", { tilt: 90 }), /tilt must be degrees from -30 to 80, not 90/);
+  assert.throws(() => d.desk.to("desk", { tilt: -40 }), /tilt must be degrees from -30 to 80, not -40/);
   assert.throws(() => d.desk.to("desk", { distance: 0.1 }), /distance must be from 0\.3 to 4/);
   assert.throws(() => createDemo().desk.to("float", { hands: true }), /the hands are never in the "float" view/);
   assert.throws(() => createDemo({ desk: { hands: false, sleeve: "navy" } }), /desk sleeve colours the hands, which hands: false leaves out/);
@@ -116,6 +117,10 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   const zoomed = await run(["check", "s.ts"], dir);
   assert.equal(zoomed.code, 1);
   assert.match(zoomed.output, /zoom\.to\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.zoom.out();\nawait demo.render("out.mp4");`);
+  const unzoomed = await run(["check", "s.ts"], dir);
+  assert.equal(unzoomed.code, 1);
+  assert.match(unzoomed.output, /zoom\.out\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
 
   // Keys pressed with the lid down are under it: a warning at each such line.
   demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);

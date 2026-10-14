@@ -1294,6 +1294,9 @@ class Engine {
         return null;
       }
       case "zoom.out": {
+        if (this.deskOn(start)) {
+          throw new Error(`reelscript: zoom.out() zooms the flat desktop, and a desk view is on (which rests any zoom itself); leave the desk with desk.out()`);
+        }
         this.manualZoom = false;
         this.attention = null;
         this.zoomAnim = {
@@ -1410,6 +1413,12 @@ class Engine {
         const to: DeskShot =
           action.kind === "desk.to" ? { view: action.view, orbit: action.orbit, tilt: action.tilt, distance: action.distance, hands: action.hands, ipad: action.ipad } : { view: "flat" };
         const from: DeskState = this.deskViewState(start) ?? { view: "flat" };
+        // A zoom under way stops where it has got to; the desk view eases it to rest from there.
+        if (to.view !== "flat" && this.zoomAnim) {
+          this.zoom = zoomAt(this.zoomAnim, this.zoom, start);
+          this.zoomAnim = null;
+        }
+        if (to.view !== "flat") this.manualZoom = false;
         this.deskAnim = { from, to, start, dur: action.duration ?? DEFAULTS.deskDuration, ease: action.ease ?? "smooth" };
         return null;
       }
@@ -1702,6 +1711,11 @@ class Engine {
         this.zoom = { ...z.to };
         this.zoomAnim = null;
       }
+    } else if (this.deskOn(t)) {
+      // In a desk view the camera is the desk's: a zoom carried in eases to rest on the whole desktop, on the screen.
+      const k = 1 - Math.exp(-dt / 450);
+      const [W, H] = this.desktop;
+      this.zoom = { scale: lerp(this.zoom.scale, 1, k), cx: lerp(this.zoom.cx, W / 2, k), cy: lerp(this.zoom.cy, H / 2, k) };
     } else if (this.follow && !this.manualZoom) {
       this.followCamera(t, dt);
     }

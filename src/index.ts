@@ -107,7 +107,8 @@ function invalidNumber(options: object): string | null {
     return `exitCode must be an exit code (0 to 255), not ${shown(o.exitCode)}`;
   }
   // A camera tilted past straight over (or under) what it looks at would turn over; a lid opens so far.
-  if (o.tilt !== undefined && !(typeof o.tilt === "number" && o.tilt >= -80 && o.tilt <= 80)) return `tilt must be degrees from -80 to 80, not ${shown(o.tilt)}`;
+  // Up to straight over what it looks at; down to a little below the deck, past which a shot is the laptop's underside.
+  if (o.tilt !== undefined && !(typeof o.tilt === "number" && o.tilt >= -30 && o.tilt <= 80)) return `tilt must be degrees from -30 to 80, not ${shown(o.tilt)}`;
   // Closer than that, the camera is inside what it looks at.
   if (o.distance !== undefined && !(typeof o.distance === "number" && o.distance >= 0.3 && o.distance <= 4)) return `distance must be from 0.3 to 4 (times the view's own), not ${shown(o.distance)}`;
   if (o.degrees !== undefined && !(typeof o.degrees === "number" && o.degrees >= 0 && o.degrees <= DESK_LID_MAX)) {
@@ -502,7 +503,7 @@ export interface DeskMoveOptions {
 export interface DeskViewOptions extends DeskMoveOptions {
   /** Degrees the camera swings around what the view looks at, to the right; negative to the left. Default: 0 */
   orbit?: number;
-  /** Degrees the camera rises (or, negative, drops) from the view's own angle, -80 to 80. Default: 0 */
+  /** Degrees the camera rises (or, negative, drops) from the view's own angle, -30 to 80. Default: 0 */
   tilt?: number;
   /** How far the camera is, times the view's own distance. Default: 1 */
   distance?: number;
