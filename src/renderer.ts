@@ -552,7 +552,16 @@ class Engine {
 
   /** Whether keys pressed now show on the desk: a keyboard window is open, or a desk view is on. */
   private sceneShown(): boolean {
-    return this.windows.has("keyboard") || (this.deskAnim !== null && this.deskAnim.to.view !== "flat");
+    if (this.windows.has("keyboard")) return true;
+    const a = this.deskAnim;
+    // A desk view, or the flight back from one, which shows the desk until it lands on the flat desktop.
+    return a !== null && (a.to.view !== "flat" || this.stepStart < a.start + a.dur);
+  }
+
+  /** Whether the frame at `t` is a desk view (any of it), not the flat desktop. */
+  private deskOn(t: number): boolean {
+    const a = this.deskAnim;
+    return a !== null && (a.to.view !== "flat" || t < a.start + a.dur);
   }
 
   /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
@@ -976,7 +985,11 @@ class Engine {
 
   // ------------------------------------------------------------ steps
 
+  /** When the step being begun starts. */
+  private stepStart = 0;
+
   async begin(action: Action, index: number, start: number): Promise<Step | null> {
+    this.stepStart = start;
     this.at = this.sources[index] ? `${this.sources[index]} (${action.kind})` : action.kind;
     this.dialogAnswer = action.kind === "cursor.click" ? (action.dialog ?? null) : null;
     // open() on an open terminal or editor applies what's passed and keeps the rest from the last open().
@@ -1261,6 +1274,10 @@ class Engine {
         return null;
       }
       case "zoom.to": {
+        // A zoom is of the flat desktop: in a desk view it would zoom the picture inside the laptop's screen.
+        if (this.deskOn(start)) {
+          throw new Error(`reelscript: zoom.to() zooms the flat desktop, and a desk view is on; move the desk's camera with desk.to(view, { distance }) instead`);
+        }
         const r = await this.resolveRect(action.target, action.window);
         const scale = action.scale ?? DEFAULTS.zoomScale;
         let cx = r.x + r.w / 2;
@@ -1699,7 +1716,8 @@ class Engine {
   private followCamera(t: number, dt: number): void {
     const f = this.follow!;
     const [W, H] = this.desktop;
-    const active = this.attention && t - this.attention.at < f.hold;
+    // In a desk view the camera is the desk's: the follow camera rests on the whole desktop, on the laptop's screen.
+    const active = this.attention && t - this.attention.at < f.hold && !this.deskOn(t);
     let target: ZoomState = { scale: 1, cx: W / 2, cy: H / 2 };
     if (active && this.attention) {
       target = { scale: f.scale, cx: this.attention.x, cy: this.attention.y };

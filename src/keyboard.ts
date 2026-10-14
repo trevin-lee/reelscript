@@ -170,7 +170,7 @@ export interface KeyPress {
 
 export interface Chord {
   keys: KeyPress[];
-  /** The chord as shown under the keyboard: "⌘ ⇧ P", or "Ctrl + Shift + P". */
+  /** The chord as shown under the keyboard: "⇧ ⌘ P", or "Ctrl + Shift + P". */
   label: string;
 }
 

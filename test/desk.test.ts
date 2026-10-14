@@ -44,7 +44,7 @@ function diff(a: Awaited<ReturnType<typeof pixels>>, b: Awaited<ReturnType<typeo
 }
 
 test("the keyboard window and the desk views queue like any window and view, and their options are checked where they're given", () => {
-  const d = createDemo({ desk: { laptop: "pc", hands: false, handColor: "#c8a080", surface: "rgb(30, 30, 34)" }, wallpaper: "#101418" });
+  const d = createDemo({ desk: { laptop: "pc", hands: false, surface: "rgb(30, 30, 34)" }, wallpaper: "#101418" });
   d.keyboard.open({ labels: false, x: 10, y: 20 });
   d.desk.to("desk", { duration: 500 });
   d.desk.to("float", { orbit: -30, tilt: 10, distance: 1.2 });
@@ -67,7 +67,9 @@ test("the keyboard window and the desk views queue like any window and view, and
   ]);
   assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "desk", "keyboard", "float"\)/);
   assert.throws(() => d.desk.to("desk", { tilt: 90 }), /tilt must be degrees from -80 to 80, not 90/);
-  assert.throws(() => d.desk.to("desk", { distance: 0 }), /distance must be a number above 0/);
+  assert.throws(() => d.desk.to("desk", { distance: 0.1 }), /distance must be from 0\.3 to 4/);
+  assert.throws(() => createDemo().desk.to("float", { hands: true }), /the hands are never in the "float" view/);
+  assert.throws(() => createDemo({ desk: { hands: false, sleeve: "navy" } }), /desk sleeve colours the hands, which hands: false leaves out/);
   assert.throws(() => d.desk.to("desk", { orbit: "left" as never }), /orbit must be a number/);
   assert.throws(() => d.desk.to("desk", { hands: "no" as never }), /hands must be true or false/);
   assert.throws(() => d.desk.to("float", { ipad: 0 as never }), /ipad must be true or false/);
@@ -108,6 +110,12 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   const missing = await run(["check", "s.ts"], dir);
   assert.equal(missing.code, 1);
   assert.match(missing.output, /press\("Meta\+F13"\): the Mac keyboard on the desk has no "F13" key[\s\S]*s\.ts:5/);
+
+  // In a desk view the camera is the desk's: zoom.to() would zoom the picture inside the laptop's screen.
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
+  const zoomed = await run(["check", "s.ts"], dir);
+  assert.equal(zoomed.code, 1);
+  assert.match(zoomed.output, /zoom\.to\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
 
   // Keys pressed with the lid down are under it: a warning at each such line.
   demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);

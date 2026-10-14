@@ -81,7 +81,7 @@ function isCssColour(v: string): boolean {
 }
 
 /** Number options by what they allow: rates and sizes, durations, and positions. */
-const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height", "distance"];
+const ABOVE_0 = ["wpm", "speed", "scale", "fontSize", "lineHeight", "cols", "rows", "width", "height"];
 const AT_LEAST_0 = ["ms", "duration", "hold", "holdMs", "settle", "maxGap", "maxGapMs", "timeout"];
 const ANY_NUMBER = ["x", "y", "by", "to", "orbit"];
 // No cap at all: every silence in a recording kept as it was.
@@ -108,6 +108,8 @@ function invalidNumber(options: object): string | null {
   }
   // A camera tilted past straight over (or under) what it looks at would turn over; a lid opens so far.
   if (o.tilt !== undefined && !(typeof o.tilt === "number" && o.tilt >= -80 && o.tilt <= 80)) return `tilt must be degrees from -80 to 80, not ${shown(o.tilt)}`;
+  // Closer than that, the camera is inside what it looks at.
+  if (o.distance !== undefined && !(typeof o.distance === "number" && o.distance >= 0.3 && o.distance <= 4)) return `distance must be from 0.3 to 4 (times the view's own), not ${shown(o.distance)}`;
   if (o.degrees !== undefined && !(typeof o.degrees === "number" && o.degrees >= 0 && o.degrees <= DESK_LID_MAX)) {
     return `degrees must be from 0 (shut) to ${DESK_LID_MAX} (as far as a MacBook opens), not ${shown(o.degrees)}`;
   }
@@ -193,6 +195,9 @@ function invalidOption(o: DemoOptions): string | null {
     const d = o.desk as DeskOptions;
     if (d.laptop !== undefined && !KEYBOARD_LAYOUTS.includes(d.laptop)) return `unknown desk laptop ${shown(d.laptop)} (use "mac" or "pc")`;
     if (d.hands !== undefined && typeof d.hands !== "boolean") return `desk hands must be true or false, not ${shown(d.hands)}`;
+    for (const k of ["handColor", "sleeve"] as const) {
+      if (d.hands === false && d[k] !== undefined) return `desk ${k} colours the hands, which hands: false leaves out`;
+    }
     for (const k of ["handColor", "sleeve", "surface", "backdrop"] as const) {
       const v = d[k];
       if (v === undefined || (k === "surface" && v === "oak")) continue;
@@ -484,7 +489,7 @@ export interface DemoOptions {
 }
 
 export interface KeyboardOptions {
-  /** Show each chord pressed as a label under the keys ("⌘ ⇧ P"). Default: true */
+  /** Show each chord pressed as a label under the keys ("⇧ ⌘ P"). Default: true */
   labels?: boolean;
 }
 
@@ -973,6 +978,7 @@ export class Demo {
     if (a.kind === "desk.to") {
       if (a.ipad !== undefined && a.view !== "float") return `ipad is for the "float" view, where the iPad is; there's none in "${a.view}"`;
       if (a.hands && this.options.desk?.hands === false) return `hands: true needs the desk's hands, which createDemo({ desk: { hands: false } }) left out`;
+      if (a.hands && a.view === "float") return `the hands are never in the "float" view, so hands: true does nothing there`;
     }
     if (a.kind === "terminal.open") {
       if (bare && a.title !== undefined) return `the bare theme draws no title bar, so title does nothing there`;

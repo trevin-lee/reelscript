@@ -769,7 +769,7 @@ async function loadHand(side) {
   // down and out toward a body in front of the laptop. The sleeve says "a person"; bare tubes the colour of the
   // hands read as stumps, and any skin between hand and cuff shows the join.
   const wrist = bones["wrist"].position.clone();
-  const toBody = new THREE.Vector3(s * 0.3, -0.14, 1).normalize().applyQuaternion(model.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
+  const toBody = new THREE.Vector3(s * 0.3, 0.02, 1).normalize().applyQuaternion(model.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize();
   const cuff = SLEEVE_CUFF, len = 0.32;
   const profile = [[0, 0], [cuff - 0.004, 0], [cuff, 0.004], [cuff + 0.001, 0.012], [cuff, 0.02], [cuff + 0.002, 0.03], [0.041, len * 0.6], [0.045, len], [0, len]];
   const sleeve = new THREE.Mesh(new THREE.LatheGeometry(profile.map(([r, y]) => new THREE.Vector2(r, y)), 40), knit);
@@ -1061,6 +1061,11 @@ function shotPose(shot) {
   return p;
 }
 // A state's numbers, blended through its flights: amounts arrive eased (by the renderer), so they're used as they are.
+// How much of the state looks at the screen: the flat frame, or the "screen" view.
+function screenOf(state) {
+  if (state.from) return screenOf(state.from) + (screenOf(state.to) - screenOf(state.from)) * state.amount;
+  return state.view === "flat" || state.view === "screen" ? 1 : 0;
+}
 // How much of the state is the flat frame.
 function flatOf(state) {
   if (state.from) return flatOf(state.from) + (flatOf(state.to) - flatOf(state.from)) * state.amount;
@@ -1095,8 +1100,13 @@ function poseOf(state) {
     fov: a.fov + (b.fov - a.fov) * p,
   };
 }
+// The camera stays above the table in the desk views (a tilt down, or a lid low under the camera, would take it under);
+// the limit lets go toward the float view, which has no table, so a flight between them doesn't jump.
+const CAMERA_FLOOR = BASE_BOTTOM + 1.2;
 function setCamera(state) {
   const p = poseOf(state);
+  const onDesk = Math.min(1, Math.max(0, (0.6 - stageOf(state)) / 0.2));
+  p.pos.y += onDesk * Math.max(0, CAMERA_FLOOR - p.pos.y);
   camera.position.copy(p.pos);
   camera.up.copy(p.up);
   camera.fov = p.fov;
@@ -1107,14 +1117,14 @@ function setCamera(state) {
 // ---------------------------------------------------------------- render
 const label = document.getElementById("label");
 let screenShown = false;
-// Where hands that leave go: back toward the body and down, out of every shot.
-const AWAY = new THREE.Vector3(0, -6, 30);
+// Where hands that leave go: back toward the body, off the near edge of the desk and out of every shot.
+const AWAY = new THREE.Vector3(0, 1.5, 36);
 function render(t, frame) {
   const state = frame.state ?? { view: "keyboard" };
-  // The flat frame is the screen square on, so the lid is open for it: a flight to or from the flat desktop opens a
-  // lower lid as it comes to the screen, and lowers it again as it leaves.
+  // The flat frame and the "screen" view look at the screen, so the lid is open for them: a flight to or from either
+  // opens a lower lid as it comes to the screen, and lowers it again as it leaves.
   const asked = frame.lid ?? ${DESK_LID};
-  const lidDeg = asked + (Math.max(asked, ${DESK_LID}) - asked) * ease(flatOf(state));
+  const lidDeg = asked + (Math.max(asked, ${DESK_LID}) - asked) * ease(screenOf(state));
   setLid(lidDeg);
   setStage(stageOf(state), ipadOf(state), t);
   notchMat.opacity = Math.min(1, (1 - flatOf(state)) * 6);
@@ -1127,7 +1137,8 @@ function render(t, frame) {
     k.mesh.material[0] = amount > 0.5 ? k.matLit : k.matTop;
   }
   // The hands leave for a shot without them, for the float view, and as the lid comes down onto the keys.
-  const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35))));
+  // Away too while the laptop is off the desk (they come back once it has nearly landed, not dangling under it).
+  const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35)), Math.min(1, stageOf(state) / 0.25)));
   if (OPTS.hands) for (const h of Object.values(hands)) {
     h.root.visible = away < 0.999;
     if (!h.root.visible) continue;
