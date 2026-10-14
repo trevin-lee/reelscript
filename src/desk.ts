@@ -1122,7 +1122,8 @@ const label = document.getElementById("label");
 let screenShown = false;
 // Where hands that leave go: back toward the body, off the near edge of the desk and out of every shot.
 const AWAY = new THREE.Vector3(0, 1.5, 36);
-function render(t, frame) {
+// Set the scene for the frame at t (the camera, the laptop, the keys, the hands); draw it unless only posing.
+function render(t, frame, draw = true) {
   const state = frame.state ?? { view: "keyboard" };
   // The flat frame is the screen square on, so the lid is open for it: a flight to or from the flat desktop opens a
   // lower lid as it comes to the screen, and lowers it again as it leaves. Every other view shows the lid as asked.
@@ -1177,7 +1178,7 @@ function render(t, frame) {
   glow.position.copy(centre).addScaledVector(normal, 6);
   // The screen lights what's in front of it, less as the lid closes and none on the studio's stage.
   glow.intensity = screenShown ? 45 * Math.min(1, lidDeg / 90) * (1 - stageOf(state)) : 0;
-  renderer.render(scene, camera);
+  if (draw) renderer.render(scene, camera);
 }
 function resize(w, h) {
   renderer.setSize(w, h, false);
@@ -1217,6 +1218,11 @@ window.__rsDesk = {
   render(t, newEvents, frame) {
     for (const ev of newEvents) events.push(ev);
     render(t, frame ?? {});
+  },
+  // The same, without drawing: where everything is at t, for a check of where the hands are.
+  pose(t, newEvents, frame) {
+    for (const ev of newEvents) events.push(ev);
+    render(t, frame ?? {}, false);
   },
 };
 resize(window.innerWidth, window.innerHeight);

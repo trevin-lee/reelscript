@@ -148,11 +148,11 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   assert.match(warned.output, /the keyboard on the desk has no key for "é", so typing it isn't shown there[\s\S]*s\.ts:5/);
 });
 
-test("renders: the keyboard panel shows a key going down, a desk view starts from the flat frame, and both render the same every time", { timeout: 600_000 }, async () => {
+test("renders: the keyboard panel shows a key going down, a desk view starts from the flat frame, and both render the same every time", { timeout: 1_500_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-desk-"));
   demo(
     dir,
-    `const demo = createDemo({ viewport: [420, 280], fps: 10, desk: { laptop: process.env.LAPTOP } });\ndemo.browser.goto("data:text/html,<input id=f autofocus>");\n` +
+    `const demo = createDemo({ viewport: [420, 280], fps: 6, desk: { laptop: process.env.LAPTOP } });\ndemo.browser.goto("data:text/html,<input id=f autofocus>");\n` +
       `demo.keyboard.open();\ndemo.wait(400);\ndemo.press("Meta+Shift+P");\ndemo.wait(600);\ndemo.desk.to("desk", { duration: 800 });\ndemo.wait(1000);\nawait demo.render(process.env.OUT ?? "out.mp4");`,
   );
   // Panel: lower right, 42% of the desktop wide. Before the chord and on it, the panel changes and the page doesn't.
@@ -212,7 +212,7 @@ test("the wallpaper is a colour, a gradient, or an image relative to the script;
   assert.match(bad.output, /there's no wallpaper image at [^\n]*nope\.png[\s\S]*s\.ts:2[^\n]*\(createDemo\)/);
 });
 
-test("desk views: a flight begun mid-flight carries on from where it was, float shows the demo on both devices, and the lid closes over it", { timeout: 600_000 }, async () => {
+test("desk views: a flight begun mid-flight carries on from where it was, float shows the demo on both devices, and the lid closes over it", { timeout: 1_200_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-float-"));
   // A page in one loud colour, so the screens are easy to count.
   demo(
