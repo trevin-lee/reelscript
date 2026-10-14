@@ -1276,7 +1276,12 @@ class Engine {
       case "zoom.to": {
         // A zoom is of the flat desktop: in a desk view it would zoom the picture inside the laptop's screen.
         if (this.deskOn(start)) {
-          throw new Error(`reelscript: zoom.to() zooms the flat desktop, and a desk view is on; move the desk's camera with desk.to(view, { distance }) instead`);
+          const back = this.deskAnim!.to.view === "flat";
+          throw new Error(
+            back
+              ? `reelscript: zoom.to() zooms the flat desktop, and desk.out() is still flying back to it (until ${((this.deskAnim!.start + this.deskAnim!.dur) / 1000).toFixed(1)}s); wait for it to land first`
+              : `reelscript: zoom.to() zooms the flat desktop, and a desk view is on; move the desk's camera with desk.to(view, { distance }) instead`,
+          );
         }
         const r = await this.resolveRect(action.target, action.window);
         const scale = action.scale ?? DEFAULTS.zoomScale;

@@ -119,6 +119,10 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   assert.match(zoomed.output, /zoom\.to\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
   demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.zoom.out();\nawait demo.render("out.mp4");`);
   const unzoomed = await run(["check", "s.ts"], dir);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.wait(300);\ndemo.desk.out();\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
+  const landing = await run(["check", "s.ts"], dir);
+  assert.equal(landing.code, 1);
+  assert.match(landing.output, /desk\.out\(\) is still flying back to it \(until [\d.]+s\); wait for it to land first[\s\S]*s\.ts:7/);
   assert.equal(unzoomed.code, 1);
   assert.match(unzoomed.output, /zoom\.out\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
 

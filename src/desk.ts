@@ -1143,10 +1143,14 @@ function render(t, frame) {
   // Away too while the laptop is off the desk (they come back once it has nearly landed, not dangling under it), and
   // when the camera comes right up to them: a hand against the lens is a blur, not a shot.
   setCamera(state);
+  // A camera low over the hands looks along the forearms, which then come between it and the screen: the hands step
+  // back as it drops under about 22° above them, gone by 14°.
   let nearCamera = 0;
   for (const side of Object.keys(homeRoot)) {
-    const d = camera.position.distanceTo(laptop.localToWorld(homeRoot[side].clone()));
-    nearCamera = Math.max(nearCamera, Math.min(1, Math.max(0, (9 - d) / 4)));
+    const at = laptop.localToWorld(homeRoot[side].clone());
+    const d = camera.position.distanceTo(at);
+    const rise = (Math.asin(Math.min(1, Math.max(-1, (camera.position.y - at.y) / d))) * 180) / Math.PI;
+    nearCamera = Math.max(nearCamera, Math.min(1, Math.max(0, (9 - d) / 4)), Math.min(1, Math.max(0, (22 - rise) / 8)));
   }
   const away = ease(Math.max(awayOf(state), Math.min(1, Math.max(0, (80 - lidDeg) / 35)), Math.min(1, stageOf(state) / 0.25), nearCamera));
   if (OPTS.hands) for (const h of Object.values(hands)) {
