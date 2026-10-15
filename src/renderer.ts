@@ -1,6 +1,6 @@
 import type { Page, Browser, BrowserContext, CDPSession, Locator } from "playwright";
-import { cli, launchChromium, macChrome } from "./browser.js";
-import { macShortcut, pressMacShortcut } from "./macKeys.js";
+import { chromeOn, cli, launchChromium } from "./browser.js";
+import { macShortcut, pcShortcut, pressMacShortcut } from "./macKeys.js";
 import { LocalPages } from "./localPages.js";
 import sharp, { type OverlayOptions } from "sharp";
 import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
@@ -252,6 +252,10 @@ class Engine {
   /** The lid moving (or moved) to an angle, in degrees; null while it's where it starts. */
   private lidAnim: { from: number; to: number; start: number; dur: number; ease: Ease } | null = null;
   private keyboardLabels = true;
+  /** The modifier the laptop's platform puts on its shortcuts: ⌘ on the Mac, Ctrl on the PC. */
+  private get primary(): "Meta" | "Control" {
+    return this.deskOpts.laptop === "pc" ? "Control" : "Meta";
+  }
   /** Lines already warned that their keys are under a shut lid. */
   private lidShutWarned = new Set<string>();
   private unshownKeys = new Set<string>();
@@ -326,9 +330,10 @@ class Engine {
     // Draw the desktop (wallpaper, menu bar) now, before any page loads: drawn
     // lazily at the first captured frame, it raced a heavy page for the GPU.
     await this.theme.background(this.desktop);
-    // The browser is Chrome on a Mac on every host, like the desktop it sits
-    // on: pages show the same ⌘ shortcut hints in a local preview as in CI.
-    const mac = macChrome(this.browser);
+    // The browser is Chrome on the laptop's platform on every host (a Mac, or
+    // Windows for the PC laptop): pages show the same shortcut hints in a
+    // local preview as in CI, ⌘ on the Mac and Ctrl on the PC.
+    const mac = chromeOn(this.browser, this.deskOpts.laptop);
     this.context = await this.browser.newContext({
       viewport: { width: this.viewport[0], height: this.viewport[1] },
       deviceScaleFactor: 1,
@@ -477,9 +482,9 @@ class Engine {
         colorScheme: "dark",
         timezoneId: this.timezone,
         // A Mac, like the browser beside it: the same ⌘ keybindings on every host.
-        userAgent: macChrome(this.browser).userAgent,
+        userAgent: chromeOn(this.browser, this.deskOpts.laptop).userAgent,
       });
-      await ctx.addInitScript(macChrome(this.browser).script);
+      await ctx.addInitScript(chromeOn(this.browser, this.deskOpts.laptop).script);
       await ctx.addInitScript(NAME_HELPER);
     }
     const page = await (ctx ?? this.context).newPage();
@@ -578,7 +583,7 @@ class Engine {
   /** Keys pressed with the lid down are under it, shown to no one: said at the line, as a character the laptop can't type is. */
   private lidShutWarning(at: number): void {
     const deg = this.lidAt(at);
-    if (deg >= 45 || this.lidShutWarned.has(this.at)) return;
+    if (deg >= 45 || !this.deskOn(at) || this.lidShutWarned.has(this.at)) return;
     this.lidShutWarned.add(this.at);
     warn(`the laptop's lid is down (${Math.round(deg)}°), so the keys pressed here are under it and not shown; open it first with demo.desk.lid()\n  at ${this.at}`);
   }
@@ -634,7 +639,10 @@ class Engine {
     const fed = this.deskFed.get(key) ?? 0;
     const events = this.keyEvents.slice(fed);
     this.deskFed.set(key, this.keyEvents.length);
-    const frame = { state, lid: this.lidAt(t), labels };
+    // The lid is the desk views'. On the flat desktop (the keyboard window over it) the laptop's screen is the frame
+    // itself, plainly on, so the panel shows it open.
+    const lid = this.deskOn(t) ? this.lidAt(t) : Math.max(this.lidAt(t), DESK_LID);
+    const frame = { state, lid, labels };
     await page.evaluate(
       ([t, events, frame]) => (window as unknown as { __rsDesk: { render: (t: number, e: unknown[], f: unknown) => void } }).__rsDesk.render(t, events, frame),
       [t, events, frame] as const,
@@ -699,9 +707,17 @@ class Engine {
     return [...this.windows.values()].sort((a, b) => front(a) - front(b) || a.z - b.z);
   }
 
-  /** Topmost window whose frame contains the desktop point. */
+  /** Topmost window whose frame contains the desktop point. The keyboard panel is drawn over the frame after the camera, so it's under the point where the point is on screen. */
   private windowAt(p: Point): Win | null {
-    const wins = this.byZ();
+    const panel = this.windows.get("keyboard");
+    if (panel) {
+      const [W, H] = this.desktop;
+      const s = this.zoom.scale;
+      const fx = clamp(this.zoom.cx - W / s / 2, 0, W - W / s), fy = clamp(this.zoom.cy - H / s / 2, 0, H - H / s);
+      const x = (p.x - fx) * s, y = (p.y - fy) * s;
+      if (x >= panel.x && x < panel.x + panel.width && y >= panel.y && y < panel.y + panel.height + this.titleOf(panel)) return panel;
+    }
+    const wins = this.byZ().filter((w) => w !== panel);
     for (let i = wins.length - 1; i >= 0; i--) {
       const w = wins[i];
       if (p.x >= w.x && p.x < w.x + w.width && p.y >= w.y && p.y < w.y + w.height + this.titleOf(w)) return w;
@@ -1150,8 +1166,10 @@ class Engine {
           throw new Error(`reelscript: keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`);
         }
         if (action.window) this.focus(w);
-        // A shortcut that edits text does what it does on a Mac, as the page believes it's on one (see macKeys).
-        const mac = w.kind === "browser" && process.platform !== "darwin" ? macShortcut(action.key) : null;
+        // A shortcut that edits text does what it does on the laptop's platform, as the page believes it's on it, on
+        // every host (see macKeys): Playwright gives a Mac's editing only on a Mac host, and only a Mac's.
+        const darwin = process.platform === "darwin";
+        const mac = w.kind !== "browser" ? null : this.deskOpts.laptop === "pc" ? (darwin ? pcShortcut(action.key) : null) : darwin ? null : macShortcut(action.key);
         const send = () => (mac ? pressMacShortcut(w.page, w.cdp, mac) : w.page.keyboard.press(asTyped(action.key)));
         if (!this.sceneShown()) {
           await send();
@@ -1175,7 +1193,7 @@ class Engine {
         if (w.kind !== "browser") {
           throw new Error(
             w.kind === "editor"
-              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("Meta+ArrowDown") for the end of the file`
+              ? `reelscript: demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("${this.primary === "Meta" ? "Meta+ArrowDown" : "Control+End"}") for the end of the file`
               : `reelscript: demo.scroll() scrolls web pages; a terminal scrolls as its output grows`,
           );
         }
@@ -1371,7 +1389,7 @@ class Engine {
         const typeStart = opensAt + 350;
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
-        const shortcut = action.kind === "editor.openFile" ? "Meta+P" : "F1";
+        const shortcut = action.kind === "editor.openFile" ? `${this.primary}+P` : "F1";
         this.noteChord(shortcut, opensAt, 90, true, start);
         this.noteTyped(text, typeStart, msPerChar, start);
         this.noteChord("Enter", enterAt, 80, false, start);
@@ -1596,7 +1614,7 @@ class Engine {
       if (answeredMs > 10_000 || now - started > 45_000) break;
       if (seen.state === "closed" || (seen.state === "answered" && now - asked > 1200)) {
         if (seen.state !== "closed") await w.page.keyboard.press("Escape");
-        await w.page.keyboard.press(isFile ? "Meta+P" : "F1");
+        await w.page.keyboard.press(isFile ? `${this.primary}+P` : "F1");
         await w.page.keyboard.type(text);
         asked = last = Date.now();
       }
@@ -1639,7 +1657,7 @@ class Engine {
     for (const deadline = Date.now() + 3000; Date.now() < deadline; ) {
       if (!(await typable())) {
         steadySince = 0;
-        await w.page.keyboard.press("Meta+1");
+        await w.page.keyboard.press(`${this.primary}+1`);
       } else if (!steadySince) steadySince = Date.now();
       else if (Date.now() - steadySince >= 300) return;
       await new Promise((r) => setTimeout(r, 50));
@@ -1842,11 +1860,12 @@ class Engine {
       .composite(layers.flat())
       .raw()
       .toBuffer({ resolveWithObject: true });
+    // The panel films the desk with the desktop so far on the laptop's screen. It's drawn over the frame after the
+    // camera, where it was placed, so a zoom or the follow camera never crops the keys being pressed.
+    const overlays: OverlayOptions[] = [];
     if (keyboard) {
-      // The panel films the desk with the desktop so far on the laptop's screen, then sits on top of it.
-      await this.deskRender(keyboard.page, t, { view: "keyboard" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false, this.keyboardLabels);
-      const panel = await this.contentOverlay(keyboard);
-      ({ data: sceneData } = await sharp(sceneData, { raw: { width: W, height: H, channels: 4 } }).composite([panel]).raw().toBuffer({ resolveWithObject: true }));
+      await this.deskRender(keyboard.page, t, { view: "keys" }, { data: sceneData, width: W, height: H, channels: 4 }, keyboard.id, false, this.keyboardLabels);
+      overlays.push(await this.contentOverlay(keyboard));
     }
 
     const s = this.zoom.scale;
@@ -1861,7 +1880,6 @@ class Engine {
     const ox = (this.cursor.x - fx) * s;
     const oy = (this.cursor.y - fy) * s;
 
-    const overlays: OverlayOptions[] = [];
     const since = t - this.lastClick;
     if (since >= 0 && since < RIPPLE_MS) {
       const p = since / RIPPLE_MS;

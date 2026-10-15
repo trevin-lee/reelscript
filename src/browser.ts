@@ -91,28 +91,37 @@ export async function verifyBrowser(): Promise<void> {
  * inspect_page, so what an agent inspects is what gets filmed.
  */
 export function macChrome(browser: Browser): { userAgent: string; headers: Record<string, string>; script: string } {
+  return chromeOn(browser, "mac");
+}
+
+/**
+ * Chrome on a platform as pages see it: macOS for the MacBook, Windows for the PC laptop (`desk.laptop`), so a web
+ * app or VS Code shows and answers the shortcuts of the laptop on screen (⌘K on the Mac, Ctrl+K on the PC).
+ */
+export function chromeOn(browser: Browser, platform: "mac" | "pc"): { userAgent: string; headers: Record<string, string>; script: string } {
   const chrome = browser.version().split(".")[0];
+  const mac = platform === "mac";
   return {
-    userAgent: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
-    headers: { "sec-ch-ua": `"Google Chrome";v="${chrome}", "Chromium";v="${chrome}", "Not_A Brand";v="8"`, "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"macOS"' },
-    script: macPlatform(chrome),
+    userAgent: `Mozilla/5.0 (${mac ? "Macintosh; Intel Mac OS X 10_15_7" : "Windows NT 10.0; Win64; x64"}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome}.0.0.0 Safari/537.36`,
+    headers: { "sec-ch-ua": `"Google Chrome";v="${chrome}", "Chromium";v="${chrome}", "Not_A Brand";v="8"`, "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": mac ? '"macOS"' : '"Windows"' },
+    script: platformScript(chrome, mac ? "MacIntel" : "Win32", mac ? "macOS" : "Windows"),
   };
 }
 
-/** What a page's scripts ask about their platform, answered as Chrome on macOS. */
-function macPlatform(chrome: string): string {
+/** What a page's scripts ask about their platform, answered as Chrome on it. */
+function platformScript(chrome: string, navigatorPlatform: string, uaPlatform: string): string {
   return `
 (() => {
-  Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "MacIntel" });
+  Object.defineProperty(Navigator.prototype, "platform", { configurable: true, get: () => "${navigatorPlatform}" });
   Object.defineProperty(Navigator.prototype, "webdriver", { configurable: true, get: () => false });
   if (typeof NavigatorUAData === "undefined") return;
   const brands = () => [{ brand: "Google Chrome", version: "${chrome}" }, { brand: "Chromium", version: "${chrome}" }, { brand: "Not_A Brand", version: "8" }];
   const ua = NavigatorUAData.prototype;
-  Object.defineProperty(ua, "platform", { configurable: true, get: () => "macOS" });
+  Object.defineProperty(ua, "platform", { configurable: true, get: () => "${uaPlatform}" });
   Object.defineProperty(ua, "brands", { configurable: true, get: brands });
   const high = ua.getHighEntropyValues;
   ua.getHighEntropyValues = function (hints) {
-    return high.call(this, hints).then((v) => ({ ...v, platform: "macOS", brands: brands(), ...(v.fullVersionList ? { fullVersionList: brands() } : {}) }));
+    return high.call(this, hints).then((v) => ({ ...v, platform: "${uaPlatform}", brands: brands(), ...(v.fullVersionList ? { fullVersionList: brands() } : {}) }));
   };
 })();
 `;

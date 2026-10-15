@@ -22,9 +22,9 @@ demo.press("Enter");
 demo.wait(900);
 
 // Then the whole desk, the app still on screen, and back.
-demo.desk.to("desk");
+demo.desk.to("wide");
 demo.wait(2200);
-demo.desk.to("keyboard", { duration: 1200 });
+demo.desk.to("keys", { duration: 1200 });
 demo.wait(1600);
 demo.desk.out();
 demo.wait(1200);

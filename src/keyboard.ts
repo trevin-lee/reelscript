@@ -37,8 +37,8 @@ export interface Layout {
 }
 
 const ROW_H = 1;
-// Full height, as on the 2021 MacBook Pro and since: the six rows fill the desk model's keyboard well.
-const FN_ROW_H = 1;
+// The function row: full height on a MacBook (2021 and since), short on a slim PC laptop, as on the desk's models.
+const FN_ROW_H = { mac: 1, pc: 0.55 };
 
 type Spec = [id: string, legend: string, w?: number, extra?: { shifted?: string; sub?: string; h?: number; y?: number }];
 
@@ -101,8 +101,8 @@ function build(name: KeyboardLayout): Layout {
   const mac = name === "mac";
   const keys: KeyCap[] = [];
   let y = 0;
-  keys.push(...row(y, FN_ROW_H, [["Escape", mac ? "esc" : "Esc", 1.5], ...FKEYS, mac ? ["TouchId", "", 1] : ["Delete", "Del", 1]]));
-  y += FN_ROW_H;
+  keys.push(...row(y, FN_ROW_H[name], [["Escape", mac ? "esc" : "Esc", 1.5], ...FKEYS, mac ? ["TouchId", "", 1] : ["Delete", "Del", 1]]));
+  y += FN_ROW_H[name];
   keys.push(...row(y, ROW_H, [...NUMBER_ROW, ["Backspace", mac ? "delete" : "Backspace", 1.5]]));
   y += ROW_H;
   keys.push(...row(y, ROW_H, [["Tab", mac ? "tab" : "Tab", 1.5], ...TOP_ROW]));
@@ -202,8 +202,8 @@ export function resolveChord(chord: string, lay: Layout): Chord | { missing: str
   for (const p of parts) {
     const id = ALIASES[p];
     if (!id || !/^(Shift|Control|Alt|Meta)Left$/.test(id)) return { missing: p };
-    // The demo's shortcuts are a Mac's (see the README's desktop): ⌘ on a PC is Ctrl.
-    mods.add(id === "MetaLeft" && lay.name === "pc" ? "ControlLeft" : id);
+    // The keys shown are the keys pressed: Meta on a PC is its Windows (Super) key.
+    mods.add(id);
   }
   let mainId: string | null;
   if (main.length === 1 && main in SHIFTED) {

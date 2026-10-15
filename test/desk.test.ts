@@ -46,9 +46,9 @@ function diff(a: Awaited<ReturnType<typeof pixels>>, b: Awaited<ReturnType<typeo
 test("the keyboard window and the desk views queue like any window and view, and their options are checked where they're given", () => {
   const d = createDemo({ desk: { laptop: "pc", hands: false, surface: "rgb(30, 30, 34)" }, wallpaper: "#101418" });
   d.keyboard.open({ labels: false, x: 10, y: 20 });
-  d.desk.to("desk", { duration: 500 });
+  d.desk.to("wide", { duration: 500 });
   d.desk.to("float", { orbit: -30, tilt: 10, distance: 1.2 });
-  d.desk.to("desk", { hands: false });
+  d.desk.to("wide", { hands: false });
   d.desk.to("float", { ipad: false, orbit: 360 });
   d.desk.lid(0, { duration: 900 });
   d.desk.out();
@@ -56,29 +56,29 @@ test("the keyboard window and the desk views queue like any window and view, and
   d.keyboard.close();
   assert.deepEqual(d.getTimeline(), [
     { kind: "keyboard.open", labels: false, x: 10, y: 20 },
-    { kind: "desk.to", view: "desk", duration: 500 },
+    { kind: "desk.to", view: "wide", duration: 500 },
     { kind: "desk.to", view: "float", orbit: -30, tilt: 10, distance: 1.2 },
-    { kind: "desk.to", view: "desk", hands: false },
+    { kind: "desk.to", view: "wide", hands: false },
     { kind: "desk.to", view: "float", ipad: false, orbit: 360 },
     { kind: "desk.lid", degrees: 0, duration: 900 },
     { kind: "desk.out" },
     { kind: "window.place", window: "keyboard", width: 400 },
     { kind: "window.close", window: "keyboard" },
   ]);
-  assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "desk", "keyboard", "float"\)/);
-  assert.throws(() => d.desk.to("desk", { tilt: 90 }), /tilt must be degrees from -30 to 80, not 90/);
-  assert.throws(() => d.desk.to("desk", { tilt: -40 }), /tilt must be degrees from -30 to 80, not -40/);
-  assert.throws(() => d.desk.to("desk", { distance: 0.1 }), /distance must be from 0\.3 to 4/);
+  assert.throws(() => d.desk.to("side" as never), /unknown view "side" \(use "screen", "wide", "keys", "float"\)/);
+  assert.throws(() => d.desk.to("wide", { tilt: 90 }), /tilt must be degrees from -30 to 80, not 90/);
+  assert.throws(() => d.desk.to("wide", { tilt: -40 }), /tilt must be degrees from -30 to 80, not -40/);
+  assert.throws(() => d.desk.to("wide", { distance: 0.1 }), /distance must be from 0\.3 to 4/);
   assert.throws(() => createDemo().desk.to("float", { hands: true }), /the hands are never in the "float" view/);
   assert.throws(() => createDemo({ desk: { hands: false, sleeve: "navy" } }), /desk sleeve colours the hands, which hands: false leaves out/);
-  assert.throws(() => d.desk.to("desk", { orbit: "left" as never }), /orbit must be a number/);
-  assert.throws(() => d.desk.to("desk", { hands: "no" as never }), /hands must be true or false/);
+  assert.throws(() => d.desk.to("wide", { orbit: "left" as never }), /orbit must be a number/);
+  assert.throws(() => d.desk.to("wide", { hands: "no" as never }), /hands must be true or false/);
   assert.throws(() => d.desk.to("float", { ipad: 0 as never }), /ipad must be true or false/);
   assert.throws(() => d.desk.out({ orbit: 10 } as never), /orbit/);
   assert.throws(() => d.desk.lid(150), /degrees must be from 0 \(shut\) to 135/);
   // Nothing is quietly ignored: an iPad outside "float", hands the desk hasn't got, focus on a window that takes no typing.
-  assert.throws(() => d.desk.to("desk", { ipad: false }), /ipad is for the "float" view/);
-  assert.throws(() => createDemo({ desk: { hands: false } }).desk.to("desk", { hands: true }), /hands: true needs the desk's hands/);
+  assert.throws(() => d.desk.to("wide", { ipad: false }), /ipad is for the "float" view/);
+  assert.throws(() => createDemo({ desk: { hands: false } }).desk.to("wide", { hands: true }), /hands: true needs the desk's hands/);
   assert.equal((d.keyboard as unknown as { focus?: unknown }).focus, undefined, "the keyboard window has no focus()");
   assert.throws(() => d.desk.lid(undefined as never), /degrees/);
   assert.throws(() => createDemo({ desk: { backdrop: "nope nope" } }), /desk backdrop must be a CSS colour/);
@@ -89,7 +89,7 @@ test("the keyboard window and the desk views queue like any window and view, and
   for (const ok of [{ desk: { surface: "oak", sleeve: "RebeccaPurple", backdrop: "oklch(70% 0.1 250)", handColor: "#c8a080" } }, { wallpaper: "linear-gradient(#000, #fff)" }, { wallpaper: "hsl(220 30% 20%)" }])
     assert.doesNotThrow(() => createDemo(ok as never), JSON.stringify(ok));
   assert.throws(() => d.press("a", { window: "keyboard" as never }), /unknown window "keyboard"/);
-  assert.throws(() => d.desk.to("desk", { duration: -1 }), /duration must be a number, 0 or more/);
+  assert.throws(() => d.desk.to("wide", { duration: -1 }), /duration must be a number, 0 or more/);
   assert.throws(() => createDemo({ desk: { laptop: "amiga" as never } }), /unknown desk laptop "amiga" \(use "mac" or "pc"\)/);
   assert.throws(() => createDemo({ desk: { hads: true } as never }), /hads/);
   assert.throws(() => createDemo({ desk: { handColor: "not a colour" } }), /desk handColor must be a CSS colour/);
@@ -113,24 +113,39 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   assert.match(missing.output, /press\("Meta\+F13"\): the Mac keyboard on the desk has no "F13" key[\s\S]*s\.ts:5/);
 
   // In a desk view the camera is the desk's: zoom.to() would zoom the picture inside the laptop's screen.
-  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("wide", { duration: 200 });\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
   const zoomed = await run(["check", "s.ts"], dir);
   assert.equal(zoomed.code, 1);
   assert.match(zoomed.output, /zoom\.to\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
-  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.zoom.out();\nawait demo.render("out.mp4");`);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("wide", { duration: 200 });\ndemo.zoom.out();\nawait demo.render("out.mp4");`);
   const unzoomed = await run(["check", "s.ts"], dir);
-  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("desk", { duration: 200 });\ndemo.wait(300);\ndemo.desk.out();\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("wide", { duration: 200 });\ndemo.wait(300);\ndemo.desk.out();\ndemo.zoom.to("#f");\nawait demo.render("out.mp4");`);
   const landing = await run(["check", "s.ts"], dir);
   assert.equal(landing.code, 1);
   assert.match(landing.output, /desk\.out\(\) is still flying back to it \(until [\d.]+s\); wait for it to land first[\s\S]*s\.ts:7/);
   assert.equal(unzoomed.code, 1);
   assert.match(unzoomed.output, /zoom\.out\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
 
-  // Keys pressed with the lid down are under it: a warning at each such line.
-  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);
+  // Keys pressed with the lid down in a desk view are under it: a warning at each such line. On the flat desktop the
+  // laptop's screen is the frame, plainly on: the keyboard window shows the lid open, and there's nothing to warn of.
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.to("wide", { duration: 0 });\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);
   const shut = await run(["check", "s.ts"], dir);
   assert.equal(shut.code, 0, shut.output);
   assert.match(shut.output, /the laptop's lid is down \(0°\), so the keys pressed here are under it[\s\S]*s\.ts:6/);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.keyboard.open();\ndemo.desk.lid(0, { duration: 0 });\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);
+  const flatShut = await run(["check", "--strict", "s.ts"], dir);
+  assert.equal(flatShut.code, 0, flatShut.output);
+
+  // The PC laptop's platform: pages see Windows and answer its shortcuts, on every host (a Mac host included, where
+  // Playwright would give a Mac's editing): Control+A selects all, Ctrl+K reaches the app as Ctrl.
+  demo(
+    dir,
+    `const demo = createDemo({ viewport: [400, 300], desk: { laptop: "pc" } });\ndemo.browser.goto("data:text/html,<input id=f value='hello world'><script>addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='k')document.title='ctrl k'})</script>");\n` +
+      `demo.cursor.moveTo("#f");\ndemo.cursor.click();\ndemo.press("Control+A");\ndemo.type("#f", "X");\ndemo.press("Control+K");\n` +
+      `demo.call(async ({ page }) => { const r = await page!.evaluate("[document.querySelector('#f').value, document.title, navigator.platform].join('|')"); if (r !== "X|ctrl k|Win32") throw new Error("not a PC: " + r); });\nawait demo.render("out.mp4");`,
+  );
+  const pc = await run(["check", "s.ts"], dir);
+  assert.equal(pc.code, 0, pc.output);
 
   // The panel stays in front, as it's drawn, even after another window is focused: a click under it lands on it.
   const corner = `data:text/html,<button id=b style='position:fixed;right:4px;bottom:4px'>b</button>`;
@@ -153,7 +168,7 @@ test("renders: the keyboard panel shows a key going down, a desk view starts fro
   demo(
     dir,
     `const demo = createDemo({ viewport: [420, 280], fps: 6, desk: { laptop: process.env.LAPTOP } });\ndemo.browser.goto("data:text/html,<input id=f autofocus>");\n` +
-      `demo.keyboard.open();\ndemo.wait(400);\ndemo.press("Meta+Shift+P");\ndemo.wait(600);\ndemo.desk.to("desk", { duration: 800 });\ndemo.wait(1000);\nawait demo.render(process.env.OUT ?? "out.mp4");`,
+      `demo.keyboard.open();\ndemo.wait(400);\ndemo.press("Meta+Shift+P");\ndemo.wait(600);\ndemo.desk.to("wide", { duration: 800 });\ndemo.wait(1000);\nawait demo.render(process.env.OUT ?? "out.mp4");`,
   );
   // Panel: lower right, 42% of the desktop wide. Before the chord and on it, the panel changes and the page doesn't.
   const before = join(dir, "before.png"), on = join(dir, "on.png");
@@ -218,7 +233,7 @@ test("desk views: a flight begun mid-flight carries on from where it was, float 
   demo(
     dir,
     `const demo = createDemo({ viewport: [360, 240], fps: 30 });\ndemo.browser.goto("data:text/html,<body style='background:%23e0218a;margin:0'>");\n` +
-      `demo.wait(300);\ndemo.desk.to("desk", { duration: 1000 });\ndemo.wait(500);\ndemo.desk.to("float", { duration: 1000 });\ndemo.wait(1600);\n` +
+      `demo.wait(300);\ndemo.desk.to("wide", { duration: 1000 });\ndemo.wait(500);\ndemo.desk.to("float", { duration: 1000 });\ndemo.wait(1600);\n` +
       `demo.desk.lid(0, { duration: 600 });\ndemo.wait(900);\nawait demo.render("out.mp4");`,
   );
   const r = await run(["render", "s.ts"], dir);

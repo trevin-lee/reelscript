@@ -28,7 +28,7 @@ demo.desk.lid(110, { duration: 1400 });
 demo.wait(2000);
 
 // Down onto the desk, the laptop alone, then back to the flat desktop.
-demo.desk.to("desk", { hands: false, orbit: -18, duration: 1800 });
+demo.desk.to("wide", { hands: false, orbit: -18, duration: 1800 });
 demo.wait(2200);
 demo.desk.out();
 demo.wait(1200);

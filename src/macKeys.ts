@@ -115,6 +115,32 @@ export const MAC_EDITING_COMMANDS: Record<string, string[]> = {
   "Shift+Meta+KeyZ": ["redo"],
 };
 
+/**
+ * The same for a PC (Windows or Linux), from Chromium's own key bindings off the Mac (Blink's EditingBehavior). On a
+ * Linux host Chromium already does these; on a Mac host Playwright would send the Mac's commands instead (Control+A
+ * would go to the start of the line), so a PC demo there sends these, and no Mac commands for any other key.
+ */
+export const PC_EDITING_COMMANDS: Record<string, string[]> = {
+  "Backspace": ["deleteBackward"], "Shift+Backspace": ["deleteBackward"], "Delete": ["deleteForward"],
+  "Control+Backspace": ["deleteWordBackward"], "Control+Delete": ["deleteWordForward"],
+  "Escape": ["cancelOperation"],
+  "ArrowLeft": ["moveLeft"], "Shift+ArrowLeft": ["moveLeftAndModifySelection"],
+  "Control+ArrowLeft": ["moveWordLeft"], "Shift+Control+ArrowLeft": ["moveWordLeftAndModifySelection"],
+  "ArrowRight": ["moveRight"], "Shift+ArrowRight": ["moveRightAndModifySelection"],
+  "Control+ArrowRight": ["moveWordRight"], "Shift+Control+ArrowRight": ["moveWordRightAndModifySelection"],
+  "ArrowUp": ["moveUp"], "Shift+ArrowUp": ["moveUpAndModifySelection"],
+  "ArrowDown": ["moveDown"], "Shift+ArrowDown": ["moveDownAndModifySelection"],
+  "PageUp": ["movePageUp"], "Shift+PageUp": ["movePageUpAndModifySelection"],
+  "PageDown": ["movePageDown"], "Shift+PageDown": ["movePageDownAndModifySelection"],
+  "Home": ["moveToBeginningOfLine"], "Shift+Home": ["moveToBeginningOfLineAndModifySelection"],
+  "Control+Home": ["moveToBeginningOfDocument"], "Shift+Control+Home": ["moveToBeginningOfDocumentAndModifySelection"],
+  "End": ["moveToEndOfLine"], "Shift+End": ["moveToEndOfLineAndModifySelection"],
+  "Control+End": ["moveToEndOfDocument"], "Shift+Control+End": ["moveToEndOfDocumentAndModifySelection"],
+  "Control+KeyA": ["selectAll"], "Control+KeyC": ["copy"], "Control+KeyX": ["cut"], "Control+KeyV": ["paste"],
+  "Shift+Control+KeyV": ["pasteAndMatchStyle"], "Control+KeyZ": ["undo"], "Shift+Control+KeyZ": ["redo"], "Control+KeyY": ["redo"],
+  "Control+KeyB": ["toggleBold"], "Control+KeyI": ["toggleItalic"], "Control+KeyU": ["toggleUnderline"],
+};
+
 const MODIFIER_BITS = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
 type Modifier = keyof typeof MODIFIER_BITS;
 const NAMED_KEYS: Record<string, number> = {
@@ -132,6 +158,18 @@ export interface MacShortcut {
 
 /** A chord like "Meta+Shift+ArrowLeft" as its modifiers, key, and what it does to text on a Mac; null if it doesn't edit text. */
 export function macShortcut(chord: string): MacShortcut | null {
+  return editingShortcut(chord, MAC_EDITING_COMMANDS, false);
+}
+
+/**
+ * A chord as a PC handles it, for a PC demo on a Mac host: its editing commands, or none, so Playwright's Mac ones
+ * aren't sent either. Null only for a key this can't send itself (Playwright sends it as it is, as anywhere).
+ */
+export function pcShortcut(chord: string): MacShortcut | null {
+  return editingShortcut(chord, PC_EDITING_COMMANDS, true);
+}
+
+function editingShortcut(chord: string, table: Record<string, string[]>, always: boolean): MacShortcut | null {
   const parts = chord.split("+");
   const key = parts.pop()!;
   const modifiers = parts.filter((p): p is Modifier => p in MODIFIER_BITS);
@@ -143,13 +181,13 @@ export function macShortcut(chord: string): MacShortcut | null {
   else if (key in NAMED_KEYS) [code, keyCode] = [key, NAMED_KEYS[key]];
   else return null;
   const order: Modifier[] = ["Shift", "Control", "Alt", "Meta"];
-  const commands = MAC_EDITING_COMMANDS[[...order.filter((m) => modifiers.includes(m)), code].join("+")];
+  const commands = table[[...order.filter((m) => modifiers.includes(m)), code].join("+")] ?? (always ? [] : null);
   if (!commands) return null;
   const letter = /^[a-z]$/i.test(key) ? (modifiers.includes("Shift") ? key.toUpperCase() : key.toLowerCase()) : key;
   return { modifiers, key: letter, code, keyCode, commands };
 }
 
-/** Press a Mac editing shortcut with its commands, as Chromium on a Mac handles it. */
+/** Press a shortcut with its editing commands, as Chromium on the platform handles it. */
 export async function pressMacShortcut(page: Page, cdp: CDPSession, s: MacShortcut): Promise<void> {
   for (const m of s.modifiers) await page.keyboard.down(m);
   const modifiers = s.modifiers.reduce((bits, m) => bits | MODIFIER_BITS[m], 0);

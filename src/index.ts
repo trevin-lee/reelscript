@@ -815,8 +815,8 @@ class Desk {
 
   /**
    * Fly to a view of the desk: "screen" (the laptop's screen, a little from
-   * the side), "desk" (the laptop and the hands), "keyboard" (over the
-   * keys), or "float" (the laptop and an iPad floating in a studio, both
+   * the side), "wide" (the laptop and the hands, on the desk), "keys" (over
+   * the keys), or "float" (the laptop and an iPad floating in a studio, both
    * showing the demo). `orbit`, `tilt` and `distance` move the camera around
    * the view; `hands: false` sends the hands out of the shot. Runs alongside
    * following actions, like a zoom.
@@ -998,7 +998,7 @@ export class Demo {
     }
     if (a.kind === "press" && a.window === "terminal") return `keys pressed in the terminal window aren't shown; use demo.terminal.run() or terminal.print()`;
     if (a.kind === "scroll" && a.window === "terminal") return `demo.scroll() scrolls web pages; a terminal scrolls as its output grows`;
-    if (a.kind === "scroll" && a.window === "editor") return `demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("Meta+ArrowDown") for the end of the file`;
+    if (a.kind === "scroll" && a.window === "editor") return `demo.scroll() scrolls web pages; in the editor, use keys, like demo.press("${this.options.desk?.laptop === "pc" ? "Control+End" : "Meta+ArrowDown"}") for the end of the file`;
     if (a.kind === "say" && a.voice !== undefined) return unknownVoice(a.voice, this.options.tts);
     if (a.kind === "terminal.run" || a.kind === "terminal.print") {
       // Declared output is spread over duration; recorded and timed output keep their own times, played at speed with gaps capped.

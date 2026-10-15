@@ -58,8 +58,8 @@ export interface DeskPageOptions extends Required<DeskOptions> {
  * Camera presets, and "flat": the screen filling the frame exactly, where a desk view starts from. "float" is a
  * different stage: no desk, the laptop and an iPad floating in a studio void.
  */
-export type DeskView = "flat" | "screen" | "desk" | "keyboard" | "float";
-export const DESK_VIEWS: DeskView[] = ["screen", "desk", "keyboard", "float"];
+export type DeskView = "flat" | "screen" | "wide" | "keys" | "float";
+export const DESK_VIEWS: DeskView[] = ["screen", "wide", "keys", "float"];
 
 /** A shot: a view, the camera moved around it (degrees around, degrees up, times as far), and whether the hands are in it. */
 export interface DeskShot {
@@ -94,8 +94,9 @@ export function deskAsset(pathname: string): { body: Buffer; contentType: string
     const body = readFileSync(new URL(`../assets/studio/${studio[1]}`, import.meta.url));
     return { body, contentType: studio[1].endsWith(".hdr") ? "application/octet-stream" : "image/jpeg" };
   }
-  if (pathname === "/macbook.glb") {
-    return { body: readFileSync(new URL("../assets/macbook/macbook.glb", import.meta.url)), contentType: "model/gltf-binary" };
+  if (pathname === "/macbook.glb" || pathname === "/pclaptop.glb") {
+    const name = pathname.slice(1, -4);
+    return { body: readFileSync(new URL(`../assets/${name}/${name}.glb`, import.meta.url)), contentType: "model/gltf-binary" };
   }
   if (/^\/hands\/(left|right)\.glb$/.test(pathname)) {
     return { body: readFileSync(new URL(`../assets/hands/${pathname.slice(7)}`, import.meta.url)), contentType: "model/gltf-binary" };
@@ -128,7 +129,7 @@ import { HDRLoader } from "${DESK_URL}three/examples/jsm/loaders/HDRLoader.js";
 const LAYOUT = ${JSON.stringify(layout(opts.laptop))};
 const OPTS = ${JSON.stringify(opts)};
 const HANDS_URL = ${JSON.stringify(`${DESK_URL}hands/`)};
-const MACBOOK_URL = ${JSON.stringify(`${DESK_URL}macbook.glb`)};
+const MODELS_URL = ${JSON.stringify(DESK_URL)};
 const STUDIO_URL = ${JSON.stringify(`${DESK_URL}studio/`)};
 ${SCENE}
 </script></body></html>`;
@@ -138,17 +139,33 @@ ${SCENE}
 
 const SCENE = String.raw`
 const U = 1; // one key unit, 19 mm
-// The laptop is a model of a 16-inch MacBook Pro (assets/macbook), in decimetres; the scene is in key units.
-const MODEL_SCALE = 100 / 19;
-// Its body, in key units: the deck's top is y = 0, the feet at BASE_BOTTOM; the hinge is at the back.
-const BODY_W = 3.558 * MODEL_SCALE, BODY_D = 2.481 * MODEL_SCALE, BASE_BOTTOM = -0.141 * MODEL_SCALE;
+const mac = LAYOUT.name === "mac";
+// Each laptop is a model, measured here in its own units: a 16-inch MacBook Pro (assets/macbook, in decimetres) or a
+// slim Windows/Linux laptop (assets/pclaptop, in metres). Placed so the deck's top is y = 0 and the key block sits in
+// its keyboard well. The lid is upright in the MacBook's file, its parts known by their materials; the PC's is a node
+// with its pivot on the hinge, open at 102°.
+const MODEL = mac
+  ? {
+      file: "macbook.glb", scale: 100 / 19, mm: 0.01, deck: 0, bottom: -0.141, bodyW: 3.558, bodyD: 2.481, keysZ: -0.424,
+      hinge: [0, -0.065, -1.262], lidMaterials: ["Aluminum_-_Satin", "Glass_Clear", "Steel_-_Satin", "Steel_-_Satin_NONE"],
+      lidTop: 2.393 + 0.065, lidLift: 0.1, display: { w: 3.456, h: 2.234, mid: 1.24 + 0.065, z: 0.006 }, notch: true, well: null,
+    }
+  : {
+      file: "pclaptop.glb", scale: 14.5 / 0.273, mm: 0.001, deck: 0.0096, bottom: 0, bodyW: 0.34, bodyD: 0.244, keysZ: -0.043,
+      hinge: [0, 0.0081, -0.122], lidNode: /^Screen.Frame$/,
+      lidTop: 0.2441, lidLift: 0.004, display: { w: 0.3146, h: 0.2091, mid: 0.12745, z: 0.0001 }, notch: false,
+      well: { w: 0.275, d: 0.104, y: 0.006 }, // where its own keyboard sat, recessed into the deck
+    };
+const MODEL_SCALE = MODEL.scale;
+const MM = MODEL.scale * MODEL.mm; // a millimetre, in key units
+// The body, in key units: the deck's top is y = 0, the feet at BASE_BOTTOM; the hinge is at the back.
+const BODY_W = MODEL.bodyW * MODEL_SCALE, BODY_D = MODEL.bodyD * MODEL_SCALE, BASE_BOTTOM = (MODEL.bottom - MODEL.deck) * MODEL_SCALE;
 // Key caps as a MacBook's: low, rounded, a little apart, in the well; they go down a touch further than a real key's
 // millimetre, so a press shows.
 const KEY_H = 0.1, KEY_TRAVEL = 0.07, KEY_GAP = 0.14, KEY_R = 0.13;
-const mac = LAYOUT.name === "mac";
 const P = mac
   ? { body: 0xc9cacf, bodyEdge: 0xb6b7bc, key: 0x2a2a2d, keySide: 0x1f1f22, legend: "#f2f2f4", bezel: 0x0a0a0b, trackpad: 0xbfc0c5 }
-  : { body: 0x2a2b2f, bodyEdge: 0x1c1d20, key: 0xe2e3e7, keySide: 0xc6c7cc, legend: "#1c1c1f", bezel: 0x111214, trackpad: 0x34353a };
+  : { body: 0x34363b, bodyEdge: 0x1c1d20, key: 0x1d1e21, keySide: 0x161719, legend: "#e8e8ea", bezel: 0x111214, trackpad: 0x34353a };
 const ACCENT = 0x2f7cf6;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -261,7 +278,7 @@ scene.add(desk);
 // ---------------------------------------------------------------- the laptop
 const W = LAYOUT.width, D = LAYOUT.height;
 // The key block sits in the model's keyboard well: centred across, its middle at the well's.
-const KEYS_Z = -0.424 * MODEL_SCALE - (D * U) / 2; // the block's far edge
+const KEYS_Z = MODEL.keysZ * MODEL_SCALE - (D * U) / 2; // the block's far edge
 const ux = (x) => (x - W / 2) * U;
 const keyZ = (y) => KEYS_Z + y * U;
 
@@ -282,21 +299,20 @@ scene.add(laptop);
 // The iPad's back, in the laptop's metal.
 const bodyMat = new THREE.MeshStandardMaterial({ color: P.body, roughness: 0.45, metalness: mac ? 0.35 : 0.1 });
 
-// The model, its parts baked into key units. The lid's parts (by their materials) go on a hinge at the body's back
-// edge, where the model has the lid upright: the lid's angle is then a turn about the hinge from 90°.
-const HINGE = new THREE.Vector3(0, -0.065, -1.262).multiplyScalar(MODEL_SCALE);
-const LID_MATERIALS = new Set(["Aluminum_-_Satin", "Glass_Clear", "Steel_-_Satin", "Steel_-_Satin_NONE"]);
-// The display: a 16-inch MacBook Pro's, 345.6 by 223.4 mm (16:10.3), a thin black border inside the lid's rim, its
-// middle 1.24 dm up the lid from the hinge. The lid is stretched (or squashed) up its height to the demo's aspect,
-// so the demo fills the display edge to edge as a Mac's own desktop would; past what a lid could pass for, the
+// The model, its parts baked into key units. The lid's parts go on a hinge at the body's back edge, upright: the lid's
+// angle is then a turn about the hinge from 90°.
+const HINGE = new THREE.Vector3(MODEL.hinge[0], MODEL.hinge[1] - MODEL.deck, MODEL.hinge[2]).multiplyScalar(MODEL_SCALE);
+// The display, in the model's units up the upright lid from the hinge: the MacBook's is 345.6 by 223.4 mm (16:10.3),
+// a thin black border inside the lid's rim. The lid is stretched (or squashed) up its height to the demo's aspect, so
+// the demo fills the display edge to edge as the computer's own desktop would; past what a lid could pass for, the
 // picture fits inside the display instead.
-const DISPLAY_W = 3.456, DISPLAY_H = 2.234, DISPLAY_MID = 1.24 + 0.065;
+const DISPLAY_W = MODEL.display.w, DISPLAY_H = MODEL.display.h, DISPLAY_MID = MODEL.display.mid;
 const LID_STRETCH = Math.min(1.35, Math.max(0.75, DISPLAY_W / DISPLAY_H / OPTS.aspect));
 const lid = new THREE.Group();
 lid.position.copy(HINGE);
 // The model's hinge is below the deck, where the open lid's foot is; shut, the lid would sink into the body. So the
 // hinge rises as the lid comes past upright, until shut the lid lies on the keys.
-const HINGE_LIFT = 0.1 * MODEL_SCALE;
+const HINGE_LIFT = MODEL.lidLift * MODEL_SCALE;
 function setLid(degrees) {
   lid.rotation.x = Math.PI / 2 - (degrees * Math.PI) / 180;
   lid.position.y = HINGE.y + HINGE_LIFT * Math.min(1, Math.max(0, (90 - degrees) / 90));
@@ -304,35 +320,54 @@ function setLid(degrees) {
 setLid(${DESK_LID});
 laptop.add(lid);
 {
-  const model = (await new GLTFLoader().loadAsync(MACBOOK_URL)).scene;
+  const model = (await new GLTFLoader().loadAsync(MODELS_URL + MODEL.file)).scene;
   model.updateMatrixWorld(true);
+  let pivot = null;
+  if (MODEL.lidNode) model.traverse((o) => { if (!pivot && MODEL.lidNode.test(o.name)) pivot = o; });
+  const inLid = (m) => {
+    if (MODEL.lidMaterials) return MODEL.lidMaterials.includes(m.material.name);
+    for (let o = m; o; o = o.parent) if (o === pivot) return true;
+    return false;
+  };
+  const toLid = pivot ? pivot.matrixWorld.clone().invert() : new THREE.Matrix4().makeTranslation(-MODEL.hinge[0], -MODEL.hinge[1], -MODEL.hinge[2]);
   const parts = [];
   model.traverse((o) => { if (o.isMesh) parts.push(o); });
   for (const m of parts) {
     const name = m.material.name;
     if (name === "Glass_Clear") continue; // a pale film over the screen, which would wash the demo out
     m.geometry.applyMatrix4(m.matrixWorld);
+    const lidPart = inLid(m);
+    if (lidPart) m.geometry.applyMatrix4(toLid); // in the upright lid's own space, from the hinge
+    else m.geometry.translate(0, -MODEL.deck, 0);
     m.geometry.scale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
     m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.set(1, 1, 1);
     m.castShadow = true;
     m.receiveShadow = true;
-    // Satin aluminium: metal, a little rough, reflecting the room. The PC is the same body, dark.
-    if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.42; }
-    if (!mac && !name.startsWith("Rubber") && name !== "Steel_-_Satin" && name !== "Steel_-_Satin_NONE") {
-      // The PC: a dark, matte body, which stays dark in the studio's light rather than reflecting it as silver.
-      m.material.color.setHex(0x2c2e33);
-      m.material.metalness = 0.25;
-      m.material.roughness = 0.55;
+    if (mac) {
+      // Satin aluminium: metal, a little rough, reflecting the room.
+      if (m.material.metalness > 0.2) { m.material.metalness = 0.75; m.material.roughness = 0.42; }
+    } else if (name === "Base") {
+      // The PC: a graphite body, satin rather than mirror-bright.
+      m.material.color.setHex(P.body);
+      m.material.metalness = 0.55;
+      m.material.roughness = 0.42;
     }
-    if (LID_MATERIALS.has(name)) {
-      m.geometry.translate(-HINGE.x, -HINGE.y, -HINGE.z);
+    if (lidPart) {
       m.geometry.scale(1, LID_STRETCH, 1);
       lid.add(m);
     } else laptop.add(m);
   }
 }
+// Where the PC's own keyboard sat: a dark well, recessed into the deck, under reelscript's keys.
+if (MODEL.well) {
+  const well = new THREE.Mesh(new THREE.PlaneGeometry(MODEL.well.w * MODEL_SCALE, MODEL.well.d * MODEL_SCALE), new THREE.MeshStandardMaterial({ color: 0x0b0b0c, roughness: 0.9 }));
+  well.rotation.x = -Math.PI / 2;
+  well.position.set(0, (MODEL.well.y - MODEL.deck) * MODEL_SCALE, MODEL.keysZ * MODEL_SCALE);
+  well.receiveShadow = true;
+  laptop.add(well);
+}
 // From the hinge to the lid's top edge.
-const LID_H = (2.393 + 0.065) * MODEL_SCALE * LID_STRETCH;
+const LID_H = MODEL.lidTop * MODEL_SCALE * LID_STRETCH;
 
 // Legends, drawn once each into the keycap's top texture, in the bundled Inter: it must have loaded first,
 // or the canvas silently draws the default serif (Times). The layout follows the keyboard's own:
@@ -436,7 +471,7 @@ function keyCenter(id) {
 
 // The screen: the model's display area on the lid (in decimetres, the lid upright), and the demo's picture in it at
 // the demo's own aspect, as large as fits, the panel's black round it where the shapes differ.
-const DISPLAY = { w: DISPLAY_W * MODEL_SCALE, h: DISPLAY_H * MODEL_SCALE * LID_STRETCH, y: DISPLAY_MID * MODEL_SCALE * LID_STRETCH, z: 0.006 * MODEL_SCALE };
+const DISPLAY = { w: DISPLAY_W * MODEL_SCALE, h: DISPLAY_H * MODEL_SCALE * LID_STRETCH, y: DISPLAY_MID * MODEL_SCALE * LID_STRETCH, z: MODEL.display.z * MODEL_SCALE };
 const SCREEN_W = Math.min(DISPLAY.w, DISPLAY.h * OPTS.aspect);
 const SCREEN_H = SCREEN_W / OPTS.aspect;
 const screenTex = new THREE.Texture();
@@ -456,9 +491,9 @@ lid.add(screen);
 // corners, and faded in as the view leaves the flat frame, which is the desktop exactly and has none of it.
 const notchMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, toneMapped: false });
 const displayMask = (() => {
-  const mm = MODEL_SCALE / 100; // a millimetre, in key units
+  const mm = MM;
   const L = -SCREEN_W / 2, R = SCREEN_W / 2, T = SCREEN_H / 2, over = 0.6 * mm; // a little past the edge, onto the bezel
-  const corner = 7 * mm, notchW = 31 * mm, notchH = 6 * mm, bottomR = 2 * mm, shoulder = 1.2 * mm;
+  const corner = (mac ? 7 : 3) * mm, notchW = 31 * mm, notchH = 6 * mm, bottomR = 2 * mm, shoulder = 1.2 * mm;
   const shapes = [];
   // The corners: the square corner, less a quarter circle.
   for (const side of [-1, 1]) {
@@ -823,7 +858,7 @@ function placeHandFor(hand, f, target) {
 // Aim another finger of a placed hand at a key, by spreading at the knuckle and curling to reach.
 function aimFinger(hand, f, target, press) {
   let best = null;
-  const wide = f === 0 ? 1.4 : 0.7; // a thumb swings further than a finger spreads
+  const wide = f === 0 ? 1.8 : 0.7; // a thumb swings further than a finger spreads
   for (let spread = -wide; spread <= wide + 1e-9; spread += wide / 5) {
     for (let curl = 0.05; curl <= 1.25; curl += 0.1) {
       poseFinger(hand, f, curl, press, spread);
@@ -1036,7 +1071,7 @@ function viewPose(name) {
     const pos = centre.clone().addScaledVector(normal, dist).addScaledVector(side, -dist * 0.16).addScaledVector(up, -dist * 0.08);
     return { pos, at: centre.clone().addScaledVector(up, -SCREEN_H * 0.08), up: new THREE.Vector3(0, 1, 0), fov };
   }
-  if (name === "desk") {
+  if (name === "wide") {
     return { pos: new THREE.Vector3(-4.5, 21.5, 30), at: new THREE.Vector3(0, 4.6, -3), up: new THREE.Vector3(0, 1, 0), fov: 30 };
   }
   if (name === "side") return { pos: new THREE.Vector3(34, 5, 2), at: new THREE.Vector3(0, 1, 0), up: new THREE.Vector3(0, 1, 0), fov: 28 };
@@ -1124,7 +1159,7 @@ let screenShown = false;
 const AWAY = new THREE.Vector3(0, 1.5, 36);
 // Set the scene for the frame at t (the camera, the laptop, the keys, the hands); draw it unless only posing.
 function render(t, frame, draw = true) {
-  const state = frame.state ?? { view: "keyboard" };
+  const state = frame.state ?? { view: "keys" };
   // The flat frame is the screen square on, so the lid is open for it: a flight to or from the flat desktop opens a
   // lower lid as it comes to the screen, and lowers it again as it leaves. Every other view shows the lid as asked.
   const asked = frame.lid ?? ${DESK_LID};

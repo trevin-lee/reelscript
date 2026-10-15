@@ -27,7 +27,7 @@ function posesAt(page: Page, times: number[]): Promise<Tips[]> {
   return page.evaluate((times) => {
     const { hands, THREE } = (window as any).__rsDesk._debug;
     return times.map((t) => {
-      (window as any).__rsDesk.pose(t, [], { to: "keyboard" });
+      (window as any).__rsDesk.pose(t, [], { state: { view: "keys" } });
       const out: any = {};
       for (const h of Object.values(hands) as any[]) {
         h.root.updateMatrixWorld(true);
@@ -55,8 +55,8 @@ test("hands: every key of a chord has its finger on it, on both laptops, thumbs 
         const keys = assignFingers((resolveChord(chord, lay) as any).keys, lay);
         const misses: string[] = await page.evaluate(([keys, base]) => {
           const { hands, THREE, keys: caps } = (window as any).__rsDesk._debug;
-          (window as any).__rsDesk.pose(-1, [{ at: base + 1000, hold: 300, keys, from: base + 500 }], { to: "keyboard" });
-          (window as any).__rsDesk.pose(base + 1100, [], { to: "keyboard" });
+          (window as any).__rsDesk.pose(-1, [{ at: base + 1000, hold: 300, keys, from: base + 500 }], { state: { view: "keys" } });
+          (window as any).__rsDesk.pose(base + 1100, [], { state: { view: "keys" } });
           return keys.flatMap((k: any) => {
             const h = hands[k.hand];
             h.root.updateMatrixWorld(true);
@@ -86,7 +86,7 @@ test("hands: nothing jumps between frames, however fast the typing and however t
       const keys = resolveChar(c, lay);
       if (keys) events.push({ at: 2000 + i * 50, hold: 35, keys: assignFingers(keys, lay), from: 1730 });
     });
-    await page.evaluate((ev) => (window as any).__rsDesk.pose(-1, ev, { to: "keyboard" }), events);
+    await page.evaluate((ev) => (window as any).__rsDesk.pose(-1, ev, { state: { view: "keys" } }), events);
     const times = Array.from({ length: 240 }, (_, i) => (i * 1000) / 60);
     const poses = await posesAt(page, times);
     let hand = 0, tip = 0;
@@ -112,7 +112,7 @@ test("hands: palms face the keys and each thumb is on the inside, on both hands"
   try {
     const got = await page.evaluate(() => {
       const { hands, THREE } = (window as any).__rsDesk._debug;
-      (window as any).__rsDesk.pose(300, [], { to: "keyboard" });
+      (window as any).__rsDesk.pose(300, [], { state: { view: "keys" } });
       const out: any = {};
       for (const h of Object.values(hands) as any[]) {
         h.root.updateMatrixWorld(true);

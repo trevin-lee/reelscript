@@ -1,0 +1,9 @@
+pclaptop.glb is based on "Modern Slim Laptop"
+(https://sketchfab.com/3d-models/modern-slim-laptop-fbf172f8b14241feab581dcb1fbcd475)
+by Blaž Mraz (https://sketchfab.com/Mraz3D), licensed under CC-BY-4.0
+(http://creativecommons.org/licenses/by/4.0/).
+
+Changes made for reelscript:
+- The keyboard, its backlight and the screen are removed (reelscript draws
+  its own keys and shows the demo on the screen).
+- Packed as one binary glTF (GLB) and unused data pruned.
