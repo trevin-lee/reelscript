@@ -54,13 +54,17 @@ test("a Playwright key name or chord resolves to its keys, with modifiers held, 
   assert.deepEqual(chord("Hyper+K"), { missing: "Hyper" });
   // A key a laptop leaves out is fn with the key it shares, as a person presses it.
   assert.deepEqual(chord("PageDown", mac), { ids: ["+Fn", "ArrowDown"], label: "fn ↓" });
+  // ControlOrMeta is the laptop's own shortcut key, whatever the host; Windows writes its logo key first.
+  assert.deepEqual(chord("ControlOrMeta+P", mac), { ids: ["+MetaLeft", "p"], label: "⌘ P" });
+  assert.deepEqual(chord("ControlOrMeta+P", pc), { ids: ["+ControlLeft", "p"], label: "Ctrl + P" });
+  assert.equal((resolveChord("Meta+Shift+S", pc) as { label: string }).label, "Win + Shift + S");
   assert.deepEqual(chord("Home", mac), { ids: ["+Fn", "ArrowLeft"], label: "fn ←" });
   assert.deepEqual(chord("Meta+Delete", mac), { ids: ["+Fn", "+MetaLeft", "Backspace"], label: "fn ⌘ ⌫" }, "forward delete is fn delete");
   assert.deepEqual(chord("Delete", pc), { ids: ["Delete"], label: "Del" }, "a PC has its own Del key");
   const all = resolveChord("Control+Shift+Alt+Meta+K", mac);
   assert.ok(!("missing" in all));
   assert.equal(all.label, "⌃ ⌥ ⇧ ⌘ K", "modifiers in Apple's order");
-  assert.equal(chordLabel(all.keys, pc), "Ctrl + Alt + Shift + Win + K");
+  assert.equal(chordLabel(all.keys, pc), "Win + Ctrl + Alt + Shift + K", "Windows writes its logo key first");
 });
 
 test("typed characters resolve to keys, shifted where a US keyboard shifts them; others are null", () => {

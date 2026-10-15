@@ -85,18 +85,11 @@ export async function verifyBrowser(): Promise<void> {
 }
 
 /**
- * Chrome on macOS, as pages see it: the user agent, the client hint headers
- * (which otherwise name HeadlessChrome and the host's platform), and what
- * their scripts ask. Shared by the browser window, the editor, and MCP's
- * inspect_page, so what an agent inspects is what gets filmed.
- */
-export function macChrome(browser: Browser): { userAgent: string; headers: Record<string, string>; script: string } {
-  return chromeOn(browser, "mac");
-}
-
-/**
- * Chrome on a platform as pages see it: macOS for the MacBook, Windows for the PC laptop (`desk.laptop`), so a web
- * app or VS Code shows and answers the shortcuts of the laptop on screen (⌘K on the Mac, Ctrl+K on the PC).
+ * Chrome on a platform as pages see it: the user agent, the client hint headers (which otherwise name HeadlessChrome
+ * and the host's platform), and what their scripts ask. macOS for the MacBook, Windows for the PC laptop
+ * (`desk.laptop`), so a web app or VS Code shows and answers the shortcuts of the laptop on screen (⌘K on the Mac,
+ * Ctrl+K on the PC). Shared by the browser window, the editor, `login` and MCP's inspect_page, so what an agent
+ * inspects, and the session it signs in with, are what gets filmed.
  */
 export function chromeOn(browser: Browser, platform: "mac" | "pc"): { userAgent: string; headers: Record<string, string>; script: string } {
   const chrome = browser.version().split(".")[0];

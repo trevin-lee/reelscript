@@ -121,6 +121,9 @@ test("login names a missing web address; pronunciations respell whole words", as
   const r = await run(["login", "./app.html"], dir);
   assert.equal(r.code, 1);
   assert.match(r.output, /^reelscript: login takes the web address of your app's sign-in page, like https:\/\/app\.example\.com\/login, not "\.\/app\.html"$/m);
+  const laptop = await run(["login", "https://app.example.com/login", "--laptop", "windows"], dir);
+  assert.equal(laptop.code, 1);
+  assert.match(laptop.output, /--laptop is "mac" or "pc", as the demo's desk\.laptop is, not "windows"/);
   assert.equal(applyPronunciations("PostgreSQL speaks SQL.", { SQL: "sequel" }), "PostgreSQL speaks sequel.");
   assert.equal(applyPronunciations("Reelscript's clock", { Reelscript: "Reel script" }), "Reel script's clock");
 });

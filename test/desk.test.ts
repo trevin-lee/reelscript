@@ -147,6 +147,12 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   const pc = await run(["check", "s.ts"], dir);
   assert.equal(pc.code, 0, pc.output);
 
+  // Typing into a field the panel covers, or moving to it, is a warning at the line: it'd be filmed behind the panel.
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("data:text/html,<input id=f style='position:fixed;right:6px;bottom:6px'>");\ndemo.keyboard.open();\ndemo.type("#f", "hi");\nawait demo.render("out.mp4");`);
+  const hidden = await run(["check", "s.ts"], dir);
+  assert.equal(hidden.code, 0, hidden.output);
+  assert.match(hidden.output, /"#f" is under the keyboard window, which covers it on screen[\s\S]*s\.ts:5/);
+
   // The panel stays in front, as it's drawn, even after another window is focused: a click under it lands on it.
   const corner = `data:text/html,<button id=b style='position:fixed;right:4px;bottom:4px'>b</button>`;
   demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${corner}");\ndemo.keyboard.open();\ndemo.browser.focus();\ndemo.cursor.moveTo("#b");\ndemo.cursor.click();\nawait demo.render("out.mp4");`);

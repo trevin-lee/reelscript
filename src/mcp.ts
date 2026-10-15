@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import sharp from "sharp";
 
-const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop, with a keyboard view (hands pressing the keys) and 3D shots of the demo on a MacBook on a desk or floating with an iPad.
+const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop, with a keyboard window (hands pressing the keys) and 3D shots of the demo on a laptop on a desk or floating with an iPad. desk.laptop "pc" makes the laptop a Windows/Linux one and the browser and VS Code Windows (Ctrl shortcuts); pass inspect_page the same laptop.
 
 Workflow for making a demo:
 1. Call reelscript_docs once to learn the API.
@@ -159,13 +159,14 @@ export async function serve(): Promise<void> {
           .optional()
           .describe('The page\'s date, as a demo\'s clock option: an ISO date, or "now" for the real one (with a session, when the app checks its token\'s expiry). Default: the demo default, 2025-09-23 9:41 AM'),
         timezone: z.string().optional().describe('IANA timezone, as a demo\'s timezone option. Default "UTC"'),
+        laptop: z.enum(["mac", "pc"]).optional().describe('The demo\'s desk.laptop: "pc" sees the page as Chrome on Windows, as a PC demo\'s browser does (Ctrl shortcuts). Default "mac"'),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ url, width = 1280, height = 800, screenshot = true, session, clock, timezone }) => {
+    async ({ url, width = 1280, height = 800, screenshot = true, session, clock, timezone, laptop = "mac" }) => {
       const { launchChromium } = await import("./browser.js");
       const { resolveSession } = await import("./session.js");
-      const { macChrome } = await import("./browser.js");
+      const { chromeOn } = await import("./browser.js");
       const { dateShim } = await import("./clock.js");
       const { DEFAULT_CLOCK, DEFAULT_TIMEZONE, clockEpoch } = await import("./time.js");
       const storageState = session ? resolveSession(session, process.cwd(), "working directory") : undefined;
@@ -181,10 +182,10 @@ export async function serve(): Promise<void> {
       const { LocalPages } = await import("./localPages.js");
       const local = new LocalPages();
       try {
-        // The page as a demo's browser shows it: Chrome on a Mac, on the demo's date and timezone.
+        // The page as a demo's browser shows it: Chrome on the laptop's platform, on the demo's date and timezone.
         const zone = timezone ?? DEFAULT_TIMEZONE;
         const epoch = clock === "now" ? Date.now() : clockEpoch(clock ?? DEFAULT_CLOCK, zone);
-        const mac = macChrome(browser);
+        const mac = chromeOn(browser, laptop);
         const context = await browser.newContext({
           viewport: { width, height },
           deviceScaleFactor: 1,

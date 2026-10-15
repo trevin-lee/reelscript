@@ -970,6 +970,18 @@ class Engine {
     return p.x < 0 || p.y < 0 || p.x > w.width || p.y > w.height;
   }
 
+  /** Lines already warned that what they aim at is under the keyboard window. */
+  private panelWarned = new Set<string>();
+
+  /** A target the keyboard window covers on screen would be filmed behind it: a warning at the line, as a click there fails. */
+  private underPanel(p: Point, target: Target): void {
+    const panel = this.windows.get("keyboard");
+    if (!panel || this.windowAt(p) !== panel || this.panelWarned.has(this.at)) return;
+    this.panelWarned.add(this.at);
+    const named = typeof target === "string" ? JSON.stringify(target) : `(${target.x}, ${target.y})`;
+    warn(`${named} is under the keyboard window, which covers it on screen; move the keyboard window (demo.keyboard.place()) or close it first\n  at ${this.at}`);
+  }
+
   private async resolvePoint(target: Target, windowId?: string): Promise<Point> {
     const r = await this.resolveRect(target, windowId, true);
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
@@ -1081,6 +1093,7 @@ class Engine {
       }
       case "cursor.moveTo": {
         const to = await this.resolvePoint(action.target, action.window);
+        this.underPanel(to, action.target);
         this.aimed =
           typeof action.target === "string"
             ? { selector: action.target, window: action.window ?? this.focusedId ?? "" }
@@ -1122,6 +1135,8 @@ class Engine {
         if (action.target) {
           const field = await this.visible(w, action.target);
           await this.inView(w, field, action.target); // like moveTo: no silent jump to an off-screen field
+          const fr = await this.resolveRect(action.target, action.window);
+          this.underPanel({ x: fr.x + fr.w / 2, y: fr.y + fr.h / 2 }, action.target);
           await field.focus();
           // A field that can't take the keyboard would leave the keys to whatever had it before.
           const refused = await field.evaluate((el) => {
@@ -1169,15 +1184,17 @@ class Engine {
         // A shortcut that edits text does what it does on the laptop's platform, as the page believes it's on it, on
         // every host (see macKeys): Playwright gives a Mac's editing only on a Mac host, and only a Mac's.
         const darwin = process.platform === "darwin";
-        const mac = w.kind !== "browser" ? null : this.deskOpts.laptop === "pc" ? (darwin ? pcShortcut(action.key) : null) : darwin ? null : macShortcut(action.key);
-        const send = () => (mac ? pressMacShortcut(w.page, w.cdp, mac) : w.page.keyboard.press(asTyped(action.key)));
+        // ControlOrMeta is the laptop's own (⌘ on the Mac, Ctrl on the PC), not the host's, which Playwright would take.
+        const key = action.key.replace(/(^|\+)ControlOrMeta(?=\+|$)/g, `$1${this.primary}`);
+        const mac = w.kind !== "browser" ? null : this.deskOpts.laptop === "pc" ? (darwin ? pcShortcut(key) : null) : darwin ? null : macShortcut(key);
+        const send = () => (mac ? pressMacShortcut(w.page, w.cdp, mac) : w.page.keyboard.press(asTyped(key)));
         if (!this.sceneShown()) {
           await send();
           return { end: start + 100 };
         }
         // On camera, the hand gets there first and the page reacts as the key goes down, never before.
         const at = start + KEY_REACH_MS;
-        this.noteChord(action.key, at, 90, true, start);
+        this.noteChord(key, at, 90, true, start);
         let sent = false;
         const flush = async (t: number) => {
           if (sent || t < at) return;
@@ -1302,6 +1319,7 @@ class Engine {
           );
         }
         const r = await this.resolveRect(action.target, action.window);
+        this.underPanel({ x: r.x + r.w / 2, y: r.y + r.h / 2 }, action.target);
         const scale = action.scale ?? DEFAULTS.zoomScale;
         let cx = r.x + r.w / 2;
         let cy = r.y + r.h / 2;

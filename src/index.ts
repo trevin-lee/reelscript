@@ -112,7 +112,7 @@ function invalidNumber(options: object): string | null {
   // Closer than that, the camera is inside what it looks at.
   if (o.distance !== undefined && !(typeof o.distance === "number" && o.distance >= 0.3 && o.distance <= 4)) return `distance must be from 0.3 to 4 (times the view's own), not ${shown(o.distance)}`;
   if (o.degrees !== undefined && !(typeof o.degrees === "number" && o.degrees >= 0 && o.degrees <= DESK_LID_MAX)) {
-    return `degrees must be from 0 (shut) to ${DESK_LID_MAX} (as far as a MacBook opens), not ${shown(o.degrees)}`;
+    return `degrees must be from 0 (shut) to ${DESK_LID_MAX} (as far as a laptop opens), not ${shown(o.degrees)}`;
   }
   if (o.status !== undefined && !(Number.isInteger(o.status) && (o.status as number) >= 100 && (o.status as number) <= 599)) {
     return `status must be an HTTP status code, not ${shown(o.status)}`;

@@ -55,7 +55,7 @@ usage:
   reelscript record  <script> [more...] [--prune] [--strict]
                                                    run terminal commands for real and save
                                                    recordings; --prune deletes unused ones
-  reelscript login   <url> [--out session.json]    sign in once in a real browser; save the session
+  reelscript login   <url> [--out session.json] [--laptop pc]    sign in once in a real browser; save the session
   reelscript warmup  [browser] [narration] [editor] [--with-deps]
                                                    download the browser, voice model and VS Code
                                                    (all three when no part is named, ~800 MB);
@@ -233,7 +233,7 @@ const OPTIONS: Record<string, string[]> = {
   preview: ["at", "out"],
   check: ["strict"],
   record: ["prune", "strict"],
-  login: ["out"],
+  login: ["out", "laptop"],
   warmup: ["with-deps"],
   cache: [],
   mcp: [],
@@ -361,8 +361,10 @@ async function main(): Promise<void> {
       const url = positional[0];
       if (!/^https?:\/\//i.test(url)) fail(`login takes the web address of your app's sign-in page, like https://app.example.com/login, not "${url}"`);
       const out = flags.out || "session.json";
+      const laptop = flags.laptop || "mac";
+      if (laptop !== "mac" && laptop !== "pc") fail(`--laptop is "mac" or "pc", as the demo's desk.laptop is, not "${laptop}"`);
       const { login } = await import("./session.js");
-      const r = await login(url, out);
+      const r = await login(url, out, console.error, laptop);
       console.error(
         `reelscript: saved ${r.cookies} cookie${r.cookies === 1 ? "" : "s"} and storage for ${r.origins} origin${r.origins === 1 ? "" : "s"} to ${r.path}\n` +
           `  Use it with createDemo({ session: "<path to it from your script's folder>" }). It signs in as you: keep it out of git.`,

@@ -5,7 +5,7 @@
  * signed in with it.
  */
 import { chromium, type BrowserContext } from "playwright";
-import { browserMissing, cli, installBrowserHint, macChrome } from "./browser.js";
+import { browserMissing, chromeOn, cli, installBrowserHint } from "./browser.js";
 import { interrupted } from "./cleanup.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -45,7 +45,7 @@ export function resolveSession(path: string, baseDir: string, relativeTo: "scrip
   return full;
 }
 
-export async function login(url: string, out: string, log: (m: string) => void = console.error): Promise<LoginResult> {
+export async function login(url: string, out: string, log: (m: string) => void = console.error, laptop: "mac" | "pc" = "mac"): Promise<LoginResult> {
   const headless = process.env.REELSCRIPT_LOGIN_HEADLESS === "1"; // tests only
   let browser;
   try {
@@ -64,8 +64,8 @@ export async function login(url: string, out: string, log: (m: string) => void =
     throw err;
   }
   try {
-    // The same browser a demo uses (Chrome on a Mac), so a session tied to it carries over.
-    const mac = macChrome(browser);
+    // The same browser a demo uses (Chrome on a Mac, or on Windows for the PC laptop), so a session tied to it carries over.
+    const mac = chromeOn(browser, laptop);
     const context = await browser.newContext({ viewport: null, userAgent: mac.userAgent, extraHTTPHeaders: mac.headers });
     await context.addInitScript(mac.script);
     const page = await context.newPage();

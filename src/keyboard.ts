@@ -159,7 +159,7 @@ const PLAIN: Record<string, string> = {
 /** Playwright key names and codes that aren't the key's own id here. */
 const ALIASES: Record<string, string> = {
   Esc: "Escape", Return: "Enter", Del: "Delete", Spacebar: "Space", Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight",
-  Backquote: "Backquote", Shift: "ShiftLeft", Control: "ControlLeft", Alt: "AltLeft", Meta: "MetaLeft", ControlOrMeta: "MetaLeft",
+  Backquote: "Backquote", Shift: "ShiftLeft", Control: "ControlLeft", Alt: "AltLeft", Meta: "MetaLeft",
 };
 
 export interface KeyPress {
@@ -200,7 +200,8 @@ export function resolveChord(chord: string, lay: Layout): Chord | { missing: str
   const main = parts.pop()!;
   const mods = new Set<string>();
   for (const p of parts) {
-    const id = ALIASES[p];
+    // ControlOrMeta is the laptop's own shortcut key: ⌘ on the Mac, Ctrl on the PC.
+    const id = p === "ControlOrMeta" ? (lay.name === "pc" ? "ControlLeft" : "MetaLeft") : ALIASES[p];
     if (!id || !/^(Shift|Control|Alt|Meta)Left$/.test(id)) return { missing: p };
     // The keys shown are the keys pressed: Meta on a PC is its Windows (Super) key.
     mods.add(id);
@@ -265,6 +266,8 @@ export function chordLabel(keys: KeyPress[], lay: Layout): string {
     const cap = lay.keys.find((k) => k.id === id);
     return cap && cap.legend ? cap.legend : id;
   });
+  // Windows writes its logo key first ("Win + Shift + S").
+  if (!mac) parts.sort((a, b) => (b === PC_NAMES.MetaLeft ? 1 : 0) - (a === PC_NAMES.MetaLeft ? 1 : 0));
   return mac ? parts.join(" ") : parts.join(" + ");
 }
 
