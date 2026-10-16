@@ -141,7 +141,7 @@ const SCENE = String.raw`
 const U = 1; // one key unit, 19 mm
 const mac = LAYOUT.name === "mac";
 // Each laptop is a model, measured here in its own units: a 16-inch MacBook Pro (assets/macbook, in decimetres) or a
-// slim Windows/Linux laptop (assets/pclaptop, in metres). Placed so the deck's top is y = 0 and the key block sits in
+// slim Windows laptop (assets/pclaptop, in metres). Placed so the deck's top is y = 0 and the key block sits in
 // its keyboard well. The lid is upright in the MacBook's file, its parts known by their materials; the PC's is a node
 // with its pivot on the hinge, open at 102°.
 const MODEL = mac

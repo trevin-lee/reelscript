@@ -15,7 +15,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import sharp from "sharp";
 
-const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop, with a keyboard window (hands pressing the keys) and 3D shots of the demo on a laptop on a desk or floating with an iPad. desk.laptop "pc" makes the laptop a Windows/Linux one and the browser and VS Code Windows (Ctrl shortcuts); pass inspect_page the same laptop.
+const INSTRUCTIONS = `reelscript renders product demos from TypeScript scripts: a scripted cursor, typing, zooms, narration, and browser, terminal, and VS Code windows on a mocked macOS desktop, with a keyboard window (hands pressing the keys) and 3D shots of the demo on a laptop on a desk or floating with an iPad. desk.laptop "pc" makes the laptop a Windows one and the browser and VS Code Windows (Ctrl shortcuts); pass inspect_page the same laptop.
 
 Workflow for making a demo:
 1. Call reelscript_docs once to learn the API.

@@ -96,7 +96,7 @@ test("the keyboard window and the desk views queue like any window and view, and
   assert.throws(() => createDemo({ theme: "bare", wallpaper: "#000" }), /the bare theme draws no desktop, so wallpaper does nothing there/);
 });
 
-test("check: the keyboard window never takes typing; a key the laptop hasn't got fails at the line; a character it can't type is a warning", { timeout: 120_000 }, async () => {
+test("check: the keyboard window never takes typing; a key the laptop hasn't got fails at the line; a character it can't type is a warning", { timeout: 600_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-desk-"));
   const page = `data:text/html,<input id=f autofocus>`;
   demo(
@@ -125,6 +125,11 @@ test("check: the keyboard window never takes typing; a key the laptop hasn't got
   assert.match(landing.output, /desk\.out\(\) is still flying back to it \(until [\d.]+s\); wait for it to land first[\s\S]*s\.ts:7/);
   assert.equal(unzoomed.code, 1);
   assert.match(unzoomed.output, /zoom\.out\(\) zooms the flat desktop, and a desk view is on[\s\S]*s\.ts:5/);
+
+  // desk.out() on the flat desktop does nothing, as zoom.out() with no zoom does: a zoom after it isn't held up.
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("${page}");\ndemo.desk.out();\ndemo.zoom.to("#f");\ndemo.zoom.out();\nawait demo.render("out.mp4");`);
+  const stray = await run(["check", "--strict", "s.ts"], dir);
+  assert.equal(stray.code, 0, stray.output);
 
   // Keys pressed with the lid down in a desk view are under it: a warning at each such line. On the flat desktop the
   // laptop's screen is the frame, plainly on: the keyboard window shows the lid open, and there's nothing to warn of.

@@ -1336,7 +1336,12 @@ class Engine {
       }
       case "zoom.out": {
         if (this.deskOn(start)) {
-          throw new Error(`reelscript: zoom.out() zooms the flat desktop, and a desk view is on (which rests any zoom itself); leave the desk with desk.out()`);
+          const back = this.deskAnim!.to.view === "flat";
+          throw new Error(
+            back
+              ? `reelscript: zoom.out() zooms the flat desktop, and desk.out() is still flying back to it (until ${((this.deskAnim!.start + this.deskAnim!.dur) / 1000).toFixed(1)}s), resting any zoom on the way; wait for it to land if there's more to zoom out`
+              : `reelscript: zoom.out() zooms the flat desktop, and a desk view is on (which rests any zoom itself); leave the desk with desk.out()`,
+          );
         }
         this.manualZoom = false;
         this.attention = null;
@@ -1450,6 +1455,9 @@ class Engine {
       }
       case "desk.to":
       case "desk.out": {
+        // Back to the flat desktop when it's already there, or already on its way: nothing to do, as zoom.out() with
+        // no zoom does nothing (a flight from flat to flat would hold the desk's camera for nothing).
+        if (action.kind === "desk.out" && (!this.deskAnim || this.deskAnim.to.view === "flat")) return null;
         // Like a zoom: it runs alongside what follows. A new one starts from where the last one had got to.
         const to: DeskShot =
           action.kind === "desk.to" ? { view: action.view, orbit: action.orbit, tilt: action.tilt, distance: action.distance, hands: action.hands, ipad: action.ipad } : { view: "flat" };
@@ -1817,14 +1825,14 @@ class Engine {
    * our control and slower; CDP grabs the current compositor frame directly.
    */
   private async capture(w: Win): Promise<Buffer> {
-    return this.captureFrom(w.cdp, `the ${w.id} window`);
+    return this.captureFrom(w.cdp, `the ${w.id} window`, w.kind === "keyboard" ? DESK_CAPTURE_MS : PAGE_CAPTURE_MS);
   }
 
-  private async captureFrom(cdp: CDPSession, what: string): Promise<Buffer> {
+  private async captureFrom(cdp: CDPSession, what: string, limitMs = PAGE_CAPTURE_MS): Promise<Buffer> {
     return retryCapture(what, async () => {
       let timer: NodeJS.Timeout | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("the page's compositor stalled for 10s")), 10_000);
+        timer = setTimeout(() => reject(new Error(`the page's compositor stalled for ${limitMs / 1000}s`)), limitMs);
       });
       try {
         const { data } = await Promise.race([cdp.send("Page.captureScreenshot", { format: "png" }), timeout]);
@@ -1945,7 +1953,7 @@ class Engine {
       await this.loadDesk(page, cdp, false, "desk");
     }
     await this.deskRender(this.deskPage.page, t, view, { data: flat, width: W, height: H, channels: 3 }, "desk", true);
-    const png = await this.captureFrom(this.deskPage.cdp, "the desk");
+    const png = await this.captureFrom(this.deskPage.cdp, "the desk", DESK_CAPTURE_MS);
     return sharp(png).removeAlpha().raw().toBuffer();
   }
 }
@@ -2082,6 +2090,14 @@ export function quickInputMatches(label: string, text: string, isFile: boolean):
  * ("Unable to capture screenshot"); a moment later it succeeds. Retry a few
  * times, then fail with a message that says what couldn't be captured.
  */
+/**
+ * How long a frame may take to come back before it's a stall. A page's frame is quick, so 10 s means something's wrong;
+ * the desk's are drawn in 3D in software, which on a loaded machine (a busy CI runner, renders side by side) can take
+ * many times that, and is still coming.
+ */
+const PAGE_CAPTURE_MS = 10_000;
+const DESK_CAPTURE_MS = 120_000;
+
 async function retryCapture<T>(what: string, attempt: () => Promise<T>): Promise<T> {
   let last: unknown;
   for (let i = 0; i < 4; i++) {
