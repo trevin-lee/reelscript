@@ -7,7 +7,7 @@ import { mkdirSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { DEFAULTS, type Action, type Target } from "./timeline.js";
 import { clamp, lerp, progress, type Ease } from "./easing.js";
-import { createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
+import { bundledFontFace, createTheme, type FrameImage, type Menubar, type RawImage, type Theme, type ThemeName, type WindowKind } from "./theme.js";
 import { cursorSprite, rippleSprite, type Sprite } from "./cursor.js";
 import { Encoder, checkOutputFormat, gifSize, muxNarration, stopEncoders, type GifOptions, type NarrationCue } from "./encoder.js";
 import { clockShim, dateShim } from "./clock.js";
@@ -26,6 +26,7 @@ import {
   type TermEvent,
 } from "./terminal.js";
 import { EditorServer, editorStyles, editorTitle } from "./editor.js";
+import { KEYSTROKE_DEFAULTS, keystrokeHtml, keystrokeKeys, keystrokeOpacity, keystrokePlace, showsAsKeystroke, type Keystroke, type KeystrokeOptions } from "./keystrokes.js";
 import { DESK_DEFAULTS, DESK_LID, DESK_URL, deskAsset, deskPageHtml, type DeskOptions, type DeskShot, type DeskState, type KeyEvent } from "./desk.js";
 import { assignFingers, layout as keyboardLayout, resolveChar, resolveChord, type Layout } from "./keyboard.js";
 import { readFileSync } from "node:fs";
@@ -58,6 +59,8 @@ export interface RenderOptions {
   desk?: DeskOptions;
   /** The macOS theme's wallpaper: a CSS colour or gradient, or an image file's path. */
   wallpaper?: string;
+  /** The keystroke overlay: the shortcuts pressed, named in a pill over the frame. Off without it. */
+  keystrokes?: KeystrokeOptions;
   /** The moment the demo happens at: the page's Date starts here and the menu bar shows it. */
   clock?: string | Date;
   /** IANA timezone for the page and the menu bar. Default: "UTC" */
@@ -256,6 +259,10 @@ class Engine {
   private get primary(): "Meta" | "Control" {
     return this.deskOpts.laptop === "pc" ? "Control" : "Meta";
   }
+  /** The keystroke overlay's settings, or null when it's off; the shortcuts it shows, in time order; its pills, drawn once each. */
+  private strokeOpts: Required<KeystrokeOptions> | null;
+  private strokes: Keystroke[] = [];
+  private strokeSprites = new Map<string, Promise<{ data: Buffer; width: number; height: number }>>();
   /** Lines already warned that their keys are under a shut lid. */
   private lidShutWarned = new Set<string>();
   private unshownKeys = new Set<string>();
@@ -270,7 +277,9 @@ class Engine {
     private frameMs = 1000 / DEFAULTS.fps,
     desk: DeskOptions = {},
     wallpaper?: string,
+    keystrokes?: KeystrokeOptions,
   ) {
+    this.strokeOpts = keystrokes ? { ...KEYSTROKE_DEFAULTS, ...keystrokes } : null;
     this.theme = createTheme(themeName, (html, w, h, transparent) => this.rasterizeHtml(html, w, h, transparent), menubar, wallpaper);
     this.deskOpts = { ...DESK_DEFAULTS, ...desk };
     this.deskLayout = keyboardLayout(this.deskOpts.laptop);
@@ -570,6 +579,47 @@ class Engine {
   }
 
   /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
+  /** A shortcut for the keystroke overlay, when it's on: shown if it's a shortcut (or the overlay shows all), or as `force` says. */
+  private noteStroke(chord: string, at: number, force?: boolean): void {
+    if (!this.strokeOpts || force === false) return;
+    if (force !== true && !showsAsKeystroke(chord, this.strokeOpts.show)) return;
+    this.strokes.push({ at, keys: keystrokeKeys(chord, this.deskLayout) });
+  }
+
+  /** The keystroke pill for these keys, as RGBA, drawn once and kept. */
+  private strokeSprite(keys: string[]): Promise<{ data: Buffer; width: number; height: number }> {
+    const key = keys.join("\u0000");
+    let p = this.strokeSprites.get(key);
+    if (!p) {
+      const [W, H] = this.desktop;
+      const { html, height } = keystrokeHtml(keys, H, bundledFontFace(), this.strokeOpts!.css);
+      p = this.rasterizeHtml(html, W, height, true).then(async (png) => {
+        const { data, info } = await sharp(png).trim({ threshold: 0 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        return { data, width: info.width, height: info.height };
+      });
+      this.strokeSprites.set(key, p);
+    }
+    return p;
+  }
+
+  /** The keystroke overlay over a finished frame (packed RGB), when a shortcut is showing at `t`. */
+  private async withKeystroke(frame: Buffer, t: number): Promise<Buffer> {
+    if (!this.strokeOpts || !this.strokes.length) return frame;
+    const showing = keystrokeOpacity(this.strokes, this.strokeOpts.hold, t);
+    if (!showing || showing.opacity <= 0) return frame;
+    const sprite = await this.strokeSprite(showing.stroke.keys);
+    let data = sprite.data;
+    if (showing.opacity < 1) {
+      data = Buffer.from(sprite.data);
+      for (let i = 3; i < data.length; i += 4) data[i] = Math.round(data[i] * showing.opacity);
+    }
+    const [W, H] = this.desktop;
+    const { left, top } = keystrokePlace(this.strokeOpts.position, sprite.width, sprite.height, W, H);
+    const overlay = await clipRaw({ data, width: sprite.width, height: sprite.height, channels: 4 }, left, top, W, H);
+    if (!overlay) return frame;
+    return sharp(frame, { raw: { width: W, height: H, channels: 3 } }).composite([overlay]).removeAlpha().raw().toBuffer();
+  }
+
   private noteChord(chord: string, at: number, hold: number, withLabel: boolean, from = at): void {
     if (!this.sceneShown()) return;
     const resolved = resolveChord(chord, this.deskLayout);
@@ -1189,11 +1239,13 @@ class Engine {
         const mac = w.kind !== "browser" ? null : this.deskOpts.laptop === "pc" ? (darwin ? pcShortcut(key) : null) : darwin ? null : macShortcut(key);
         const send = () => (mac ? pressMacShortcut(w.page, w.cdp, mac) : w.page.keyboard.press(asTyped(key)));
         if (!this.sceneShown()) {
+          this.noteStroke(key, start, action.keystroke);
           await send();
           return { end: start + 100 };
         }
         // On camera, the hand gets there first and the page reacts as the key goes down, never before.
         const at = start + KEY_REACH_MS;
+        this.noteStroke(key, at, action.keystroke);
         this.noteChord(key, at, 90, true, start);
         let sent = false;
         const flush = async (t: number) => {
@@ -1413,6 +1465,7 @@ class Engine {
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
         const shortcut = action.kind === "editor.openFile" ? `${this.primary}+P` : "F1";
+        this.noteStroke(shortcut, opensAt);
         this.noteChord(shortcut, opensAt, 90, true, start);
         this.noteTyped(text, typeStart, msPerChar, start);
         this.noteChord("Enter", enterAt, 80, false, start);
@@ -1544,6 +1597,10 @@ class Engine {
         this.noteChord("Enter", typeEnd, 80, false, start);
         const lastOut = events.length ? outStart + events[events.length - 1][0] : outStart;
         const text = events.map((e) => e[1]).join("");
+        // Events from a terminal session (an asciicast) already have their carriage returns, and a bare line feed
+        // there keeps the column, which full-screen programs rely on. Events written by hand have none: their line
+        // feeds are new lines, as in declared output.
+        const raw = !!action.events && text.includes("\r");
         const endsWithNewline = !text || /\n$/.test(text);
         const promptAt = lastOut + 150;
         let nextChar = 0;
@@ -1560,7 +1617,7 @@ class Engine {
           }
           let out = "";
           while (nextEvent < events.length && outStart + events[nextEvent][0] <= t) out += events[nextEvent++][1];
-          await this.termWrite(w, out, !!action.events);
+          await this.termWrite(w, out, raw);
           if (!prompted && t >= promptAt) {
             prompted = true;
             if (typeof action.prompt === "string") w.termPrompt = action.prompt; // a new prompt from here on
@@ -1576,13 +1633,17 @@ class Engine {
         if (!events) throw new Error("reelscript: terminal events missing (internal)");
         const lastOut = events.length ? start + events[events.length - 1][0] : start;
         const text = events.map((e) => e[1]).join("");
+        // Events from a terminal session (an asciicast) already have their carriage returns, and a bare line feed
+        // there keeps the column, which full-screen programs rely on. Events written by hand have none: their line
+        // feeds are new lines, as in declared output.
+        const raw = !!action.events && text.includes("\r");
         const endsWithNewline = !text || /\n$/.test(text);
         let nextEvent = 0;
         let prompted = false;
         const flush = async (t: number) => {
           let out = "";
           while (nextEvent < events.length && start + events[nextEvent][0] <= t) out += events[nextEvent++][1];
-          await this.termWrite(w, out, !!action.events);
+          await this.termWrite(w, out, raw);
           if (action.prompt && !prompted && t >= lastOut + 150) {
             prompted = true;
             if (typeof action.prompt === "string") w.termPrompt = action.prompt;
@@ -1871,6 +1932,11 @@ class Engine {
 
   /** Capture every window, compose the desktop, zoom, and overlay the cursor. Returns packed RGB. */
   async frame(t: number): Promise<Buffer> {
+    return this.withKeystroke(await this.scene(t), t);
+  }
+
+  /** The frame at `t` before the keystroke overlay: the desktop, the camera, the cursor, and a desk view. */
+  private async scene(t: number): Promise<Buffer> {
     const [W, H] = this.desktop;
     const bg = await this.theme.background(this.desktop);
     const keyboard = this.windows.get("keyboard") ?? null;
@@ -2167,7 +2233,7 @@ export async function render(actions: Action[], options: RenderOptions): Promise
           app: options.menubar?.app,
           clockText: options.menubar?.clockText ?? options.menubar?.clock ?? menubarClock(clockEpoch(options.clock ?? DEFAULT_CLOCK, timezone), timezone),
         };
-  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs, options.desk, options.wallpaper);
+  const engine = new Engine(viewport, options.desktop, themeName, options.deterministic ?? true, menubar, frameMs, options.desk, options.wallpaper, options.keystrokes);
   if (options.onStatus) engine.onStatus = options.onStatus;
   engine.sources = options.sources ?? [];
   engine.timezone = options.timezone ?? DEFAULT_TIMEZONE;

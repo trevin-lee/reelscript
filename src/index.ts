@@ -16,6 +16,7 @@ import type { Menubar, ThemeName } from "./theme.js";
 import { checkOutputFormat, type GifOptions } from "./encoder.js";
 import { KOKORO_VOICES, type TtsEngine } from "./tts.js";
 import { DESK_LID_MAX, DESK_VIEWS, type DeskOptions, type DeskView } from "./desk.js";
+import { KEYSTROKE_POSITIONS, type KeystrokeOptions } from "./keystrokes.js";
 import { KEYBOARD_LAYOUTS } from "./keyboard.js";
 import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
@@ -143,7 +144,7 @@ function invalidValue(options: object): string | null {
   for (const k of TEXT) {
     if (o[k] !== undefined && typeof o[k] !== "string") return `${k} must be text, not ${JSON.stringify(o[k])}`;
   }
-  for (const k of ["hands", "labels", "ipad"]) {
+  for (const k of ["hands", "labels", "ipad", "keystroke"]) {
     if (o[k] !== undefined && typeof o[k] !== "boolean") return `${k} must be true or false, not ${JSON.stringify(o[k])}`;
   }
   if (o.prompt !== undefined && typeof o.prompt !== "boolean" && typeof o.prompt !== "string") {
@@ -177,7 +178,7 @@ function invalidOption(o: DemoOptions): string | null {
     if (problem) return problem;
   }
   // And inside the options that are objects themselves.
-  const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS], ["desk", o.desk, DESK_FIELDS]];
+  const inside: [string, unknown, object][] = [["camera", o.camera, CAMERA_FIELDS], ["menubar", o.menubar, MENUBAR_FIELDS], ["gif", o.gif, GIF_FIELDS], ["desk", o.desk, DESK_FIELDS], ["keystrokes", o.keystrokes, KEYSTROKE_FIELDS]];
   for (const [name, value, fields] of inside) {
     const problem = value && typeof value === "object" ? unknownField(value, fields) : null;
     if (problem) return `${name}: ${problem}`;
@@ -204,6 +205,18 @@ function invalidOption(o: DemoOptions): string | null {
       if (v === undefined || (k === "surface" && v === "oak")) continue;
       if (typeof v !== "string" || !isCssColour(v)) return `desk ${k} must be a CSS colour${k === "surface" ? ' (or "oak")' : ""}, not ${shown(v)}`;
     }
+  }
+  if (o.keystrokes !== undefined && typeof o.keystrokes !== "boolean") {
+    if (typeof o.keystrokes !== "object" || o.keystrokes === null) return `keystrokes must be true, false, or { show, position, hold, css }, not ${shown(o.keystrokes)}`;
+    const k = o.keystrokes as KeystrokeOptions;
+    if (k.show !== undefined && k.show !== "chords" && k.show !== "all") return `unknown keystrokes show ${shown(k.show)} (use "chords" or "all")`;
+    const p = k.position as unknown;
+    const point = typeof p === "object" && p !== null && Object.keys(p).sort().join() === "x,y" && Object.values(p).every((v) => typeof v === "number" && Number.isFinite(v));
+    if (p !== undefined && !point && !KEYSTROKE_POSITIONS.includes(p as string)) {
+      return `unknown keystrokes position ${shown(p)} (use ${KEYSTROKE_POSITIONS.map((x) => `"${x}"`).join(", ")}, or { x, y })`;
+    }
+    if (k.hold !== undefined && !(typeof k.hold === "number" && Number.isFinite(k.hold) && k.hold >= 0)) return `keystrokes hold must be a number, 0 or more, not ${shown(k.hold)}`;
+    if (k.css !== undefined && typeof k.css !== "string") return `keystrokes css must be text, not ${shown(k.css)}`;
   }
   if (o.theme === "bare" && o.address !== undefined) return `the bare theme draws no address bar, so address does nothing there (it's the macos theme's)`;
   const camera = o.camera;
@@ -261,7 +274,7 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   "desk.out": { duration: true, ease: true },
   "keyboard.open": { labels: true, x: true, y: true, width: true, height: true },
   type: { target: true, text: true, wpm: true, window: true },
-  press: { key: true, window: true },
+  press: { key: true, window: true, keystroke: true },
   wait: { ms: true },
   scroll: { target: true, by: true, to: true, duration: true, ease: true, window: true },
   waitFor: { target: true, window: true, timeout: true, settle: true },
@@ -335,8 +348,9 @@ function missingField(action: Action): string | null {
 const DEMO_FIELDS: { readonly [P in keyof DemoOptions]-?: true } = {
   session: true, clock: true, timezone: true, theme: true, viewport: true, desktop: true, fps: true, camera: true, deterministic: true,
   gif: true, voice: true, tts: true, pronunciations: true, recordingsDir: true, verbose: true, address: true, menubar: true,
-  desk: true, wallpaper: true,
+  desk: true, wallpaper: true, keystrokes: true,
 };
+const KEYSTROKE_FIELDS: { readonly [P in keyof KeystrokeOptions]-?: true } = { show: true, position: true, hold: true, css: true };
 const DESK_FIELDS: { readonly [P in keyof DeskOptions]-?: true } = { laptop: true, hands: true, handColor: true, sleeve: true, surface: true, backdrop: true };
 
 const CAMERA_FIELDS: { readonly [P in keyof FollowCamera]-?: true } = { scale: true, hold: true, holdMs: true };
@@ -405,6 +419,7 @@ export type { Ease } from "./easing.js";
 export type { Menubar, ThemeName } from "./theme.js";
 export type { RenderResult, FollowCamera } from "./renderer.js";
 export type { DeskOptions, DeskView } from "./desk.js";
+export type { KeystrokeOptions, KeystrokePosition } from "./keystrokes.js";
 export type { GifOptions } from "./encoder.js";
 export type { TtsEngine, TtsAudio, TtsOptions } from "./tts.js";
 export { kokoro } from "./tts.js";
@@ -487,6 +502,12 @@ export interface DemoOptions {
    * .avif) relative to the script, shown to cover the desktop.
    */
   wallpaper?: string;
+  /**
+   * Name each shortcut pressed in a pill over the frame ("⇧ ⌘ P"), as a
+   * keystroke overlay does: `true`, or { show, position, hold, css }.
+   * Default: off
+   */
+  keystrokes?: boolean | KeystrokeOptions;
 }
 
 export interface KeyboardOptions {
@@ -976,6 +997,9 @@ export class Demo {
   private cantApply(a: Action): string | null {
     const o = a as Record<string, unknown>;
     const bare = this.options.theme === "bare";
+    if (a.kind === "press" && a.keystroke !== undefined && !this.options.keystrokes) {
+      return `keystroke shows or hides this press in the keystroke overlay, which is off; turn it on with createDemo({ keystrokes: true })`;
+    }
     if (a.kind === "desk.to") {
       if (a.ipad !== undefined && a.view !== "float") return `ipad is for the "float" view, where the iPad is; there's none in "${a.view}"`;
       if (a.hands && this.options.desk?.hands === false) return `hands: true needs the desk's hands, which createDemo({ desk: { hands: false } }) left out`;
@@ -1045,7 +1069,14 @@ export class Demo {
   }
 
   /** Press a key or chord, e.g. "Enter" or "Meta+K", in the focused window or the one named by `window` (it comes to the front). */
-  press(key: string, opts: { window?: "browser" | "terminal" | "editor" } = {}): void {
+  press(
+    key: string,
+    opts: {
+      window?: "browser" | "terminal" | "editor";
+      /** With the keystroke overlay on: show this press (true) or not (false), whatever the overlay's `show` says. */
+      keystroke?: boolean;
+    } = {},
+  ): void {
     this._push({ kind: "press", key }, opts);
   }
 
@@ -1202,6 +1233,7 @@ export class Demo {
       menubar: this.options.menubar,
       desk: this.options.desk,
       wallpaper: this.wallpaper(),
+      keystrokes: this.options.keystrokes === true ? {} : this.options.keystrokes || undefined,
       fps: this.options.fps,
       viewport: this.options.viewport,
       desktop: this.options.desktop,
@@ -1297,6 +1329,7 @@ export class Demo {
       menubar: this.options.menubar,
       desk: this.options.desk,
       wallpaper: this.wallpaper(),
+      keystrokes: this.options.keystrokes === true ? {} : this.options.keystrokes || undefined,
       clock: this.options.clock,
       timezone: this.options.timezone,
       snapshotAt,

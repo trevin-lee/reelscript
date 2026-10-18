@@ -115,6 +115,20 @@ await demo.render("out.mp4");`);
   assert.deepEqual(JSON.parse(readFileSync(join(dir, "seen.json"), "utf8")), [60, "acme %", "18px"]);
 });
 
+test("events written by hand start each line at the left, as declared output does; a session's are written as they are", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
+  demo(dir, `import { writeFileSync } from "node:fs";
+const demo = createDemo({ viewport: [700, 400] });
+demo.terminal.open({ prompt: "% " });
+demo.terminal.run("deploy", { events: [[0, "Building\\n"], [100, "Live\\n"]] });
+demo.terminal.run("cast", { events: [[0, "one\\r\\n"], [100, "  two\\r\\n"]] });
+demo.call(async ({ page }) => writeFileSync("rows.json", JSON.stringify(await page!.evaluate(() => [...document.querySelectorAll(".xterm-rows > div")].map((r) => (r.textContent ?? "").trimEnd()).filter(Boolean)))));
+await demo.render("out.mp4");`);
+  const r = await run(["check", "s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "rows.json"), "utf8")), ["% deploy", "Building", "Live", "% cast", "one", "  two", "%"]);
+});
+
 test("a script can say a warning's cause is meant: goto status, click dialog, run exitCode", { timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
   const server = createServer((req, res) => {

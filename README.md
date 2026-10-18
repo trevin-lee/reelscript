@@ -192,6 +192,23 @@ A recording as wide as your own terminal needs a window as big: give `open()` a 
 
 See [examples/terminal.ts](examples/terminal.ts).
 
+## Keystrokes
+
+`createDemo({ keystrokes: true })` names each shortcut as it's pressed, in a pill near the bottom of the frame: ⌘K, ⇧ ⌘ P, Esc, ↩, as the laptop writes them (⌘ on the Mac, Ctrl on the PC). It shows the shortcuts `press()` presses and the ones the editor's `openFile()` and `command()` press, not typing, whose text is on screen already. It's drawn over the finished frame, so a zoom, the follow camera or a desk view never moves or crops it, and costs next to nothing to render.
+
+```ts
+const demo = createDemo({
+  keystrokes: {
+    show: "chords",                          // or "all", for every press()
+    position: "bottom",                      // "bottom-left", "bottom-right", "top", or { x, y }
+    hold: 1000,                              // ms on screen after the key goes down
+    css: ".keystrokes { background: #4f46e5 }", // restyle it: .keystrokes is the pill, .key each key
+  },
+});
+demo.press("Meta+K");
+demo.press("Meta+Shift+P", { keystroke: false }); // not this one
+```
+
 ## Keyboard window, desk and device shots
 
 ```ts
@@ -348,7 +365,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `demo.cursor.moveTo(target, { ease, duration, window })` | Glide to a target. `duration` defaults from the distance, `ease` to `smooth`. Eases: `smooth`, `snappy`, `overshoot`, `linear`. |
 | `demo.cursor.click({ button, duration, dialog })` | Click at the cursor, with a ripple, taking `duration` ms of video (default 180). Focuses and raises the window under the cursor. `duration: 0` takes no video time, so a following `waitFor` cuts straight to the page the click led to. `dialog: "accept"` or `"dismiss"` answers an `alert()`, `confirm()` or `prompt()` the click opens, as meant (no warning); otherwise it's answered OK with a warning. |
 | `demo.type(selector, text, { wpm, window })` | Focus a field and type at `wpm` (default 300), in the focused window or the one named by `window`. Like `moveTo`, the field must be on screen. |
-| `demo.press(key, { window })` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`, in the focused window or the one named by `window`. Not in the terminal window, whose input is `terminal.run()`. |
+| `demo.press(key, { window, keystroke })` | Press a key or chord, e.g. `"Enter"`, `"Meta+K"`, in the focused window or the one named by `window`. Not in the terminal window, whose input is `terminal.run()`. With the keystroke overlay on, `keystroke: false` hides this press from it and `true` shows it whatever its `show` says. |
 | `demo.wait(ms)` | Hold, on camera. |
 | `demo.scroll(selector \| { by, to }, { duration, ease, window })` | Scroll, on camera, stepped with the frame clock: to center an element (scrolling its nearest scrollable container), or by / to a position on the page. `duration` defaults from the distance, `ease` to `smooth`. |
 | `demo.waitFor(selector, { window, timeout, settle })` | Hold, off camera, until the selector is visible (for `timeout` ms of real time, default 15000), then run the page's clock `settle` ms more (default 0). The page keeps running, so its loading isn't filmed. |
@@ -386,6 +403,7 @@ reelscript keeps downloads and generated audio in one folder, `~/.cache/reelscri
 | `session` | none | A saved login from `reelscript login`, relative to the script. |
 | `desk` | `{ laptop: "mac" }` | The desk behind the keyboard window and the desk views: `laptop` `"mac"` or `"pc"`, `hands` (default true), `handColor`, `sleeve` and `backdrop` as CSS colours, and `surface` (`"oak"` or a CSS colour). |
 | `wallpaper` | the theme's gradient | A CSS colour or gradient, or an image file (relative to the script), covering the macOS theme's desktop. |
+| `keystrokes` | off | `true`, or `{ show, position, hold, css }`: name each shortcut pressed in a pill over the frame. `show` is `"chords"` (a key with ⌘, Ctrl or ⌥, or a key such as Enter, Escape, Tab, an arrow or an F key; the default) or `"all"`; `position` is `"bottom"` (default), `"bottom-left"`, `"bottom-right"`, `"top"` or `{ x, y }`, the pill's centre in the video's pixels; `hold` how long each stays up after its key goes down (1000 ms); `css` restyles it (`.keystrokes` the pill, `.key` each key). |
 | `address` | none | `(url) => string`, rewriting what the browser's address pill shows. A local page (`goto("./app.html")`) shows a blank pill, and `address` gets its `file://` URL: `address: () => "app.acme.com"` names a site. |
 | `menubar` | `{ app: "reelscript" }` | The macOS menu bar's text: `app`, and `clockText` for what its clock shows, which is the demo's `clock` unless you set it. `false` removes the bar. |
 | `voice` | `"af_heart"` | Narration voice. With your own `tts` engine, the default is its `defaultVoice`, or the first of its `voices`. |

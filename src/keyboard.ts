@@ -258,6 +258,11 @@ const PC_KEY_NAMES: Record<string, string> = { Escape: "Esc", Space: "Space", Ar
 
 /** A chord as a viewer reads it: Mac symbols ("⇧ ⌘ P"), or PC names joined with + ("Ctrl + Shift + P"). */
 export function chordLabel(keys: KeyPress[], lay: Layout): string {
+  return chordParts(keys, lay).join(lay.name === "mac" ? " " : " + ");
+}
+
+/** A chord's keys as a viewer reads each: ["⇧", "⌘", "P"] on a Mac, ["Ctrl", "Shift", "P"] on a PC. */
+export function chordParts(keys: KeyPress[], lay: Layout): string[] {
   const mac = lay.name === "mac";
   const parts = keys.map(({ id, modifier }) => {
     if (modifier) return mac ? MAC_SYMBOLS[id] : PC_NAMES[id];
@@ -268,7 +273,7 @@ export function chordLabel(keys: KeyPress[], lay: Layout): string {
   });
   // Windows writes its logo key first ("Win + Shift + S").
   if (!mac) parts.sort((a, b) => (b === PC_NAMES.MetaLeft ? 1 : 0) - (a === PC_NAMES.MetaLeft ? 1 : 0));
-  return mac ? parts.join(" ") : parts.join(" + ");
+  return parts;
 }
 
 // ---------------------------------------------------------------- which finger

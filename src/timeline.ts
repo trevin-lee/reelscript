@@ -25,7 +25,7 @@ export type Action =
   | { kind: "desk.out"; duration?: number; ease?: Ease }
   | { kind: "keyboard.open"; labels?: boolean; x?: number; y?: number; width?: number; height?: number }
   | { kind: "type"; target?: string; text: string; wpm?: number; window?: string }
-  | { kind: "press"; key: string; window?: string }
+  | { kind: "press"; key: string; window?: string; /** Show this press in the keystroke overlay (true), or not (false), whatever its `show` says. */ keystroke?: boolean }
   | { kind: "wait"; ms: number }
   | {
       kind: "scroll";
