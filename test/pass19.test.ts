@@ -129,6 +129,17 @@ await demo.render("out.mp4");`);
   assert.deepEqual(JSON.parse(readFileSync(join(dir, "rows.json"), "utf8")), ["% deploy", "Building", "Live", "% cast", "one", "  two", "%"]);
 });
 
+test("a local page's image, video or script that isn't there is a warning at the step that loaded it, once; a 404 from fetch isn't", { timeout: 60_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
+  writeFileSync(join(dir, "page.html"), `<img src="gone.png"><img src="gone.png"><video src="gone.mp4"></video><script>fetch("/api/none")</script>`);
+  demo(dir, `const demo = createDemo({ viewport: [400, 300] });\ndemo.browser.goto("./page.html");\ndemo.wait(500);\nawait demo.render("out.mp4");`);
+  const r = await run(["check", "s.ts"], dir);
+  assert.equal(r.code, 0, r.output);
+  assert.equal(r.output.match(/gone\.png, which isn't there/g)?.length, 1, r.output);
+  assert.match(r.output, /gone\.mp4, which isn't there[\s\S]*s\.ts:3/);
+  assert.doesNotMatch(r.output, /api\/none/);
+});
+
 test("a script can say a warning's cause is meant: goto status, click dialog, run exitCode", { timeout: 120_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "rs-p19-"));
   const server = createServer((req, res) => {

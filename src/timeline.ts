@@ -55,8 +55,8 @@ export type Action =
       width?: number;
       height?: number;
     }
-  | { kind: "editor.openFile"; path: string; wpm?: number }
-  | { kind: "editor.command"; command: string; wpm?: number }
+  | { kind: "editor.openFile"; path: string; wpm?: number; keystroke?: boolean }
+  | { kind: "editor.command"; command: string; wpm?: number; keystroke?: boolean }
   | { kind: "window.focus"; window: string }
   | { kind: "window.close"; window: string }
   | { kind: "browser.open"; x?: number; y?: number; width?: number; height?: number }

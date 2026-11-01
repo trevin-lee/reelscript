@@ -27,7 +27,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - name: Check every example (no rendering)
-        run: npm run build && node dist/cli.js check examples/*.ts
+        run: npm run build && node dist/cli.js check examples/*.ts && (cd examples/meta && node ../../dist/cli.js check --strict *.ts)
       - name: Render the example end to end
         run: npm run example
       - name: Render frames of the desk (the keyboard view in a desk shot) and the float view (the laptop alone, turning)

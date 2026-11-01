@@ -43,7 +43,12 @@ test("keystrokes: options are checked at the createDemo line, and keystroke on a
   assert.throws(() => createDemo({ keystrokes: { position: "middle" as never } }), /unknown keystrokes position "middle"/);
   assert.throws(() => createDemo({ keystrokes: { hold: -1 } }), /keystrokes hold must be a number, 0 or more/);
   assert.throws(() => createDemo({ keystrokes: { colour: "red" } as never }), /keystrokes: .*colour/);
-  assert.throws(() => createDemo().press("Meta+K", { keystroke: false }), /keystroke shows or hides this press in the keystroke overlay, which is off/);
+  assert.throws(() => createDemo().press("Meta+K", { keystroke: false }), /keystroke shows or hides this press where shortcuts are named, .* and neither is on/);
+  const panel = createDemo();
+  panel.keyboard.open();
+  assert.doesNotThrow(() => panel.press("Meta+K", { keystroke: false }), "the keyboard window names shortcuts too");
+  assert.doesNotThrow(() => createDemo({ keystrokes: true }).editor.openFile("app.ts", { keystroke: false }));
+  assert.doesNotThrow(() => createDemo({ keystrokes: true }).editor.command("Format Document", { keystroke: false }));
   assert.doesNotThrow(() => createDemo({ keystrokes: true }).press("a", { keystroke: true }));
 });
 

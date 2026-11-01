@@ -22,7 +22,7 @@ import type { FollowCamera } from "./renderer.js";
 import { RECORD_TIMEOUT_MS, parseAsciicast, recordCommand, recordingKeys, recordingPath, saveRecording, type RecordingKey, type TermRecording } from "./terminal.js";
 import { DEFAULT_TIMEZONE, clockEpoch } from "./time.js";
 import { existsSync, readFileSync, renameSync } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LIB_DIR = dirname(fileURLToPath(import.meta.url));
@@ -119,6 +119,12 @@ function invalidNumber(options: object): string | null {
     return `status must be an HTTP status code, not ${shown(o.status)}`;
   }
   return null;
+}
+
+/** A file as the summary line names it: from the working directory when it's inside it, as a shell would say it. */
+function shownPath(file: string): string {
+  const rel = relative(process.cwd(), file);
+  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : file;
 }
 
 /** Old names that still work until 1.0, with what replaced them: said at the line, so --strict finds them before 1.0 does. */
@@ -282,8 +288,8 @@ const ACTION_FIELDS: { [K in Action["kind"]]: Fields<Extract<Action, { kind: K }
   waitForNarration: {},
   "terminal.open": { title: true, prompt: true, fontSize: true, lineHeight: true, cols: true, rows: true, x: true, y: true, width: true, height: true },
   "editor.open": { workspace: true, extensions: true, settings: true, notifications: true, x: true, y: true, width: true, height: true },
-  "editor.openFile": { path: true, wpm: true },
-  "editor.command": { command: true, wpm: true },
+  "editor.openFile": { path: true, wpm: true, keystroke: true },
+  "editor.command": { command: true, wpm: true, keystroke: true },
   "window.focus": { window: true },
   "window.close": { window: true },
   "browser.open": { x: true, y: true, width: true, height: true },
@@ -588,6 +594,15 @@ export interface ScrollOptions {
   window?: "browser" | "terminal" | "editor";
 }
 
+export interface ShortcutOptions {
+  /**
+   * Name this shortcut on screen (true) or not (false), in the keystroke
+   * overlay or the keyboard window's label, whatever the overlay's `show`
+   * says. Default: named if it's a shortcut
+   */
+  keystroke?: boolean;
+}
+
 export interface TypeOptions {
   /** Typing speed in words per minute. Default: 300 */
   wpm?: number;
@@ -873,12 +888,12 @@ class EditorWindow extends Win {
   }
 
   /** Open a file through Quick Open (⌘P), typing its name. */
-  openFile(path: string, opts: TypeOptions = {}): void {
+  openFile(path: string, opts: TypeOptions & ShortcutOptions = {}): void {
     this.demo._push({ kind: "editor.openFile", path }, opts);
   }
 
   /** Run a command through the Command Palette, typing its name. */
-  command(command: string, opts: TypeOptions = {}): void {
+  command(command: string, opts: TypeOptions & ShortcutOptions = {}): void {
     this.demo._push({ kind: "editor.command", command }, opts);
   }
 
@@ -992,13 +1007,16 @@ export class Demo {
   /** The terminal's prompt as the script has left it, and whether a run is waiting on print() for the rest of its output. */
   private term: { prompt: string; awaiting: boolean } | null = null;
   private termOpened: string | undefined;
+  /** Whether a keyboard window has been opened yet, which names the shortcuts pressed. */
+  private keyboardOpened = false;
 
   /** An option the step can't use, which would otherwise do nothing: an error, like menubar on the bare theme. */
   private cantApply(a: Action): string | null {
     const o = a as Record<string, unknown>;
     const bare = this.options.theme === "bare";
-    if (a.kind === "press" && a.keystroke !== undefined && !this.options.keystrokes) {
-      return `keystroke shows or hides this press in the keystroke overlay, which is off; turn it on with createDemo({ keystrokes: true })`;
+    if (a.kind === "keyboard.open") this.keyboardOpened = true;
+    if ((a.kind === "press" || a.kind === "editor.openFile" || a.kind === "editor.command") && a.keystroke !== undefined && !this.options.keystrokes && !this.keyboardOpened) {
+      return `keystroke shows or hides this press where shortcuts are named, the keystroke overlay or the keyboard window, and neither is on; turn one on with createDemo({ keystrokes: true }) or demo.keyboard.open()`;
     }
     if (a.kind === "desk.to") {
       if (a.ipad !== undefined && a.view !== "float") return `ipad is for the "float" view, where the iPad is; there's none in "${a.view}"`;
@@ -1073,7 +1091,7 @@ export class Demo {
     key: string,
     opts: {
       window?: "browser" | "terminal" | "editor";
-      /** With the keystroke overlay on: show this press (true) or not (false), whatever the overlay's `show` says. */
+      /** Name this press on screen (true) or not (false), in the keystroke overlay or the keyboard window's label. Default: named if it's a shortcut */
       keystroke?: boolean;
     } = {},
   ): void {
@@ -1357,7 +1375,7 @@ export class Demo {
     if (verbose) {
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       process.stderr.write(
-        `${process.stderr.isTTY ? "\r" : ""}reelscript: wrote ${result.out}  (${result.width}x${result.height}, ${result.frames} frame${result.frames === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
+        `${process.stderr.isTTY ? "\r" : ""}reelscript: wrote ${shownPath(result.out)}  (${result.width}x${result.height}, ${result.frames} frame${result.frames === 1 ? "" : "s"}, ${(result.durationMs / 1000).toFixed(2)}s video, rendered in ${secs}s)\n`,
       );
     }
     return result;

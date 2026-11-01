@@ -353,6 +353,16 @@ class Engine {
       extraHTTPHeaders: mac.headers,
     });
     await this.context.addInitScript(mac.script);
+    // A file a local page uses that isn't there (an image, a video, a script) would be filmed as a blank: said at the
+    // step that loaded it, once per file. Data requests (fetch, XHR) are left alone: a mocked API may answer 404 on purpose.
+    this.context.on("response", (r) => {
+      const kind = r.request().resourceType();
+      if (r.status() !== 404 || !this.local.isLocal(r.url()) || !["image", "media", "script", "stylesheet", "font"].includes(kind)) return;
+      const file = fileURLToPath(this.local.file(r.url()).replace(/[?#].*$/, ""));
+      if (this.missingFiles.has(file)) return;
+      this.missingFiles.add(file);
+      warn(`the page asked for ${file}, which isn't there, so it shows nothing in its place\n  at ${this.at}`);
+    });
     // Headless Chromium denies clipboard writes by default, so a "Copy"
     // button in the page under demo would fail where a real browser succeeds.
     await this.context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -400,6 +410,8 @@ class Engine {
 
   /** Serves the demo's local pages over http (see LocalPages). */
   private local = new LocalPages();
+  /** Files local pages asked for that weren't there, already warned about. */
+  private missingFiles = new Set<string>();
 
   /** Render static HTML (theme chrome) in a separate, un-shimmed context. */
   private async rasterizeHtml(html: string, width: number, height: number, transparent: boolean): Promise<Buffer> {
@@ -578,12 +590,24 @@ class Engine {
     return a !== null && (a.to.view !== "flat" || t < a.start + a.dur);
   }
 
-  /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
-  /** A shortcut for the keystroke overlay, when it's on: shown if it's a shortcut (or the overlay shows all), or as `force` says. */
+  /**
+   * Whether a press is named on screen, by the keystroke overlay or the keyboard window's label (one rule for both):
+   * a shortcut (or, with the overlay's show "all", any key), unless the press's `keystroke` says otherwise.
+   */
+  private named(chord: string, force?: boolean): boolean {
+    if (force !== undefined) return force;
+    return showsAsKeystroke(chord, this.strokeOpts?.show ?? "chords");
+  }
+
+  /** A shortcut for the keystroke overlay, when it's on and the press is named. */
   private noteStroke(chord: string, at: number, force?: boolean): void {
-    if (!this.strokeOpts || force === false) return;
-    if (force !== true && !showsAsKeystroke(chord, this.strokeOpts.show)) return;
+    if (!this.strokeOpts || !this.named(chord, force)) return;
     this.strokes.push({ at, keys: keystrokeKeys(chord, this.deskLayout) });
+  }
+
+  /** Whether the keyboard window labels a press: when it's named, and the keystroke overlay isn't naming it already. */
+  private panelLabels(chord: string, force?: boolean): boolean {
+    return !this.strokeOpts && this.named(chord, force);
   }
 
   /** The keystroke pill for these keys, as RGBA, drawn once and kept. */
@@ -620,6 +644,7 @@ class Engine {
     return sharp(frame, { raw: { width: W, height: H, channels: 3 } }).composite([overlay]).removeAlpha().raw().toBuffer();
   }
 
+  /** A chord pressed at `at`, for the hands. A key the laptop doesn't have fails: the viewer would be shown nothing. */
   private noteChord(chord: string, at: number, hold: number, withLabel: boolean, from = at): void {
     if (!this.sceneShown()) return;
     const resolved = resolveChord(chord, this.deskLayout);
@@ -1246,7 +1271,7 @@ class Engine {
         // On camera, the hand gets there first and the page reacts as the key goes down, never before.
         const at = start + KEY_REACH_MS;
         this.noteStroke(key, at, action.keystroke);
-        this.noteChord(key, at, 90, true, start);
+        this.noteChord(key, at, 90, this.panelLabels(key, action.keystroke), start);
         let sent = false;
         const flush = async (t: number) => {
           if (sent || t < at) return;
@@ -1465,8 +1490,8 @@ class Engine {
         const typeEnd = typeStart + chars.length * msPerChar;
         const enterAt = typeEnd + 400;
         const shortcut = action.kind === "editor.openFile" ? `${this.primary}+P` : "F1";
-        this.noteStroke(shortcut, opensAt);
-        this.noteChord(shortcut, opensAt, 90, true, start);
+        this.noteStroke(shortcut, opensAt, action.keystroke);
+        this.noteChord(shortcut, opensAt, 90, this.panelLabels(shortcut, action.keystroke), start);
         this.noteTyped(text, typeStart, msPerChar, start);
         this.noteChord("Enter", enterAt, 80, false, start);
         let opened = false;

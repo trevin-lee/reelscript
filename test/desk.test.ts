@@ -278,3 +278,27 @@ test("desk views: a flight begun mid-flight carries on from where it was, float 
   assert.ok(magenta(shut, 0, 0.5) < 0.01, "the laptop's screen is hidden by its lid");
   assert.ok(magenta(shut, 0.6, 1) > 0.02, "the iPad still shows the demo");
 });
+
+test("the keyboard window labels what the keystroke overlay would name, and steps aside when the overlay is on", { timeout: 600_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "rs-label-"));
+  demo(
+    dir,
+    `const demo = createDemo({ viewport: [400, 300], keystrokes: process.env.KEYS === "1" });\ndemo.browser.goto("data:text/html,hi");\n` +
+      `demo.keyboard.open();\ndemo.wait(300);\ndemo.press(process.env.KEY!, { keystroke: process.env.HIDE ? false : undefined });\ndemo.wait(1500);\nawait demo.render("out.mp4");`,
+  );
+  const shot = async (name: string, env: Record<string, string>) => {
+    const r = await run(["preview", "s.ts", "--at", "1.5", "--out", name], dir, env);
+    assert.equal(r.code, 0, r.output);
+    return pixels(join(dir, name));
+  };
+  const letter = await shot("a.png", { KEY: "a" });
+  const chord = await shot("k.png", { KEY: "Meta+K" });
+  const overlay = await shot("o.png", { KEY: "Meta+K", KEYS: "1" });
+  // The label sits in the panel's top band, over the laptop's screen; the hands and keys below it differ either way.
+  const panelW = Math.min(560, Math.round(letter.width * 0.42)), panelH = Math.round(panelW * 0.45);
+  const band = { left: letter.width - panelW - 24, top: letter.height - panelH - 24, width: panelW, height: Math.round(panelH * 0.22) };
+  assert.ok(diff(letter, chord, band) > 2, "a shortcut is labelled, a letter isn't");
+  assert.ok(diff(letter, overlay, band) < 1, "with the overlay on, the panel leaves the naming to it");
+  const hidden = await shot("h.png", { KEY: "Meta+K", HIDE: "1" });
+  assert.ok(diff(letter, hidden, band) < 1, "keystroke: false hides it from the panel too");
+});
