@@ -2,7 +2,7 @@ import { createDemo } from "@reelscript/cli";
 
 const demo = createDemo();
 
-demo.browser.goto("./app.html");
+demo.browser.goto("../app.html");
 demo.keyboard.open();
 demo.cursor.moveTo("#new-project");
 demo.cursor.click();
